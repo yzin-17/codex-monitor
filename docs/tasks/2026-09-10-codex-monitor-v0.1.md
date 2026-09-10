@@ -13,13 +13,18 @@
 - [x] T07：CLI 编译与演示输出通过；56 项 XCTest 通过。
 - [x] T08：静态离线门禁、Bash 语法和 SwiftUI 源文件语法解析通过。
 
-## 代码已交付，仍需 macOS 验证
+## macOS CI 已验证
 
-- [ ] T09：SwiftUI 四页、菜单栏和浮动条的 macOS 类型检查／编译。
+- [x] T09：SwiftUI 四页、菜单栏和浮动条的 macOS 类型检查／编译；Debug 与 Release 通过。
+- [x] T13：GitHub macOS CI #1 通过；56 项核心测试、`.app`、ZIP 打包与本地签名校验完成。
+
+依据：[GitHub Actions #1](https://github.com/yzin-17/codex-monitor/actions/runs/34444341531)，对应源码提交 `5affd26`；运行器为 macOS 15 ARM64。仅完成构建与自动测试，不含用户交互验收。
+
+## 仍需实机验收
+
 - [ ] T10：本机安装、首次启动、窗口与深链接交互。
 - [ ] T11：实际 Codex 版本日志兼容性、父子关系与 Skill 读取抽样对账。
 - [ ] T12：百万行以上历史、低电量与睡眠恢复压测。
-- [ ] T13：GitHub macOS CI 触发与产物验证；工作流文件已提供但尚未运行。
 
 ## 后续独立任务
 

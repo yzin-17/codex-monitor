@@ -19,11 +19,11 @@ Linux x86_64；Swift 6.2.1；系统 SQLite 3.46.1。
 
 测试使用临时目录和合成 JSONL／SQLite，不使用真实账户文件。覆盖累计差分、缓存与推理不重复计数、重复事件、基线、回退、跨期、父子与循环、Fork、半行、重写、超长行、只读源校验、私有缓存权限、缓存不保存正文、暖缓存不重写、Skill 证据与同名消歧、未知价格和报告脱敏。
 
-## 未在本次环境完成
+## Linux 源码准备阶段未完成
 
 macOS SwiftUI/AppKit 类型检查、`.app` 构建与签名执行、安装和窗口交互、真实 Codex 最新日志适配、桌面深链接、真实账户数据对账、百万行性能和网络抓包。
 
-提供了 macOS CI 与构建脚本，**没有**声称已经执行。不要把此交付视为经过 Mac 实机验收的正式发行包。
+以上是 Linux 源码准备阶段的边界；后续 GitHub macOS CI 结果见文末。即使 CI 通过，也不能把此交付视为经过真实桌面交互验收的正式发行包。
 
 ## Mac 上的验收路径
 
@@ -58,6 +58,26 @@ macOS SwiftUI/AppKit 类型检查、`.app` 构建与签名执行、安装和窗�
 
 日期：2026-09-10。用户已创建 `yzin-17/codex-monitor`，初始 `main` 为 `22018eb8d5dc4d129dfb4bfa043a423c8e5ddc48`。导入保留原始 MIT 许可证和初始提交，仅新增项目文件；修正了侧栏漏改的旧项目名称。
 
-解压原始源码包后，重新执行 `./scripts/test.sh`，56 项核心测试通过；`python3 Tests/PublishingTests/test_publish.py` 的 9 项模拟测试通过。全量 Git 文件树与本地发布清单应在更新分支前进行校验。
+解压原始源码包后，重新执行 `./scripts/test.sh`，56 项核心测试通过；`python3 Tests/PublishingTests/test_publish.py` 的 9 项模拟测试通过。全量 47 个文件（包含保留的原始 LICENSE）的 Git 文件树与本地发布清单已在更新分支前校验一致，文件内容和执行权限均匹配。
 
 macOS CI 的执行结果以该提交对应的 GitHub Actions 为准；推送成功、CI 构建成功和真实桌面交互验收是三个独立状态。
+
+## GitHub 首次发布与 macOS CI（已完成）
+
+源码提交：[`5affd26ebb588e4c46b5ec157603491745acfb81`](https://github.com/yzin-17/codex-monitor/commit/5affd26ebb588e4c46b5ec157603491745acfb81)。
+
+CI：[本地核心与 macOS 构建 #1](https://github.com/yzin-17/codex-monitor/actions/runs/34444341531)，任务 `102765763642`，2026-09-10 06:15 UTC 完成，结果 `success`。
+
+实际运行器：macOS 15.7.9 ARM64，Apple Swift 6.1.2。
+
+| 验证 | 实际结果 |
+| --- | --- |
+| 远程 `main` 提交 | 已更新并读取校验；保留原始 MIT 许可证和初始提交 |
+| 核心 `swift test` | macOS 上 56 项 XCTest 全部通过，0 失败 |
+| SwiftUI / AppKit Debug 编译 | 通过，实际编译并链接 `CodexMonitor` |
+| 桌面 Release 编译 | `swift build -c release --product CodexMonitor` 通过 |
+| `Info.plist` 与本地签名 | `plutil -lint`、ad-hoc 签名和 `codesign --verify --deep --strict` 通过 |
+| 打包 | CI 工作目录生成 `CodexMonitor.app` 与 `CodexMonitor-0.1.0-macos-arm64.zip` |
+| 安装、窗口交互与真实账户数据对账 | 尚未执行，不将构建成功等同于实机验收 |
+
+本工作流没有上传二进制 Artifact 或创建 Release；CI 中生成文件不等于提供了可下载的发行安装包。Intel 架构构建、Apple 公证和真实数据兼容仍未验证。
