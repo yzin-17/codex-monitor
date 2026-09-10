@@ -289,6 +289,10 @@ private func referenceCatalog(at now: Date) throws -> SkillCatalogSnapshot {
     window.orderFrontRegardless(); host.layoutSubtreeIfNeeded()
     try await Task.sleep(for: .milliseconds(200))
     host.layoutSubtreeIfNeeded(); host.displayIfNeeded()
+    if name == "hud-menu-bar" {
+        #expect(host.bounds.height <= min(22, NSStatusBar.system.thickness))
+        #expect(window.contentView?.bounds.height == host.bounds.height)
+    }
     let bitmap = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
     host.cacheDisplay(in: host.bounds, to: bitmap)
     if let output {

@@ -67,11 +67,13 @@ import Testing
 
 @Test func floatingHUDStaysInsideMenuBarAndHasNoNotchGap() {
     let screen = CGRect(x: -1920, y: -100, width: 1920, height: 1080)
-    for position in [0.0, 0.5, 1.0] {
-        let f = FloatingHUDGeometry.frame(screen: screen, menuBarHeight: 24, contentSize: .init(width: 160, height: 20), maximumWidth: 220, position: position)
-        #expect(f.width == 160 && f.height == 20)
-        #expect(f.maxY <= screen.maxY && f.minY >= screen.maxY - 24)
-        #expect(f.minX >= screen.minX && f.maxX <= screen.maxX)
+    for barHeight: CGFloat in [20, 22, 24, 32] {
+        for position in [0.0, 0.5, 1.0] {
+            let f = FloatingHUDGeometry.frame(screen: screen, menuBarHeight: barHeight, contentSize: .init(width: 160, height: 20), maximumWidth: 220, position: position)
+            #expect(f.width == 160 && f.height == min(22, barHeight))
+            #expect(f.maxY <= screen.maxY && f.minY >= screen.maxY - barHeight)
+            #expect(f.minX >= screen.minX && f.maxX <= screen.maxX)
+        }
     }
 }
 @Test func revealStartsInsideHUDAndKeepsTopEdgeAndFontSize() {

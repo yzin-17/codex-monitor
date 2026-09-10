@@ -4,22 +4,27 @@
 
 ## 已完成的 macOS 验证
 
-[菜单栏浮窗与 Codex 账号验证 #4](https://github.com/yzin-17/codex-monitor/actions/runs/34473968808) 的 validate 与 publish 作业均成功。已验证实现提交为 `a2d87eb61e228d97c176e4d55c9345361e635139`，使用 macOS 15.7.9 ARM64、Swift 6.1.2。
+[菜单栏浮窗与 Codex 账号验证 #4](https://github.com/yzin-17/codex-monitor/actions/runs/34473968808) 的 validate 与 publish 作业均成功，最初验证实现为 a2d87eb。主体发布 45272d3 的 [main CI](https://github.com/yzin-17/codex-monitor/actions/runs/34475031904) 也已成功。
+
+随后在原生截图中发现双行 HUD 的固有内容尺寸可能将窗口从 22 pt 撑到 24 pt，已固定视图高度并关闭 HUD/下拉窗口 hosting view 的反向尺寸约束。[菜单栏浮窗高度回归 #2](https://github.com/yzin-17/codex-monitor/actions/runs/34476099486) 在 b0ed4dd 实现上再次完成全量验证及分支发布。最终发布使用该已验证生产源码，仅移除临时工作流并更新本记录。
+
+实际环境：macOS 15.7.9 ARM64、Apple Swift 6.1.2。
 
 | 验证项 | 结果 |
 | --- | --- |
-| Swift Testing | 148 项通过：既有 123 项 + 新增 25 项 |
+| Swift Testing | 最终 148 项通过：既有 123 项 + 新增 25 项 |
 | 原版独立回归 | All regression tests passed |
 | ARM64 Release | 编译、打包与 ad-hoc 签名校验通过 |
 | Intel x86_64 | 交叉编译、打包与 ad-hoc 签名校验通过，未在 Intel 实机运行 |
-| 原生截图 | Codex、性能、Skills、Codex Radar、对话费用、菜单栏浮窗、布局编辑器、Codex 账号共 8 张生成成功并逐张检查 |
-| 浮窗布局与揭露 | 测试窗口位于菜单栏内、负坐标屏幕边界、HUD 起始裁剪区域、内容原字号及最终尺寸不随裁剪缩放 |
+| 原生截图 | Codex、性能、Skills、Codex Radar、对话费用、菜单栏浮窗、布局编辑器、Codex 账号共 8 张生成成功并检查 |
+| 原生 HUD 高度 | 双行截图为 220 × 22；新增实际 NSHostingView/NSWindow 高度断言，几何测试覆盖 20/22/24/32 pt 菜单栏及负坐标副屏 |
+| 揭露动画基础 | HUD 起始裁剪区域、正文原字号及最终尺寸不随裁剪缩放的行为测试通过 |
 | 账号验证 | 使用替身 HTTP/内存凭据库验证固定只读端点、导入限制、401 不保存、工作区隔离、取消与迟到结果、Keychain 保存失败与账户删除 |
 | 源码哈希 | 检查脚本和 test/build 调用已移除，未运行源码或补丁哈希检查 |
 
-修复了 SwiftUI 的 Binding.animation 同名绑定歧义、账号属性初始化顺序，以及紧凑模式中额度重置条与标题的间距。没有删除失败测试，也没有把仅语法解析当成 Mac 编译。
+修复了 SwiftUI 的 Binding.animation 同名绑定歧义、账号属性初始化顺序、紧凑模式中额度重置条与标题的间距。HUD 高度上限从预留内边距调整为 min(22, 菜单栏高度) 后，同步旧几何测试的精确断言并补齐多种菜单栏高度；保留边界断言和新增原生窗口断言，没有跳过失败测试。
 
-生产功能基于上述已验证提交；最终发布仅更新这份记录、任务状态、安全说明和常规 CI，并移除一次性传输工作流。常规 CI 从 VERSION 读取安装包版本，不再写死旧版本号。main 的再次验证结果以其对应 GitHub Actions 为准。
+常规 CI 从 VERSION 读取安装包版本，不再写死旧版本号。最终 main 提交的重复构建以 GitHub Actions 对应提交为准。
 
 ## 功能边界
 

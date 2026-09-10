@@ -165,7 +165,7 @@ struct HUDMetricStrip: View {
                     }
                 }
             }
-            .font(.system(size: menuBar && lines.count == 2 ? 9 : 11, weight: .medium))
+            .font(.system(size: menuBar && lines.count == 2 ? min(9, NSStatusBar.system.thickness / 2.5) : 11, weight: .medium))
             .monospacedDigit()
             .fixedSize(horizontal: true, vertical: false)
             .overlay(alignment: .topTrailing) {
@@ -199,11 +199,12 @@ struct ConfigurableHUDView: View {
                 }.frame(width: notch.width, height: notch.collapsedHeight)
             } else {
                 HUDMetricStrip(layout: layout, data: data, remaining: preferences.value.showRemaining, menuBar: menuBar)
-                    .padding(.horizontal, 8).padding(.vertical, menuBar ? 1 : 4)
+                    .padding(.horizontal, 8).padding(.vertical, menuBar ? 0 : 4)
                     .frame(maxWidth: preferences.value.normalized.maximumWidth)
                     .clipped()
             }
         }
+        .frame(height: menuBar ? min(22, NSStatusBar.system.thickness) : nil)
         .background(HUDGlassBackground(opacity: preferences.value.normalized.hudOpacity))
         .clipShape(RoundedRectangle(cornerRadius: menuBar ? 5 : 14))
         .preferredColorScheme(.dark).foregroundStyle(.white)
