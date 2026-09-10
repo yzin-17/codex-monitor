@@ -1,6 +1,7 @@
 name: macOS 原版与增量验证
 on:
   push:
+    branches: [main]
   pull_request:
 permissions:
   contents: read
@@ -9,7 +10,6 @@ concurrency:
   cancel-in-progress: true
 jobs:
   macos:
-    if: "!contains(github.event.head_commit.message, '[import-alight]') && !contains(github.event.head_commit.message, '[apply-alight]')"
     runs-on: macos-15
     timeout-minutes: 20
     steps:
@@ -28,6 +28,8 @@ jobs:
           ./scripts/build-app.sh > "$RUNNER_TEMP/build.log" 2>&1 || { tail -180 "$RUNNER_TEMP/build.log"; exit 1; }
           grep -E 'Executed [0-9]+ tests|Test run with|All regression|Built |error:' "$RUNNER_TEMP/build.log" || true
           codesign --verify --deep --strict dist/CodexMonitor.app
+          python3 scripts/verify-alight-baseline.py
+          git diff --exit-code
           ls -lh dist/*.dmg
       - name: 验证安装包
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
