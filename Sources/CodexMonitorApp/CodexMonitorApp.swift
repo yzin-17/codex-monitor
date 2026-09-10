@@ -3,44 +3,36 @@ import SwiftUI
 import CodexMonitorCore
 
 @main
+@MainActor
 struct CodexMonitorApp: App {
-    @StateObject private var store = AppStore()
+    @StateObject private var store: AppStore
+    init() {
+        let arguments = CommandLine.arguments
+        let preview = arguments.contains("--ui-snapshots")
+        _store = StateObject(wrappedValue: AppStore(preview: preview))
+        if preview {
+            guard let index = arguments.firstIndex(of: "--ui-snapshots"), index + 1 < arguments.count else {
+                print("需要指定合成数据截图输出目录"); exit(2)
+            }
+            do { try MonitorSnapshots.write(to: URL(fileURLWithPath: arguments[index + 1])); exit(0) }
+            catch { print("界面截图失败：\(error)"); exit(1) }
+        }
+    }
     var body: some Scene {
         Window("Codex Monitor", id: "main") {
-            RootView(store: store).frame(minWidth: 980, minHeight: 660).tint(.blue)
+            RootView(store: store).frame(minWidth: 640, minHeight: 660)
+                .ignoresSafeArea(.container, edges: .top)
                 .task { store.startIfNeeded() }
         }
-        .defaultSize(width: 1160, height: 780)
+        .windowStyle(.hiddenTitleBar)
+        .defaultSize(width: 760, height: 744)
+        .commands { CommandGroup(replacing: .newItem) {} }
         MenuBarExtra {
-            MenuContent(store: store).task { store.startIfNeeded() }
+            RootView(store: store, showsHUD: false).frame(width: 720, height: 660)
+                .task { store.startIfNeeded() }
         } label: {
-            Label("\(Display.tokens(store.usage.total))", systemImage: "chart.bar.xaxis")
+            Label("\(Display.tokens(store.dashboard.today.total))", systemImage: "chart.bar.xaxis")
         }
         .menuBarExtraStyle(.window)
-    }
-}
-
-private struct MenuContent: View {
-    @ObservedObject var store: AppStore
-    @Environment(\.openWindow) private var openWindow
-    var body: some View {
-        VStack(alignment: .leading, spacing: 15) {
-            HStack {
-                Label("Codex Monitor", systemImage: "chart.bar.xaxis").font(.headline)
-                Spacer()
-                Text(store.demo ? "演示" : "离线").font(.caption).foregroundStyle(.secondary)
-            }
-            Text(Display.tokens(store.usage.total)).font(.system(size: 32, weight: .semibold, design: .rounded)).monospacedDigit()
-            Text("\(store.window.rawValue) · 本机所有已扫描对话").font(.caption).foregroundStyle(.secondary)
-            if store.snapshot.progress.pendingFiles > 0 {
-                Text("回填中：还有 \(store.snapshot.progress.pendingFiles) 个文件").font(.caption).foregroundStyle(.orange)
-            }
-            Divider()
-            Button("打开分析面板") { openWindow(id: "main"); NSApp.activate(ignoringOtherApps: true) }
-            Button("显示 / 隐藏浮动条") { store.hud.toggle(store: store) }
-            Button(store.scanning ? "扫描中…" : "刷新 / 继续回填") { store.refresh() }.disabled(store.scanning)
-            Divider()
-            Button("退出 Codex Monitor") { NSApp.terminate(nil) }
-        }.padding(20).frame(width: 300)
     }
 }

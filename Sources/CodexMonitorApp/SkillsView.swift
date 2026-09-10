@@ -3,47 +3,113 @@ import CodexMonitorCore
 
 struct SkillsView: View {
     @ObservedObject var store: AppStore
-    @State private var selected: String?
+    @State private var selected: SkillRow?
     @State private var search = ""
     private var rows: [SkillRow] {
         store.skillRows.filter { search.isEmpty || $0.skill.name.localizedCaseInsensitiveContains(search) || $0.skill.description.localizedCaseInsensitiveContains(search) }
     }
     var body: some View {
         if !store.configuration.skillsEnabled {
-            EmptyPanel(title:"Skills 分析已关闭",detail:"可在设置中开启。本地 Token 统计仍可使用。",icon:"square.stack.3d.up.slash")
-        } else {
-            HSplitView {
-                VStack(spacing:0) {
-                    TextField("搜索 Skill",text:$search).textFieldStyle(.roundedBorder).padding(16)
-                    List(selection:$selected) {
-                        ForEach(rows) { row in
-                            VStack(alignment:.leading,spacing:8) {
-                                HStack {
-                                    Text(row.skill.name).font(.callout.weight(.medium))
-                                    Spacer()
-                                    Text("\(row.count(.fileRead))").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                                }
-                                Text(row.skill.description).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                                HStack {
-                                    Text(row.skill.scope)
-                                    Spacer()
-                                    Text(row.skill.state == .unknown ? "生效状态未知" : row.skill.state == .enabled ? "快照：启用" : "快照：停用")
-                                }.font(.caption2).foregroundStyle(.secondary)
-                            }.padding(.vertical,8).tag(row.id)
-                        }
-                    }.listStyle(.inset)
-                    Button("添加 Skills 目录") { store.addSkillRoot() }.padding(16)
-                }.frame(minWidth:260,idealWidth:310,maxWidth:380)
-                if let row = rows.first(where:{$0.id == selected}) ?? rows.first {
-                    SkillDetail(store:store,row:row).frame(minWidth:420,maxWidth:.infinity)
-                } else {
-                    VStack(spacing:16) {
-                        EmptyPanel(title:"未发现 Skill",detail:"默认读取用户目录与手动添加项目。插件缓存不会被当作已启用目录；可手动添加其实际 Skills 目录。",icon:"square.stack.3d.up")
-                        Button("添加项目") { store.addProject() }
-                    }.padding(24)
-                }
+            VStack(spacing: 12) {
+                EmptyPanel(title: "Skills 分析已关闭", detail: "可在设置中开启。Token 统计仍然正常工作。", icon: "square.stack.3d.up.slash")
+                Spacer()
             }
+        } else {
+            VStack(spacing: 12) {
+                HStack {
+                    Text("Skill 观察").font(.system(size: 13, weight: .semibold))
+                    Text("\(store.snapshot.skills.count) 个目录").font(.system(size: 11)).foregroundStyle(MonitorTheme.muted)
+                    Spacer()
+                    Picker("观察范围", selection: $store.window) {
+                        ForEach(TimeWindow.allCases) { Text($0.rawValue).tag($0) }
+                    }.labelsHidden().fixedSize().controlSize(.small)
+                    MonitorIconButton(icon: "plus", label: "添加 Skills 目录") { store.addSkillRoot() }
+                }.frame(height: 25)
+                ScrollView {
+                    VStack(spacing: 12) {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 185), spacing: 9)], spacing: 9) {
+                            ForEach(rows) { row in
+                                SkillTile(row: row) { selected = row }
+                            }
+                        }
+                        if rows.isEmpty {
+                            EmptyPanel(title: "暂无 Skill 目录", detail: "添加项目或实际 Skills 根目录；本地文件存在不代表当前已启用。", icon: "square.stack.3d.up")
+                            Button("添加项目…") { store.addProject() }
+                        }
+                        Notice(text: "读取返回成功 ≠ 指令被执行有效。生效状态来自离线快照或标记未知，不自动禁用任何 Skill。")
+                        evidenceTable
+                    }.padding(.bottom, 2)
+                }
+                HStack(spacing: 0) {
+                    summary("已观察使用证据", "\(store.skillRows.filter { !$0.evidence.isEmpty }.count)")
+                    Rectangle().fill(MonitorTheme.stroke).frame(width: 1, height: 32)
+                    summary("成功读取返回", "\(store.skillRows.reduce(0) { $0 + $1.count(.fileRead) })")
+                    Rectangle().fill(MonitorTheme.stroke).frame(width: 1, height: 32)
+                    summary("目录 Token 粗估", "≈ \(store.snapshot.skills.reduce(0) { $0 + $1.catalogTokenEstimate })")
+                }.padding(.vertical, 11).monitorSurface()
+            }.sheet(item: $selected) { row in DetailShell(title: "Skill 证据详情") { SkillDetail(store: store, row: row) } }
         }
+    }
+    private var evidenceTable: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("最近证据").font(.system(size: 13, weight: .semibold))
+                Spacer()
+                TextField("搜索 Skill", text: $search).textFieldStyle(.plain).font(.system(size: 11))
+                    .padding(7).frame(width: 170).background(MonitorTheme.inset, in: RoundedRectangle(cornerRadius: 6))
+            }.padding(12)
+            let records = rows.flatMap { row in row.evidence.map { (row, $0) } }
+                .sorted { ($0.1.date ?? .distantPast) > ($1.1.date ?? .distantPast) }
+            ForEach(Array(records.prefix(8).enumerated()), id: \.offset) { _, record in
+                Button { selected = record.0 } label: {
+                    HStack(spacing: 10) {
+                        Circle().fill(record.1.kind == .fileRead ? MonitorTheme.accent : MonitorTheme.cyan).frame(width: 6, height: 6)
+                        Text(record.0.skill.name).font(.system(size: 12, weight: .medium)).lineLimit(1)
+                        Spacer()
+                        Text(record.1.kind.label).font(.system(size: 11)).foregroundStyle(MonitorTheme.secondary)
+                        Text(record.1.date.map { $0.formatted(date: .omitted, time: .shortened) } ?? "未知")
+                            .font(.system(size: 11)).foregroundStyle(MonitorTheme.muted).monospacedDigit().frame(width: 55, alignment: .trailing)
+                    }.padding(.horizontal, 14).frame(height: 38)
+                        .overlay(alignment: .top) { Rectangle().fill(MonitorTheme.stroke).frame(height: 1) }.contentShape(Rectangle())
+                }.buttonStyle(.plain)
+            }
+            if records.isEmpty { Text("已扫描范围内暂无匹配证据").font(.caption).foregroundStyle(MonitorTheme.muted).padding(24) }
+        }.monitorSurface()
+    }
+    private func summary(_ title: String, _ value: String) -> some View {
+        VStack(spacing: 5) {
+            Text(title).font(.system(size: 11)).foregroundStyle(MonitorTheme.secondary)
+            Text(value).font(.system(size: 18, weight: .bold)).monospacedDigit()
+        }.frame(maxWidth: .infinity)
+    }
+}
+
+private struct SkillTile: View {
+    let row: SkillRow
+    var select: () -> Void
+    @State private var hovered = false
+    private var color: Color { row.count(.fileRead) > 0 ? MonitorTheme.accent : row.evidence.isEmpty ? MonitorTheme.muted : MonitorTheme.cyan }
+    var body: some View {
+        Button(action: select) {
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(spacing: 6) {
+                    Circle().fill(color).frame(width: 6, height: 6)
+                    Text(row.skill.name).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                }.foregroundStyle(MonitorTheme.secondary)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text("\(row.count(.fileRead))").font(.system(size: 29, weight: .semibold)).monospacedDigit().foregroundStyle(color)
+                    Text("次读取返回成功").font(.system(size: 10)).foregroundStyle(MonitorTheme.muted)
+                }
+                HStack {
+                    Text("\(row.sessions) 个对话 · \(row.count(.requested)) 次提及")
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right").opacity(hovered ? 1 : 0.3)
+                }.font(.system(size: 10)).foregroundStyle(MonitorTheme.muted)
+            }.padding(.horizontal, 13).padding(.vertical, 12).frame(maxWidth: .infinity, alignment: .leading)
+                .background(hovered ? MonitorTheme.surface : MonitorTheme.inset, in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(MonitorTheme.stroke))
+                .overlay(alignment: .leading) { RoundedRectangle(cornerRadius: 2).fill(color).frame(width: 2, height: 40).padding(.leading, 4) }
+        }.buttonStyle(.plain).onHover { hovered = $0 }.help("查看 \(row.skill.name) 的证据与目录状态")
     }
 }
 
@@ -108,6 +174,6 @@ private struct SkillDetail: View {
         VStack(alignment:.leading,spacing:8) {
             Text(label).font(.caption).foregroundStyle(.secondary)
             Text("\(value)").font(.system(size:26,weight:.semibold,design:.rounded)).monospacedDigit()
-        }.frame(maxWidth:.infinity,alignment:.leading).padding(14).background(Color.blue.opacity(0.06),in:RoundedRectangle(cornerRadius:10))
+        }.frame(maxWidth:.infinity,alignment:.leading).padding(14).background(MonitorTheme.inset,in:RoundedRectangle(cornerRadius:10))
     }
 }

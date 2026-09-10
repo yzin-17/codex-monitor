@@ -1,115 +1,91 @@
+import AppKit
 import SwiftUI
 import CodexMonitorCore
 
-private enum Page: String, CaseIterable, Identifiable {
-    case overview = "概览", sessions = "对话与子代理", skills = "Skills", settings = "设置与隐私"
+enum MonitorTab: String, CaseIterable, Identifiable {
+    case codex = "Codex", skills = "Skills"
     var id: String { rawValue }
-    var icon: String {
-        switch self { case .overview: "square.grid.2x2"; case .sessions: "bubble.left.and.bubble.right"; case .skills: "square.stack.3d.up"; case .settings: "slider.horizontal.3" }
-    }
-}
-struct RootView: View {
-    @ObservedObject var store: AppStore
-    @State private var page: Page? = .overview
-    var body: some View {
-        NavigationSplitView {
-            VStack(alignment: .leading, spacing: 8) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("CODEX MONITOR").font(.system(size: 13, weight: .bold, design: .rounded)).tracking(1.4)
-                    Text("看见用量，也看见证据").font(.caption).foregroundStyle(.secondary)
-                }.padding(20)
-                List(Page.allCases, selection: $page) { p in Label(p.rawValue, systemImage: p.icon).tag(p) }
-                    .listStyle(.sidebar)
-                VStack(alignment: .leading, spacing: 8) {
-                    Label("默认离线 · 无账户登录", systemImage: "lock.shield").font(.caption)
-                    Text("0.1.0 / macOS 原生").font(.caption2).foregroundStyle(.secondary)
-                }.padding(20)
-            }.navigationSplitViewColumnWidth(220)
-        } detail: {
-            VStack(spacing: 0) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text((page ?? .overview).rawValue).font(.title2.bold())
-                        Text(store.demo ? "演示数据 · 不是你的真实用量" : "只读本机日志 · 不追踪桌面当前选中的窗口")
-                            .font(.caption).foregroundStyle(store.demo ? Color.orange : Color.secondary)
-                    }
-                    Spacer()
-                    if page != .settings {
-                        if page == .overview || page == .skills {
-                            Picker("统计窗口", selection: $store.window) {
-                                ForEach(TimeWindow.allCases) { Text($0.rawValue).tag($0) }
-                            }.labelsHidden().frame(width: 120)
-                        }
-                        Menu {
-                            Button("导出 Markdown") { store.export(json: false) }
-                            Button("导出 JSON") { store.export(json: true) }
-                        } label: { Image(systemName: "square.and.arrow.up") }
-                        .menuStyle(.borderlessButton).frame(width: 28)
-                    }
-                    Button { store.refresh() } label: {
-                        if store.scanning { ProgressView().controlSize(.small) }
-                        else { Image(systemName: "arrow.clockwise") }
-                    }.disabled(store.scanning).help("刷新；未完成的扫描会从检查点继续")
-                }.padding(24)
-                if let error = store.lastError { Notice(text: error, warning: true).padding(.horizontal, 24).padding(.bottom, 12) }
-                Divider()
-                Group {
-                    switch page ?? .overview {
-                    case .overview: OverviewView(store: store)
-                    case .sessions: SessionsView(store: store)
-                    case .skills: SkillsView(store: store)
-                    case .settings: SettingsView(store: store)
-                    }
-                }.frame(maxWidth: .infinity, maxHeight: .infinity)
-                Divider()
-                HStack(spacing: 12) {
-                    Circle().fill(store.scanning ? Color.blue : Color.secondary.opacity(0.5)).frame(width: 6, height: 6)
-                    Text(store.scanning ? "正在扫描；只在完整行提交检查点" : "已扫描 \(store.snapshot.progress.caughtUp) / \(store.snapshot.progress.files) 个文件")
-                    if store.snapshot.progress.pendingFiles > 0 { Text("结果尚未追平").foregroundStyle(.orange) }
-                    Spacer()
-                    Toggle("自动刷新", isOn: $store.autoRefresh).toggleStyle(.checkbox)
-                    Text(store.snapshot.createdAt, style: .time).monospacedDigit()
-                }.font(.caption).foregroundStyle(.secondary).padding(.horizontal,24).padding(.vertical,10)
-            }.background(Color(nsColor: .windowBackgroundColor))
-        }
-    }
 }
 
-struct Surface<Content: View>: View {
-    let content: Content
-    init(@ViewBuilder content: () -> Content) { self.content = content() }
-    var body: some View {
-        content.padding(20).frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.primary.opacity(0.07), lineWidth: 1))
+struct RootView: View {
+    @ObservedObject var store: AppStore
+    @State private var tab: MonitorTab
+    @State private var settingsShown = false
+    @Environment(\.openWindow) private var openWindow
+    var showsHUD = true
+
+    init(store: AppStore, initialTab: MonitorTab = .codex, showsHUD: Bool = true) {
+        self.store = store; self.showsHUD = showsHUD
+        _tab = State(initialValue: initialTab)
     }
-}
-struct Metric: View {
-    let title: String; let value: String; let detail: String
     var body: some View {
-        Surface {
-            VStack(alignment: .leading, spacing: 10) {
-                Text(title).font(.subheadline).foregroundStyle(.secondary)
-                Text(value).font(.system(size: 29, weight: .semibold, design: .rounded)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.6)
-                Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+        VStack(spacing: 0) {
+            if showsHUD {
+                HUDSummary(store: store).frame(height: 42).frame(width: 390).padding(.top, 10).padding(.bottom, 18)
             }
+            VStack(spacing: 14) {
+                header
+                tabs
+                if let error = store.lastError { Notice(text: error, warning: true) }
+                if store.snapshot.progress.pendingFiles > 0 {
+                    Notice(text: "回填中 · 还有 \(store.snapshot.progress.pendingFiles) 个文件。以下为已扫描部分。", warning: true)
+                }
+                Group {
+                    if tab == .codex { OverviewView(store: store) }
+                    else { SkillsView(store: store) }
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                footer
+            }.padding(.horizontal, 18).padding(.top, showsHUD ? 0 : 18).padding(.bottom, 12)
+        }
+        .foregroundStyle(MonitorTheme.text).background(MonitorTheme.background)
+        .preferredColorScheme(.dark).tint(MonitorTheme.accent)
+        .sheet(isPresented: $settingsShown) {
+            DetailShell(title: "设置与隐私") { SettingsView(store: store) }
+        }
+        .onAppear {
+            store.hud.onOpen = { openWindow(id: "main"); NSApp.activate(ignoringOtherApps: true) }
         }
     }
-}
-struct Notice: View {
-    let text: String
-    var warning = false
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: warning ? "exclamationmark.triangle" : "info.circle").foregroundStyle(warning ? Color.orange : Color.secondary)
-            Text(text).font(.callout).textSelection(.enabled)
-            Spacer(minLength: 0)
-        }.padding(14).background((warning ? Color.orange : Color.secondary).opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+    private var header: some View {
+        HStack(spacing: 10) {
+            Text(tab == .codex ? "Codex Monitor" : "Skill Insights").font(.system(size: 23, weight: .bold)).tracking(-0.6)
+            MonitorBadge(text: store.demo ? "演示" : store.scanning ? "扫描中" : tab == .skills ? "本地证据" : store.dashboard.activity.rawValue,
+                         color: store.demo ? MonitorTheme.amber : tab == .skills ? MonitorTheme.cyan : MonitorTheme.color(store.dashboard.activity))
+            Spacer(minLength: 8)
+            if store.scanning { ProgressView().controlSize(.small).frame(width: 30, height: 30) }
+            else { MonitorIconButton(icon: "arrow.clockwise", label: "刷新 / 继续回填") { store.refresh() } }
+            MonitorIconButton(icon: "gearshape", label: "设置与隐私") { settingsShown = true }
+        }.frame(height: 36)
     }
-}
-struct EmptyPanel: View {
-    let title: String; let detail: String; let icon: String
-    var body: some View {
-        ContentUnavailableView(title, systemImage: icon, description: Text(detail)).frame(maxWidth: .infinity, minHeight: 220)
+    private var tabs: some View {
+        HStack(spacing: 0) {
+            ForEach(MonitorTab.allCases) { item in
+                Button { tab = item } label: {
+                    Text(item.rawValue).font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(tab == item ? MonitorTheme.text : MonitorTheme.secondary)
+                        .frame(maxWidth: .infinity).frame(height: 36)
+                        .background(tab == item ? MonitorTheme.selected : .clear, in: RoundedRectangle(cornerRadius: 8))
+                }.buttonStyle(.plain).accessibilityAddTraits(tab == item ? .isSelected : [])
+            }
+        }.padding(3).background(MonitorTheme.surface, in: RoundedRectangle(cornerRadius: 10))
+    }
+    private var footer: some View {
+        HStack(spacing: 6) {
+            Image(systemName: store.demo ? "flask" : "lock.shield").font(.system(size: 10))
+            Text(store.demo ? "演示数据 · 非真实账户" : "只读本机日志 · 额度与运行状态均为日志快照").lineLimit(1)
+            Spacer(minLength: 4)
+            Text(store.snapshot.createdAt, style: .time).monospacedDigit()
+            Menu {
+                Button("导出 Markdown") { store.export(json: false) }
+                Button("导出 JSON") { store.export(json: true) }
+                Divider()
+                Toggle("自动刷新", isOn: $store.autoRefresh)
+                Toggle("隐私显示", isOn: $store.privacyMode)
+                Button("显示 / 隐藏浮动条") { store.hud.toggle(store: store) }
+                Button(store.demo ? "退出演示模式" : "查看演示数据") { store.toggleDemo() }
+                Button("退出 Codex Monitor") { NSApp.terminate(nil) }
+            } label: { Image(systemName: "ellipsis").frame(width: 18, height: 16) }
+            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("报告、显示与退出")
+        }.font(.system(size: 10)).foregroundStyle(MonitorTheme.muted)
     }
 }

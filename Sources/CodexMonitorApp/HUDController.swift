@@ -5,37 +5,63 @@ import CodexMonitorCore
 @MainActor
 final class HUDController {
     private var panel: NSPanel?
-    func toggle(store:AppStore) {
-        if let panel { if panel.isVisible { panel.orderOut(nil) } else { panel.orderFrontRegardless() }; return }
-        let panel = NSPanel(contentRect:NSRect(x:0,y:0,width:560,height:62),
-                            styleMask:[.borderless,.nonactivatingPanel],backing:.buffered,defer:false)
+    var onOpen: (() -> Void)?
+    func toggle(store: AppStore) {
+        if let panel {
+            if panel.isVisible { panel.orderOut(nil) } else { panel.orderFrontRegardless() }
+            return
+        }
+        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 390, height: 44),
+                            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = true
         panel.level = .floating; panel.hidesOnDeactivate = false
         panel.isMovableByWindowBackground = true
-        panel.collectionBehavior = [.canJoinAllSpaces,.fullScreenAuxiliary]
-        panel.contentView = NSHostingView(rootView:HUDView(store:store))
-        let frame = NSScreen.main?.visibleFrame ?? NSRect(x:0,y:0,width:1280,height:800)
-        panel.setFrameOrigin(NSPoint(x:frame.midX - 280,y:frame.maxY - 74))
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.contentView = NSHostingView(rootView: HUDSummary(store: store)
+            .onTapGesture { [weak self] in self?.onOpen?() }
+            .contextMenu {
+                Button("打开监控面板") { [weak self] in self?.onOpen?() }
+                Button("刷新本地数据") { store.refresh() }
+                Button("隐藏浮动条") { [weak self] in self?.panel?.orderOut(nil) }
+            })
+        let frame = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
+        panel.setFrameOrigin(NSPoint(x: frame.midX - 195, y: frame.maxY - 52))
         self.panel = panel; panel.orderFrontRegardless()
     }
 }
-private struct HUDView:View {
-    @ObservedObject var store:AppStore
-    var body:some View {
-        HStack(spacing:18) {
-            Image(systemName:"chart.bar.xaxis").foregroundStyle(.blue).font(.title3)
-            VStack(alignment:.leading,spacing:3) {
-                Text("Codex Monitor").font(.system(size:11,weight:.semibold))
-                Text(store.demo ? "演示数据" : "\(store.window.rawValue) · 本机汇总").font(.system(size:10)).foregroundStyle(.secondary)
+
+struct HUDSummary: View {
+    @ObservedObject var store: AppStore
+    private var state: String {
+        if store.scanning { return "SCAN" }
+        return store.dashboard.activity == .running ? "RUN" : store.dashboard.activity.rawValue
+    }
+    var body: some View {
+        HStack(spacing: 13) {
+            HStack(spacing: 7) {
+                Circle().fill(MonitorTheme.color(store.dashboard.activity)).frame(width: 8, height: 8)
+                Text(state).font(.system(size: 12, weight: .bold))
             }
-            Divider().frame(height:26)
-            Text(Display.tokens(store.usage.total)).font(.system(size:22,weight:.semibold,design:.rounded)).monospacedDigit()
-            Spacer()
-            if store.scanning { ProgressView().controlSize(.small) }
-            else if store.snapshot.progress.pendingFiles > 0 { Text("回填中").font(.caption).foregroundStyle(.orange) }
-            Button { store.refresh() } label:{Image(systemName:"arrow.clockwise")}.buttonStyle(.plain).disabled(store.scanning)
-            Button { store.hud.toggle(store:store) } label:{Image(systemName:"xmark")}.buttonStyle(.plain)
-        }.padding(.horizontal,20).frame(height:62).background(.regularMaterial,in:RoundedRectangle(cornerRadius:14))
-            .overlay(RoundedRectangle(cornerRadius:14).stroke(Color.primary.opacity(0.09)))
+            quota("5h", minutes: 300)
+            quota("7d", minutes: 10080)
+            HStack(spacing: 5) {
+                Text("Today").foregroundStyle(MonitorTheme.secondary)
+                Text(Display.tokens(store.dashboard.today.total)).fontWeight(.bold)
+            }
+            if store.demo { Text("演示").foregroundStyle(MonitorTheme.amber).font(.system(size: 9)) }
+        }.font(.system(size: 11, weight: .medium)).monospacedDigit()
+            .padding(.horizontal, 15).frame(maxWidth: .infinity, maxHeight: .infinity)
+            .foregroundStyle(MonitorTheme.text)
+            .background(MonitorTheme.hud, in: Capsule())
+            .overlay(Capsule().stroke(Color.white.opacity(0.10), lineWidth: 1))
+            .contentShape(Capsule()).preferredColorScheme(.dark)
+            .help("本地日志快照 · 点击展开面板，拖动移动，右键隐藏。")
+    }
+    private func quota(_ title: String, minutes: Int) -> some View {
+        HStack(spacing: 5) {
+            Text(title).foregroundStyle(MonitorTheme.secondary)
+            Text(MonitorQuota.percentage(MonitorQuota.generalWindow(store.quota, minutes: minutes)))
+                .foregroundStyle(MonitorTheme.accent).fontWeight(.bold)
+        }
     }
 }

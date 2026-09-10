@@ -4,7 +4,10 @@ import CodexMonitorCore
 
 @MainActor
 final class AppStore: ObservableObject {
-    @Published var snapshot = LedgerSnapshot()
+    @Published var snapshot = LedgerSnapshot() {
+        didSet { dashboard = MonitorDashboard(sessions: snapshot.sessions) }
+    }
+    @Published private(set) var dashboard = MonitorDashboard(sessions: [])
     @Published var configuration: LedgerConfiguration
     @Published var scanning = false
     @Published var lastError: String?
@@ -22,7 +25,12 @@ final class AppStore: ObservableObject {
     private var started = false
     let hud = HUDController()
 
-    init() {
+    init(preview: Bool = false) {
+        if preview {
+            configuration = LedgerConfiguration(codexHome: "/__codex_monitor_preview__", cacheDirectory: nil)
+            started = true
+            return
+        }
         let file = Paths.support.appendingPathComponent("preferences.json")
         if let data = try? Data(contentsOf: file), let value = try? JSONDecoder().decode(LedgerConfiguration.self, from: data) {
             configuration = value
@@ -46,7 +54,11 @@ final class AppStore: ObservableObject {
         guard !started else { return }; started = true; refresh()
         timer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
-                guard let self, self.autoRefresh, !self.demo, !self.scanning else { return }
+                guard let self else { return }
+                if Date().timeIntervalSince(self.dashboard.generatedAt) >= 30 {
+                    self.dashboard = MonitorDashboard(sessions: self.snapshot.sessions)
+                }
+                guard self.autoRefresh, !self.demo, !self.scanning else { return }
                 if ProcessInfo.processInfo.isLowPowerModeEnabled { return }
                 if [.serious, .critical].contains(ProcessInfo.processInfo.thermalState) { return }
                 self.refresh()

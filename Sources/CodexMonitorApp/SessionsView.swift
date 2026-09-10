@@ -3,40 +3,95 @@ import CodexMonitorCore
 
 struct SessionsView: View {
     @ObservedObject var store: AppStore
-    @State private var selected: String?
+    @State private var selected: TaskUsage?
     @State private var search = ""
-    private var rows: [TaskUsage] {
-        store.tasks.filter { search.isEmpty || store.title($0.root).localizedCaseInsensitiveContains(search) ||
-            $0.root.models.joined(separator:" ").localizedCaseInsensitiveContains(search) || $0.root.id.contains(search) }
+    @State private var showsSearch = false
+    private var rows: [MonitorTaskRow] {
+        store.dashboard.rows.filter {
+            search.isEmpty || store.title($0.task.root).localizedCaseInsensitiveContains(search)
+                || $0.task.root.models.joined(separator: " ").localizedCaseInsensitiveContains(search)
+                || $0.id.contains(search)
+        }
     }
     var body: some View {
-        if store.snapshot.sessions.isEmpty {
-            EmptyPanel(title:"暂无对话",detail:"先扫描本地 Codex 数据，或打开演示模式。",icon:"bubble.left.and.bubble.right")
-        } else {
-            HSplitView {
-                VStack(spacing:0) {
-                    TextField("搜索对话、模型或 ID",text:$search).textFieldStyle(.roundedBorder).padding(16)
-                    List(selection:$selected) {
-                        ForEach(rows) { task in
-                            VStack(alignment:.leading,spacing:8) {
-                                Text(store.title(task.root)).font(.callout.weight(.medium)).lineLimit(2)
-                                HStack {
-                                    Text("\(task.descendants.count) 个子代理").foregroundStyle(.secondary)
-                                    Spacer()
-                                    Text(Display.tokens(task.total.total)).fontWeight(.semibold).monospacedDigit()
-                                }.font(.caption)
-                                if !store.privacyMode, let cwd = task.root.cwd {
-                                    Text(URL(fileURLWithPath:cwd).lastPathComponent).font(.caption2).foregroundStyle(.secondary)
-                                }
-                            }.padding(.vertical,8).tag(task.id)
-                        }
-                    }.listStyle(.inset)
-                }.frame(minWidth:260,idealWidth:300,maxWidth:380)
-                if let task = rows.first(where:{$0.id == selected}) ?? rows.first {
-                    TaskDetail(store:store,task:task).frame(minWidth:420,maxWidth:.infinity)
-                } else { EmptyPanel(title:"没有匹配的任务",detail:"尝试其他名称或模型。",icon:"magnifyingglass") }
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                HStack(spacing: 6) {
+                    Text("Session")
+                    Button { showsSearch.toggle(); if !showsSearch { search = "" } } label: { Image(systemName: "magnifyingglass").font(.system(size: 10)) }
+                        .buttonStyle(.plain).help("搜索对话、模型或 ID").accessibilityLabel("搜索会话")
+                }.frame(maxWidth: .infinity, alignment: .leading)
+                Text("Status").frame(width: 86)
+                Text("Today").frame(width: 122, alignment: .trailing)
+                Text("Total").frame(width: 86, alignment: .trailing)
+            }.font(.system(size: 12, weight: .semibold)).foregroundStyle(MonitorTheme.secondary)
+                .padding(.horizontal, 16).frame(height: 38)
+            if showsSearch {
+                TextField("搜索会话、模型或 ID", text: $search).textFieldStyle(.plain)
+                    .padding(10).background(MonitorTheme.inset, in: RoundedRectangle(cornerRadius: 7))
+                    .padding(.horizontal, 12).padding(.bottom, 8)
             }
-        }
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(rows) { row in
+                        SessionTableRow(store: store, row: row) { selected = row.task }
+                    }
+                }
+                if rows.isEmpty {
+                    VStack(spacing: 8) {
+                        EmptyPanel(title: search.isEmpty ? "还没有可展示的对话" : "没有匹配的对话",
+                                   detail: search.isEmpty ? "选择 Codex 数据目录，读取本地日志。也可以先查看演示界面。" : "换一个名称或模型试试。", icon: "bubble.left.and.bubble.right")
+                        if search.isEmpty {
+                            HStack(spacing: 16) {
+                                Button("选择数据目录") { store.chooseCodexHome() }
+                                Button("查看演示") { if !store.demo { store.toggleDemo() } }
+                            }.padding(.bottom, 20)
+                        }
+                    }
+                }
+            }.frame(maxWidth: .infinity, maxHeight: .infinity)
+        }.frame(minHeight: 220).monitorSurface().clipShape(RoundedRectangle(cornerRadius: 14))
+            .sheet(item: $selected) { task in DetailShell(title: "对话与子代理") { TaskDetail(store: store, task: task) } }
+    }
+}
+
+private struct SessionTableRow: View {
+    @ObservedObject var store: AppStore
+    let row: MonitorTaskRow
+    var select: () -> Void
+    @State private var hovered = false
+    var body: some View {
+        Button(action: select) {
+            HStack(spacing: 12) {
+                HStack(spacing: 9) {
+                    Circle().fill(MonitorTheme.color(row.activity)).frame(width: 7, height: 7)
+                    Text(store.title(row.task.root)).lineLimit(1).truncationMode(.tail)
+                    if !row.task.descendants.isEmpty {
+                        Text("+\(row.task.descendants.count)").font(.system(size: 10)).foregroundStyle(MonitorTheme.muted)
+                    }
+                }.frame(maxWidth: .infinity, alignment: .leading)
+                MonitorBadge(text: row.activity.rawValue, color: MonitorTheme.color(row.activity)).frame(width: 86)
+                HStack(spacing: 5) {
+                    Spacer(minLength: 0)
+                    Text(Display.tokens(row.today.total))
+                    Text(row.share.map { String(format: "%.0f%%", $0 * 100) } ?? "—")
+                        .font(.system(size: 11)).foregroundStyle(MonitorTheme.secondary)
+                }.frame(width: 122)
+                Text(Display.tokens(row.task.total.total)).frame(width: 86, alignment: .trailing)
+            }.font(.system(size: 13, weight: .semibold)).monospacedDigit()
+                .padding(.horizontal, 16).frame(height: 50)
+                .background(row.activity == .running || hovered ? MonitorTheme.selected : .clear)
+                .overlay(alignment: .leading) {
+                    if row.activity == .running { Rectangle().fill(MonitorTheme.accent).frame(width: 3) }
+                }
+                .overlay(alignment: .bottom) { Rectangle().fill(MonitorTheme.stroke).frame(height: 1) }
+                .contentShape(Rectangle())
+        }.buttonStyle(.plain).onHover { hovered = $0 }
+            .help("点击查看父 / 子代理拆分。Today 为本地自然日；Total 为父子任务累计。状态来自日志，不是实时进程探测。")
+            .contextMenu {
+                Button("查看任务拆分", action: select)
+                Button("在 Codex 中打开") { store.openSession(row.task.root) }.disabled(store.demo)
+            }
     }
 }
 
@@ -98,7 +153,7 @@ private struct TaskDetail: View {
             Text(label).font(.caption).foregroundStyle(.secondary)
             Text(Display.tokens(value)).font(.system(size:22,weight:.semibold,design:.rounded)).monospacedDigit()
         }.frame(maxWidth:.infinity,alignment:.leading).padding(14)
-            .background(Color.blue.opacity(0.06),in:RoundedRectangle(cornerRadius:10))
+            .background(MonitorTheme.inset,in:RoundedRectangle(cornerRadius:10))
     }
     private func member(_ session:Session,isRoot:Bool) -> some View {
         VStack(alignment:.leading,spacing:7) {

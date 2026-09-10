@@ -66,10 +66,10 @@ struct SettingsView: View {
                         Text("安全边界").font(.headline)
                         Text("缓存包含模型、用量、会话 ID、Skill 路径与证据偏移，不保存对话正文、工具输出、密码或 Cookie。缓存以 0700 目录 / 0600 文件保存，但不是加密保险箱。")
                         Text("导出报告默认隐藏会话标题、路径与原始 ID。仅在点击对话按钮时通过 codex:// 打开 Codex；不会自动发送消息。")
-                        Text("这是源码首版。当前 Linux 环境验证了统计核心；macOS 图形界面与真实 Codex 数据的验收状态详见 docs/VALIDATION.md。")
+                        Text("macOS 编译与真实日志对账是独立验收项；实际记录见 docs/VALIDATION.md。")
                     }.font(.callout).foregroundStyle(.secondary)
                 }
-            }.padding(24)
+            }.padding(20)
         }
         .alert("重建本应用扫描缓存？",isPresented:$confirmReindex) {
             Button("取消",role:.cancel) {}

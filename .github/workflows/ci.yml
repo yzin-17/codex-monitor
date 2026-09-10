@@ -15,3 +15,14 @@ jobs:
         run: ./scripts/build.sh
       - name: 产物信息
         run: ls -lh dist && codesign -dv dist/CodexMonitor.app
+      - name: 原生界面截图（仅合成数据）
+        run: dist/CodexMonitor.app/Contents/MacOS/CodexMonitor --ui-snapshots dist/ui
+      - name: 保存界面截图与测试构建
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: codex-monitor-macos-preview
+          path: |
+            dist/ui/*.png
+            dist/CodexMonitor-*-macos-*.zip
+          if-no-files-found: error
+          retention-days: 14
