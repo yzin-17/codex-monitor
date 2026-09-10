@@ -1,0 +1,91 @@
+name: 服务状态、独立预测与 CLI 续跑验证
+on:
+  push:
+    branches: [feat/status-prediction-cli-20260911]
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: 应用本轮增量源码
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p .baseline-output/ui "$RUNNER_TEMP/validated"
+          python3 - <<'PY'
+          import base64,json,lzma,os,urllib.request
+          from pathlib import Path
+          parts=[]
+          for sha in ['8943f11e693dfea46eba23cdceedcaa799369f92','c177ea33bc054d4d1ae3dc27a3117d697e523f1a','88eeba9a47f0e6dbe2f1b692012873f2af5e61ad','cad63664e24551412b4b194a42aa4ba10e428993','76736d7dd58f23b84982c3731015db82c0a0da9d']:
+              req=urllib.request.Request('https://api.github.com/repos/yzin-17/codex-monitor/git/blobs/'+sha,headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
+              obj=json.load(urllib.request.urlopen(req,timeout=25))
+              parts.append(base64.b64decode(obj['content']).decode().strip())
+          patch=lzma.decompress(base64.b64decode(''.join(parts)))
+          assert patch.startswith(b'diff --git ')
+          Path(os.environ['RUNNER_TEMP'],'insights.patch').write_bytes(patch)
+          PY
+          git apply --check --index "$RUNNER_TEMP/insights.patch"
+          git apply --index "$RUNNER_TEMP/insights.patch"
+          if test -f tools/insights-fixes.py; then python3 tools/insights-fixes.py; git rm tools/insights-fixes.py; fi
+          git add -A
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          CANDIDATE="$(printf '%s\n' 'feat: add official status, separate forecasts and opt-in CLI resume' | git commit-tree "$(git write-tree)" -p "$GITHUB_SHA")"
+          git update-ref refs/heads/validated-insights "$CANDIDATE"
+          printf '%s\n' "$CANDIDATE" > "$RUNNER_TEMP/validated/candidate.txt"
+      - name: macOS 行为测试、原生截图与双架构打包
+        env:
+          CODEX_MONITOR_SNAPSHOT_DIR: ${{ github.workspace }}/.baseline-output/ui
+        run: |
+          set -euo pipefail
+          ./scripts/build.sh > .baseline-output/build.log 2>&1 || { tail -200 .baseline-output/build.log; exit 1; }
+          grep -E 'Test run with|All regression|Built |error:' .baseline-output/build.log || true
+          codesign --verify --deep --strict dist/CodexMonitor.app
+          for page in codex performance skills codexRadar conversation-costs hud-menu-bar hud-layout codex-accounts hud-fixed-status hud-status-only remote-codex resetPrediction cli-resume; do
+            test -s ".baseline-output/ui/$page.png"
+          done
+          test -s dist/codex-monitor-0.4.0-arm64.dmg
+          test -s dist/codex-monitor-0.4.0-amd64.dmg
+          git bundle create "$RUNNER_TEMP/validated/candidate.bundle" refs/heads/validated-insights
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: insights-native
+          path: |
+            .baseline-output/
+            dist/*.dmg
+          include-hidden-files: true
+          retention-days: 14
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: validated-insights
+          path: ${{ runner.temp }}/validated/
+          retention-days: 7
+  publish:
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: validated-insights
+          path: ${{ runner.temp }}/validated
+      - name: 发布已验证的功能分支
+        run: |
+          set -euo pipefail
+          CANDIDATE="$(cat "$RUNNER_TEMP/validated/candidate.txt")"
+          git fetch "$RUNNER_TEMP/validated/candidate.bundle" refs/heads/validated-insights:refs/remotes/validated/insights
+          test "$(git ls-remote origin refs/heads/feat/status-prediction-cli-20260911 | cut -f1)" = "$GITHUB_SHA"
+          git push origin "$CANDIDATE:refs/heads/feat/status-prediction-cli-20260911"
