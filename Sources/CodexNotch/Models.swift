@@ -1,0 +1,887 @@
+import Foundation
+
+typealias NotchPointAdjustment = Double
+
+enum SettingsShortcutFilter {
+    static func shouldSuppressTextInputKey(
+        characters: String?,
+        hasCommand: Bool,
+        hasControl: Bool,
+        hasOption: Bool,
+        hasShift: Bool
+    ) -> Bool {
+        guard hasCommand || hasControl else {
+            return false
+        }
+
+        let text = characters ?? ""
+        guard !text.isEmpty else {
+            return false
+        }
+
+        if hasCommand,
+           !hasControl,
+           !hasOption,
+           isAllowedCommandShortcut(text, hasShift: hasShift) {
+            return false
+        }
+
+        return hasCommand || text.contains("⌘") || text.contains("⌃") || text.contains("⌥")
+    }
+
+    private static func isAllowedCommandShortcut(_ characters: String, hasShift: Bool) -> Bool {
+        let key = characters.lowercased()
+        if hasShift {
+            return key == "z"
+        }
+        return ["a", "c", "q", "r", "v", "x", "z"].contains(key)
+    }
+}
+
+struct UsageSnapshot: Equatable {
+    var primaryPercent: Int?
+    var secondaryPercent: Int?
+    var primaryResetsAt: Date? = nil
+    var secondaryResetsAt: Date? = nil
+    var rateLimitWindows: [UsageQuotaWindow] = []
+    var resetCredits: RateLimitResetCredits? = nil
+    var usage24h: Int
+    var usage7d: Int
+    var usage30d: Int
+    var usageToday: Int = 0
+    var usage24hSummary: TokenUsageSummary = .zero
+    var usage7dSummary: TokenUsageSummary = .zero
+    var usage30dSummary: TokenUsageSummary = .zero
+    var usageTodaySummary: TokenUsageSummary = .zero
+    var sparkQuotaWindows: [UsageQuotaWindow] = []
+    var tasks: [CodexTask]
+    var isRunning: Bool
+    var lastUpdated: Date
+    var errorMessage: String?
+
+    static let empty = UsageSnapshot(
+        primaryPercent: nil,
+        secondaryPercent: nil,
+        primaryResetsAt: nil,
+        secondaryResetsAt: nil,
+        usage24h: 0,
+        usage7d: 0,
+        usage30d: 0,
+        tasks: [],
+        isRunning: false,
+        lastUpdated: Date(),
+        errorMessage: nil
+    )
+
+    func stabilizedRateLimits(against previous: UsageSnapshot) -> UsageSnapshot {
+        var copy = self
+        if copy.resetCredits == nil {
+            copy.resetCredits = previous.resetCredits
+        }
+        if copy.sparkQuotaWindows.isEmpty {
+            copy.sparkQuotaWindows = previous.sparkQuotaWindows
+        }
+
+        if !copy.rateLimitWindows.isEmpty {
+            return copy
+        }
+
+        if previous.rateLimitWindows.isEmpty {
+            if copy.primaryPercent == nil {
+                copy.primaryPercent = previous.primaryPercent
+                copy.primaryResetsAt = previous.primaryResetsAt
+            }
+            if copy.secondaryPercent == nil {
+                copy.secondaryPercent = previous.secondaryPercent
+                copy.secondaryResetsAt = previous.secondaryResetsAt
+            }
+            return copy
+        }
+
+        if copy.primaryPercent == nil && copy.secondaryPercent == nil {
+            copy.rateLimitWindows = previous.rateLimitWindows
+            copy.primaryPercent = previous.primaryPercent
+            copy.primaryResetsAt = previous.primaryResetsAt
+            copy.secondaryPercent = previous.secondaryPercent
+            copy.secondaryResetsAt = previous.secondaryResetsAt
+        }
+        return copy
+    }
+
+    var displayRateLimitWindows: [UsageQuotaWindow] {
+        if !rateLimitWindows.isEmpty {
+            return rateLimitWindows
+        }
+
+        var windows: [UsageQuotaWindow] = []
+        if primaryPercent != nil || primaryResetsAt != nil {
+            windows.append(
+                UsageQuotaWindow(
+                    id: "legacy-primary",
+                    shortLabel: "5h",
+                    remainingPercent: primaryPercent,
+                    resetsAt: primaryResetsAt
+                )
+            )
+        }
+        if secondaryPercent != nil || secondaryResetsAt != nil {
+            windows.append(
+                UsageQuotaWindow(
+                    id: "legacy-secondary",
+                    shortLabel: "7d",
+                    remainingPercent: secondaryPercent,
+                    resetsAt: secondaryResetsAt
+                )
+            )
+        }
+        if windows.isEmpty {
+            windows.append(
+                UsageQuotaWindow(
+                    id: "weekly-placeholder",
+                    shortLabel: "7d",
+                    remainingPercent: nil,
+                    resetsAt: nil
+                )
+            )
+        }
+        return windows
+    }
+}
+
+struct UsageQuotaWindow: Equatable, Identifiable {
+    let id: String
+    let shortLabel: String
+    let remainingPercent: Int?
+    let resetsAt: Date?
+
+    var isFiveHourWindow: Bool {
+        let compactLabel = shortLabel
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: " ", with: "")
+            .lowercased()
+        return ["5h", "5小时", "5hr", "5hrs"].contains(compactLabel)
+    }
+}
+
+enum CodexPlanKind: Equatable, Sendable {
+    case plus
+    case pro
+    case other
+
+    init(planType: String?) {
+        switch planType?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "plus":
+            self = .plus
+        case "pro":
+            self = .pro
+        default:
+            self = .other
+        }
+    }
+
+    var showsFiveHourQuota: Bool {
+        self != .pro
+    }
+}
+
+struct PeriodUsage: Equatable, Sendable {
+    var day: Int
+    var week: Int
+    var month: Int
+    var today: Int = 0
+    var daySummary: TokenUsageSummary = .zero
+    var weekSummary: TokenUsageSummary = .zero
+    var monthSummary: TokenUsageSummary = .zero
+    var todaySummary: TokenUsageSummary = .zero
+
+    static let zero = PeriodUsage(day: 0, week: 0, month: 0)
+}
+
+struct CodexTask: Identifiable, Equatable {
+    let id: String
+    let title: String
+    let status: TaskStatus
+    let detailPrefix: String
+    let tokenCount: Int
+    let tokenUsage: TokenUsageSummary
+    let updatedAt: Date
+    let activeSubagentCount: Int
+
+    init(
+        id: String,
+        title: String,
+        status: TaskStatus,
+        detailPrefix: String,
+        tokenCount: Int,
+        tokenUsage: TokenUsageSummary? = nil,
+        updatedAt: Date,
+        activeSubagentCount: Int = 0
+    ) {
+        self.id = id
+        self.title = title
+        self.status = status
+        self.detailPrefix = detailPrefix
+        self.tokenCount = tokenCount
+        self.tokenUsage = tokenUsage ?? .unpriced(totalTokens: tokenCount)
+        self.updatedAt = updatedAt
+        self.activeSubagentCount = activeSubagentCount
+    }
+
+    func displayDetail(now: Date = Date()) -> String {
+        return "\(detailPrefix) · \(Formatters.relativeAge(updatedAt, now: now))前"
+    }
+}
+
+enum TaskStatus: String, Equatable {
+    case running
+    case recent
+    case idle
+
+    var label: String {
+        switch self {
+        case .running:
+            "运行中"
+        case .recent:
+            "最近"
+        case .idle:
+            "空闲"
+        }
+    }
+}
+
+enum RateLimitSourcePreference: String, CaseIterable, Identifiable {
+    case appServerFirst
+    case localFilesOnly
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .appServerFirst:
+            "实时接口优先"
+        case .localFilesOnly:
+            "仅本地记录"
+        }
+    }
+}
+
+enum TaskHistoryRange: String, CaseIterable, Identifiable {
+    case day
+    case threeDays
+    case sevenDays
+    case month
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .day:
+            "24小时"
+        case .threeDays:
+            "3天"
+        case .sevenDays:
+            "7天"
+        case .month:
+            "30天"
+        }
+    }
+
+    var seconds: Int {
+        switch self {
+        case .day:
+            24 * 60 * 60
+        case .threeDays:
+            3 * 24 * 60 * 60
+        case .sevenDays:
+            7 * 24 * 60 * 60
+        case .month:
+            30 * 24 * 60 * 60
+        }
+    }
+
+    var queryLimit: Int {
+        switch self {
+        case .day:
+            40
+        case .threeDays:
+            60
+        case .sevenDays:
+            80
+        case .month:
+            120
+        }
+    }
+}
+
+enum RemoteCodexDataSource: String, CaseIterable, Identifiable, Equatable, Codable, Sendable {
+    case cliProxyAPI
+    case cpaManagerPlus
+    case sub2API
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .cliProxyAPI:
+            "CLIProxyAPI"
+        case .cpaManagerPlus:
+            "CPA Manager Plus"
+        case .sub2API:
+            "Sub2API"
+        }
+    }
+
+    var detailLabel: String {
+        switch self {
+        case .cliProxyAPI:
+            "直接从 CLIProxyAPI 读取账号状态"
+        case .cpaManagerPlus:
+            "从 CPA Manager Plus 读取巡检和用量"
+        case .sub2API:
+            "从 Sub2API 管理端读取上游 Codex 账号"
+        }
+    }
+
+    var supportsTokenUsage: Bool {
+        switch self {
+        case .cliProxyAPI:
+            false
+        case .cpaManagerPlus, .sub2API:
+            true
+        }
+    }
+}
+
+struct RemoteAccountSourceConfiguration: Identifiable, Codable, Equatable, Sendable {
+    static let legacyID = "legacy-remote-account-source"
+
+    var id: String
+    var source: RemoteCodexDataSource
+    var enabled: Bool
+    var label: String
+    var panelURL: String
+    var username: String
+    var secret: String = ""
+    var secretReadFailed: Bool = false
+    var allowInsecureTLS: Bool
+    var requestTimeout: TimeInterval
+
+    init(
+        id: String = UUID().uuidString,
+        source: RemoteCodexDataSource = .cpaManagerPlus,
+        enabled: Bool = true,
+        label: String = "",
+        panelURL: String = "",
+        username: String = "",
+        secret: String = "",
+        allowInsecureTLS: Bool = false,
+        requestTimeout: TimeInterval = 6
+    ) {
+        self.id = id
+        self.source = source
+        self.enabled = enabled
+        self.label = label
+        self.panelURL = panelURL
+        self.username = username
+        self.secret = secret
+        self.secretReadFailed = false
+        self.allowInsecureTLS = allowInsecureTLS
+        self.requestTimeout = requestTimeout
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case source
+        case enabled
+        case label
+        case panelURL
+        case username
+        case allowInsecureTLS
+        case requestTimeout
+    }
+
+    var displayLabel: String {
+        let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? source.label : trimmed
+    }
+
+    var credentialLabel: String {
+        switch source {
+        case .sub2API:
+            let trimmed = username.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? "未填写" : trimmed
+        case .cliProxyAPI, .cpaManagerPlus:
+            return secret.isEmpty ? "未填写密钥" : "已配置密钥"
+        }
+    }
+
+    var usageScopeID: String? {
+        guard source.supportsTokenUsage,
+              let endpointIdentity else {
+            return nil
+        }
+        return "\(source.rawValue)|\(endpointIdentity)"
+    }
+
+    var credentialBindingID: String? {
+        guard let endpointIdentity else {
+            return nil
+        }
+        let principal: String
+        switch source {
+        case .sub2API:
+            principal = username
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+        case .cliProxyAPI, .cpaManagerPlus:
+            principal = ""
+        }
+        return [
+            source.rawValue,
+            endpointIdentity,
+            principal,
+            allowInsecureTLS ? "insecure-tls" : "system-tls"
+        ].joined(separator: "|")
+    }
+
+    var configurationIssue: String? {
+        let trimmed = panelURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, endpointIdentity != nil else {
+            return "面板地址无效"
+        }
+        guard !secret.isEmpty else {
+            return source == .sub2API ? "缺少管理员密码" : "缺少管理密钥"
+        }
+        if source == .sub2API,
+           username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "缺少管理员邮箱"
+        }
+        return nil
+    }
+
+    private var endpointIdentity: String? {
+        let endpoint: URL?
+        switch source {
+        case .cliProxyAPI, .cpaManagerPlus:
+            endpoint = CLIProxyAPIClient.managementBaseURL(from: panelURL)
+        case .sub2API:
+            endpoint = BalanceAPIClient.apiBaseURL(from: panelURL)
+        }
+        guard let endpoint,
+              var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false),
+              components.scheme != nil,
+              components.host != nil else {
+            return nil
+        }
+        components.scheme = components.scheme?.lowercased()
+        components.host = components.host?.lowercased()
+        if (components.scheme == "https" && components.port == 443)
+            || (components.scheme == "http" && components.port == 80) {
+            components.port = nil
+        }
+        components.query = nil
+        components.fragment = nil
+        var value = components.string ?? endpoint.absoluteString
+        while value.hasSuffix("/") {
+            value.removeLast()
+        }
+        return value
+    }
+}
+
+enum NotchDisplaySource: String, CaseIterable, Identifiable, Equatable {
+    case automatic
+    case codex
+    case remoteCodex
+    case newAPI
+    case subAPI
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .automatic:
+            "自动"
+        case .codex:
+            "Codex"
+        case .remoteCodex:
+            "远程账号"
+        case .newAPI:
+            "NewAPI"
+        case .subAPI:
+            "Sub2API"
+        }
+    }
+}
+
+enum NotchDisplaySize: String, CaseIterable, Identifiable, Equatable {
+    case standard
+    case narrow
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .standard:
+            "标准"
+        case .narrow:
+            "窄刘海"
+        }
+    }
+}
+
+enum BalanceMonitorSource: String, CaseIterable, Identifiable, Equatable, Codable {
+    case newAPI
+    case subAPI
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .newAPI:
+            "NewAPI"
+        case .subAPI:
+            "Sub2API"
+        }
+    }
+}
+
+enum RefreshCadence {
+    static func pendingSnapshotDelay(for interval: TimeInterval) -> TimeInterval {
+        clamped((interval * 0.5).rounded(), min: 1, max: 3)
+    }
+
+    static func pendingUsageDelay(for interval: TimeInterval) -> TimeInterval {
+        clamped((interval * 0.25).rounded(), min: 15, max: 60)
+    }
+
+    private static func clamped(_ value: TimeInterval, min: TimeInterval, max: TimeInterval) -> TimeInterval {
+        Swift.min(max, Swift.max(min, value))
+    }
+}
+
+enum UsageRefreshCadence {
+    private static let fileChangeMinimumInterval: TimeInterval = 60
+    private static let fileChangeSettleDelay: TimeInterval = 4
+    static let maximumFailureRetries = 3
+
+    static func refreshInterval(configured: TimeInterval, lastDuration: TimeInterval?) -> TimeInterval {
+        let base = clamped(configured.rounded(), min: 120, max: 1_800)
+        guard let lastDuration, lastDuration > 0 else {
+            return base
+        }
+
+        let adaptive = (lastDuration * 30).rounded()
+        return clamped(max(base, adaptive), min: 120, max: 1_800)
+    }
+
+    static func fileChangeDelay(now: Date, lastCompletedAt: Date?) -> TimeInterval {
+        guard let lastCompletedAt else {
+            return fileChangeSettleDelay
+        }
+
+        let elapsed = max(0, now.timeIntervalSince(lastCompletedAt))
+        return max(fileChangeSettleDelay, fileChangeMinimumInterval - elapsed)
+    }
+
+    static func failureRetryDelay(consecutiveFailures: Int) -> TimeInterval {
+        switch consecutiveFailures {
+        case ...1:
+            5
+        case 2:
+            15
+        default:
+            30
+        }
+    }
+
+    private static func clamped(_ value: TimeInterval, min: TimeInterval, max: TimeInterval) -> TimeInterval {
+        Swift.min(max, Swift.max(min, value))
+    }
+}
+
+enum BalanceRefreshCadence {
+    static func refreshInterval(base: TimeInterval, consecutiveFailures: Int) -> TimeInterval {
+        guard consecutiveFailures > 0 else {
+            return base
+        }
+        return min(30, base)
+    }
+}
+
+struct ThreadRecord: Decodable {
+    let id: String
+    let title: String
+    let tokensUsed: Int
+    let model: String?
+    let reasoningEffort: String?
+    let rolloutPath: String
+    let updatedAt: Int
+    let activeSubagentCount: Int
+    let tokenUsage: TokenUsageSummary?
+
+    init(
+        id: String,
+        title: String,
+        tokensUsed: Int,
+        model: String?,
+        reasoningEffort: String?,
+        rolloutPath: String,
+        updatedAt: Int,
+        activeSubagentCount: Int = 0,
+        tokenUsage: TokenUsageSummary? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.tokensUsed = tokensUsed
+        self.model = model
+        self.reasoningEffort = reasoningEffort
+        self.rolloutPath = rolloutPath
+        self.updatedAt = updatedAt
+        self.activeSubagentCount = activeSubagentCount
+        self.tokenUsage = tokenUsage
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case tokensUsed = "tokens_used"
+        case model
+        case reasoningEffort = "reasoning_effort"
+        case rolloutPath = "rollout_path"
+        case updatedAt = "updated_at"
+        case activeSubagentCount = "subagent_count"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            id: try container.decode(String.self, forKey: .id),
+            title: try container.decode(String.self, forKey: .title),
+            tokensUsed: try container.decode(Int.self, forKey: .tokensUsed),
+            model: try container.decodeIfPresent(String.self, forKey: .model),
+            reasoningEffort: try container.decodeIfPresent(String.self, forKey: .reasoningEffort),
+            rolloutPath: try container.decode(String.self, forKey: .rolloutPath),
+            updatedAt: try container.decode(Int.self, forKey: .updatedAt),
+            activeSubagentCount: try container.decodeIfPresent(Int.self, forKey: .activeSubagentCount) ?? 0,
+            tokenUsage: nil
+        )
+    }
+}
+
+struct SessionIndexRecord: Decodable {
+    let id: String
+    let threadName: String
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case threadName = "thread_name"
+    }
+}
+
+struct UsageLogRecord: Decodable {
+    let ts: Int
+    let feedbackLogBody: String
+
+    enum CodingKeys: String, CodingKey {
+        case ts
+        case feedbackLogBody = "feedback_log_body"
+    }
+}
+
+struct ActivityRecord: Decodable {
+    let threadId: String?
+    let latestActivity: Int?
+    let latestDone: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case threadId = "thread_id"
+        case latestActivity = "latest_activity"
+        case latestDone = "latest_done"
+    }
+}
+
+struct ThreadTokenRecord: Decodable {
+    let id: String
+    let tokensUsed: Int
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case tokensUsed = "tokens_used"
+    }
+}
+
+struct RateLimitSnapshot: Equatable {
+    let primaryPercent: Int?
+    let secondaryPercent: Int?
+    let primaryResetsAt: Int?
+    let secondaryResetsAt: Int?
+    let capturedAt: Date?
+    let isPrimaryCodexLimit: Bool
+    var windows: [UsageQuotaWindow] = []
+    var sparkWindows: [UsageQuotaWindow] = []
+    var resetCredits: RateLimitResetCredits? = nil
+    var planType: String? = nil
+
+    static func preferringAppServer(
+        appServer: RateLimitSnapshot?,
+        localFiles: RateLimitSnapshot
+    ) -> RateLimitSnapshot {
+        guard let appServer else {
+            return localFiles
+        }
+
+        // Rollout timestamps describe when a log was written, not when its quota
+        // was fetched. Replayed quota values must not replace a live response.
+        var result = appServer
+        let sparkCandidates = appServer.sparkWindows + localFiles.sparkWindows
+        result.sparkWindows = Dictionary(
+            grouping: sparkCandidates,
+            by: { $0.shortLabel.lowercased() }
+        )
+        .values
+        .compactMap { windows in
+            windows.max { lhs, rhs in
+                (lhs.resetsAt ?? .distantPast) < (rhs.resetsAt ?? .distantPast)
+            }
+        }
+        .sorted { lhs, rhs in
+            Self.quotaWindowPriority(lhs.shortLabel) < Self.quotaWindowPriority(rhs.shortLabel)
+        }
+        if result.resetCredits == nil {
+            result.resetCredits = appServer.resetCredits ?? localFiles.resetCredits
+        }
+        if result.planType == nil {
+            result.planType = appServer.planType ?? localFiles.planType
+        }
+        return result
+    }
+
+    var primaryResetDate: Date? {
+        resetDate(from: primaryResetsAt)
+    }
+
+    var secondaryResetDate: Date? {
+        resetDate(from: secondaryResetsAt)
+    }
+
+    func primaryDisplayPercent(now: Date = Date()) -> Int? {
+        displayPercent(primaryPercent, resetsAt: primaryResetsAt, now: now)
+    }
+
+    func secondaryDisplayPercent(now: Date = Date()) -> Int? {
+        displayPercent(secondaryPercent, resetsAt: secondaryResetsAt, now: now)
+    }
+
+    func primaryDisplayResetDate(now: Date = Date()) -> Date? {
+        displayResetDate(primaryResetsAt, now: now)
+    }
+
+    func secondaryDisplayResetDate(now: Date = Date()) -> Date? {
+        displayResetDate(secondaryResetsAt, now: now)
+    }
+
+    func displayWindows(now: Date = Date()) -> [UsageQuotaWindow] {
+        let source = windows.isEmpty ? legacyWindows() : windows
+        let visibleSource = CodexPlanKind(planType: planType).showsFiveHourQuota
+            ? source
+            : source.filter { !$0.isFiveHourWindow }
+        return visibleSource.map { window in
+            UsageQuotaWindow(
+                id: window.id,
+                shortLabel: window.shortLabel,
+                remainingPercent: displayPercent(window.remainingPercent, resetsAt: window.resetsAt, now: now),
+                resetsAt: displayResetDate(window.resetsAt, now: now)
+            )
+        }
+    }
+
+    func displaySparkWindows(now: Date = Date()) -> [UsageQuotaWindow] {
+        sparkWindows.map { window in
+            UsageQuotaWindow(
+                id: window.id,
+                shortLabel: window.shortLabel,
+                remainingPercent: displayPercent(window.remainingPercent, resetsAt: window.resetsAt, now: now),
+                resetsAt: displayResetDate(window.resetsAt, now: now)
+            )
+        }
+    }
+
+    private static func quotaWindowPriority(_ label: String) -> Int {
+        let normalized = label.lowercased()
+        if normalized.contains("5h") || normalized.contains("5小时") {
+            return 0
+        }
+        if normalized.contains("7d") || normalized.contains("7天") {
+            return 1
+        }
+        return 2
+    }
+
+    private func displayPercent(_ percent: Int?, resetsAt: Int?, now: Date) -> Int? {
+        if let resetsAt, Int(now.timeIntervalSince1970) >= resetsAt {
+            return 100
+        }
+        if let percent, percent >= 99 {
+            return 100
+        }
+        return percent
+    }
+
+    private func displayPercent(_ percent: Int?, resetsAt: Date?, now: Date) -> Int? {
+        if let resetsAt, now >= resetsAt {
+            return 100
+        }
+        if let percent, percent >= 99 {
+            return 100
+        }
+        return percent
+    }
+
+    private func resetDate(from timestamp: Int?) -> Date? {
+        guard let timestamp else {
+            return nil
+        }
+        return Date(timeIntervalSince1970: TimeInterval(timestamp))
+    }
+
+    private func displayResetDate(_ timestamp: Int?, now: Date) -> Date? {
+        guard let timestamp,
+              Int(now.timeIntervalSince1970) < timestamp else {
+            return nil
+        }
+        return Date(timeIntervalSince1970: TimeInterval(timestamp))
+    }
+
+    private func displayResetDate(_ date: Date?, now: Date) -> Date? {
+        guard let date, now < date else {
+            return nil
+        }
+        return date
+    }
+
+    private func legacyWindows() -> [UsageQuotaWindow] {
+        var result: [UsageQuotaWindow] = []
+        if primaryPercent != nil || primaryResetsAt != nil {
+            result.append(
+                UsageQuotaWindow(
+                    id: "legacy-primary",
+                    shortLabel: "5h",
+                    remainingPercent: primaryPercent,
+                    resetsAt: primaryResetDate
+                )
+            )
+        }
+        if secondaryPercent != nil || secondaryResetsAt != nil {
+            result.append(
+                UsageQuotaWindow(
+                    id: "legacy-secondary",
+                    shortLabel: "7d",
+                    remainingPercent: secondaryPercent,
+                    resetsAt: secondaryResetDate
+                )
+            )
+        }
+        return result
+    }
+}

@@ -1,0 +1,3197 @@
+import Foundation
+import Darwin
+
+private enum UsageScanPolicy {
+    static let ripgrepCandidates = [
+        "/Applications/Codex.app/Contents/Resources/rg",
+        "/Applications/ChatGPT.app/Contents/Resources/rg",
+        "/opt/homebrew/bin/rg",
+        "/usr/local/bin/rg",
+        "/usr/bin/rg"
+    ]
+    static let runningActivityWindow = 10 * 60
+    static let largeSessionTokenScanLimit: UInt64 = 20 * 1024 * 1024
+    static let staleSessionTokenScanLimit: UInt64 = 2 * 1024 * 1024
+    static let recentSessionScanWindow: TimeInterval = 10 * 60
+    static let periodUsageTailLineLimit = 4_000
+    static let estimatedTokenLineBytes: UInt64 = 1_300
+    static let periodUsageBucketCount = 32
+    static let periodUsageCacheTTL: TimeInterval = 120
+    static let periodUsageTailCacheCapacity = 512
+    static let activeFastCacheTTL: TimeInterval = 12
+    static let idleFastCacheTTL: TimeInterval = 60
+    static let fastSessionCandidateLimit = 32
+    static let rateLimitCandidateLimit = 16
+    static let activityWatchFileLimit = 16
+    static let recentTaskPathCacheCapacity = 360
+    static let recentRateLimitPathCacheCapacity = 32
+    static let ripgrepTimeout: DispatchTimeInterval = .seconds(12)
+    static let appServerSuccessCacheTTL: TimeInterval = 30
+    static let appServerFailureCacheTTL: TimeInterval = 45
+}
+
+final class CodexUsageStore: @unchecked Sendable {
+    private let codexDirectory: URL
+    private let stateDatabase: String
+    private let logsDatabase: String
+    private let sessionIndexPath: String
+    private let appServerExecutable: String?
+    private let ripgrepCandidates: [String]
+    private let calendar: Calendar
+    private let sessionDecoder = CodexSessionEventDecoder()
+    private let tokenPattern = /tool_token_count=([0-9]+)/
+    private let cacheLock = NSLock()
+    private var fastCache: FastSnapshotCache?
+    private var recentPathsCache: RecentPathsCache?
+    private var recentTaskPathsCache: RecentPathsCache?
+    private var appServerRateLimitCache: AppServerRateLimitCache?
+    private var periodUsageCache: PeriodUsageCache?
+    private var rateLimitFileCache: [String: FileValueCache<RateLimitSnapshot>] = [:]
+    private var periodUsageBatchCache: [Int: PeriodUsageBatchCache] = [:]
+    private var periodUsageTailCache: [PeriodUsageTailCacheKey: FileValueCache<[PeriodUsageEvent]>] = [:]
+    private var sessionTokenTotalCache: [String: SessionTokenTotalCache] = [:]
+    private var sessionIndexNamesCache: FileValueCache<[String: String]>?
+    private var sessionMetaCache: [String: FileValueCache<SessionMetaInfo>] = [:]
+    private var sessionRuntimeInfoCache: [String: FileValueCache<SessionRuntimeInfo>] = [:]
+    private var sessionTitleCache: [String: FileValueCache<String>] = [:]
+    private var sessionActivityCache: [String: FileValueCache<SessionActivityInfo>] = [:]
+
+    init(
+        codexDirectory: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex"),
+        ripgrepCandidates: [String] = UsageScanPolicy.ripgrepCandidates,
+        appServerExecutable: String? = nil,
+        calendar: Calendar = .autoupdatingCurrent
+    ) {
+        self.codexDirectory = codexDirectory
+        self.ripgrepCandidates = ripgrepCandidates
+        self.calendar = calendar
+        self.appServerExecutable = appServerExecutable ?? Self.resolveAppServerExecutable()
+        self.stateDatabase = Self.latestSQLiteDatabase(
+            in: codexDirectory,
+            prefix: "state_",
+            fallback: "state_5.sqlite"
+        )
+        self.logsDatabase = Self.latestSQLiteDatabase(
+            in: codexDirectory,
+            prefix: "logs_",
+            fallback: "logs_2.sqlite"
+        )
+        self.sessionIndexPath = codexDirectory.appendingPathComponent("session_index.jsonl").path
+    }
+
+    private static func latestSQLiteDatabase(in directory: URL, prefix: String, fallback: String) -> String {
+        let fallbackPath = directory.appendingPathComponent(fallback).path
+        guard let urls = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil
+        ) else {
+            return fallbackPath
+        }
+
+        let candidates = urls.compactMap { url -> (version: Int, path: String)? in
+            guard url.pathExtension == "sqlite" else {
+                return nil
+            }
+            let name = url.deletingPathExtension().lastPathComponent
+            guard name.hasPrefix(prefix) else {
+                return nil
+            }
+            let suffix = name.dropFirst(prefix.count)
+            guard let version = Int(suffix) else {
+                return nil
+            }
+            return (version, url.path)
+        }
+
+        return candidates.max { $0.version < $1.version }?.path ?? fallbackPath
+    }
+
+    private static func resolveAppServerExecutable() -> String? {
+        let knownPaths = [
+            "/Applications/Codex.app/Contents/Resources/codex",
+            "/Applications/ChatGPT.app/Contents/Resources/codex"
+        ]
+        if let existing = knownPaths.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
+            return existing
+        }
+
+        let pathEntries = (ProcessInfo.processInfo.environment["PATH"] ?? "")
+            .split(separator: ":")
+            .map(String.init)
+        for directory in pathEntries {
+            let candidate = URL(fileURLWithPath: directory).appendingPathComponent("codex").path
+            if FileManager.default.isExecutableFile(atPath: candidate) {
+                return candidate
+            }
+        }
+        return nil
+    }
+
+    func loadSnapshot(
+        includePeriodUsage: Bool = true,
+        fallbackUsage: PeriodUsage? = nil,
+        bypassFastCache: Bool = false,
+        rateLimitSource: RateLimitSourcePreference = .appServerFirst,
+        taskHistoryRange: TaskHistoryRange = .threeDays,
+        now: Date = Date()
+    ) -> UsageSnapshot {
+        if !bypassFastCache,
+           !includePeriodUsage,
+           let cachedSnapshot = cachedFastSnapshot(
+                now: now,
+                fallbackUsage: fallbackUsage,
+                rateLimitSource: rateLimitSource,
+                taskHistoryRange: taskHistoryRange
+           ) {
+            return cachedSnapshot
+        }
+
+        do {
+            let databaseThreads = try loadRecentThreads(range: taskHistoryRange, now: now)
+            let knownTokens = tokenMap(from: databaseThreads)
+            let sessionCandidates = loadRecentSessionCandidates(
+                range: taskHistoryRange,
+                now: now,
+                knownTokens: knownTokens,
+                limit: UsageScanPolicy.fastSessionCandidateLimit
+            )
+            let sessionNames = loadSessionIndexThreadNames()
+            let sessionThreads = loadRecentSessionThreads(
+                candidates: sessionCandidates,
+                names: sessionNames
+            )
+            let activeSubagentParents = loadActiveSubagentParentThreads(
+                candidates: sessionCandidates,
+                names: sessionNames,
+                now: now
+            )
+            let subagentUsage = loadSubagentUsage(candidates: sessionCandidates, now: now)
+            let threads = withSubagentUsage(
+                mergeThreadRecords(databaseThreads + sessionThreads + activeSubagentParents),
+                usage: subagentUsage
+            )
+            let activeThreadIDs = ((try? loadActiveThreadIDs(now: now)) ?? [])
+                .union(activeSessionThreadIDs(from: threads, now: now))
+                .union(activeSubagentParents.map(\.id))
+            let usage = includePeriodUsage
+                ? (loadUsageTotals(now: now, fallbackThreads: threads) ?? fallbackUsage ?? .zero)
+                : (fallbackUsage ?? .zero)
+            let rateLimitPaths = candidateRateLimitPaths(from: threads)
+            let rateLimits = loadRateLimits(from: rateLimitPaths, source: rateLimitSource, now: now)
+            let tasks = buildTasks(from: threads, activeThreadIDs: activeThreadIDs, now: now)
+            cacheFastSnapshot(
+                threads: threads,
+                activeThreadIDs: activeThreadIDs,
+                rateLimits: rateLimits,
+                signaturePaths: rateLimitPaths,
+                rateLimitSource: rateLimitSource,
+                taskHistoryRange: taskHistoryRange
+            )
+
+            return UsageSnapshot(
+                primaryPercent: rateLimits.primaryDisplayPercent(now: now),
+                secondaryPercent: rateLimits.secondaryDisplayPercent(now: now),
+                primaryResetsAt: rateLimits.primaryDisplayResetDate(now: now),
+                secondaryResetsAt: rateLimits.secondaryDisplayResetDate(now: now),
+                rateLimitWindows: rateLimits.displayWindows(now: now),
+                resetCredits: rateLimits.resetCredits,
+                usage24h: usage.day,
+                usage7d: usage.week,
+                usage30d: usage.month,
+                usageToday: usage.today,
+                usage24hSummary: usage.daySummary,
+                usage7dSummary: usage.weekSummary,
+                usage30dSummary: usage.monthSummary,
+                usageTodaySummary: usage.todaySummary,
+                sparkQuotaWindows: rateLimits.displaySparkWindows(now: now),
+                tasks: tasks,
+                isRunning: tasks.contains { $0.status == .running },
+                lastUpdated: now,
+                errorMessage: nil
+            )
+        } catch {
+            return errorSnapshot(error, now: now)
+        }
+    }
+
+    func loadUsageTotals(
+        now: Date = Date(),
+        isCancelled: @Sendable () -> Bool = { false }
+    ) -> PeriodUsage? {
+        guard !isCancelled() else {
+            return nil
+        }
+        let periodThreads = (try? loadThreadsForPeriodUsage(now: now)) ?? []
+        let sessionThreads = loadSessionUsageThreads(
+            range: .month,
+            now: now,
+            knownTokens: tokenMap(from: periodThreads),
+            knownThreadIDs: knownThreadIDsWithRolloutPaths(from: periodThreads)
+        )
+        let usageThreads = mergeThreadRecords(periodThreads + sessionThreads)
+        guard !isCancelled(),
+              !usageThreads.isEmpty,
+              let usage = try? loadPeriodUsage(
+                now: now,
+                threads: usageThreads,
+                isCancelled: isCancelled
+              ) else {
+            return nil
+        }
+        return usage
+    }
+
+    func rateLimitWatchPaths() -> [String] {
+        let threads = (try? loadRecentThreads()) ?? []
+        return uniqueExistingPaths(
+            candidateRateLimitPaths(from: threads)
+                + recentSessionActivityWatchPaths()
+        )
+    }
+
+    private func errorSnapshot(_ error: Error, now: Date) -> UsageSnapshot {
+        UsageSnapshot(
+            primaryPercent: nil,
+            secondaryPercent: nil,
+            primaryResetsAt: nil,
+            secondaryResetsAt: nil,
+            usage24h: 0,
+            usage7d: 0,
+            usage30d: 0,
+            tasks: [],
+            isRunning: false,
+            lastUpdated: now,
+            errorMessage: error.localizedDescription
+        )
+    }
+
+    private func loadUsageTotals(now: Date, fallbackThreads: [ThreadRecord]?) -> PeriodUsage? {
+        let periodThreads = (try? loadThreadsForPeriodUsage(now: now)) ?? []
+        let knownTokens = tokenMap(from: periodThreads + (fallbackThreads ?? []))
+        let sessionThreads = loadSessionUsageThreads(
+            range: .month,
+            now: now,
+            knownTokens: knownTokens,
+            knownThreadIDs: knownThreadIDsWithRolloutPaths(
+                from: periodThreads + (fallbackThreads ?? [])
+            )
+        )
+        let usageThreads = mergeThreadRecords(periodThreads + sessionThreads + (fallbackThreads ?? []))
+        guard !usageThreads.isEmpty else {
+            return nil
+        }
+        return try? loadPeriodUsage(now: now, threads: usageThreads)
+    }
+
+    private func cachedFastSnapshot(
+        now: Date,
+        fallbackUsage: PeriodUsage?,
+        rateLimitSource: RateLimitSourcePreference,
+        taskHistoryRange: TaskHistoryRange
+    ) -> UsageSnapshot? {
+        cacheLock.lock()
+        let cache = fastCache
+        cacheLock.unlock()
+
+        guard let cache else {
+            return nil
+        }
+
+        let ttl = cache.activeThreadIDs.isEmpty
+            ? UsageScanPolicy.idleFastCacheTTL
+            : UsageScanPolicy.activeFastCacheTTL
+        guard cache.rateLimitSource == rateLimitSource,
+              cache.taskHistoryRange == taskHistoryRange,
+              now.timeIntervalSince(cache.createdAt) < ttl,
+              makeSnapshotSignature(for: cache.rolloutPaths) == cache.signature else {
+            return nil
+        }
+
+        let usage = fallbackUsage ?? .zero
+        let tasks = buildTasks(from: cache.threads, activeThreadIDs: cache.activeThreadIDs, now: now)
+        return UsageSnapshot(
+            primaryPercent: cache.rateLimits.primaryDisplayPercent(now: now),
+            secondaryPercent: cache.rateLimits.secondaryDisplayPercent(now: now),
+            primaryResetsAt: cache.rateLimits.primaryDisplayResetDate(now: now),
+            secondaryResetsAt: cache.rateLimits.secondaryDisplayResetDate(now: now),
+            rateLimitWindows: cache.rateLimits.displayWindows(now: now),
+            resetCredits: cache.rateLimits.resetCredits,
+            usage24h: usage.day,
+            usage7d: usage.week,
+            usage30d: usage.month,
+            usageToday: usage.today,
+            usage24hSummary: usage.daySummary,
+            usage7dSummary: usage.weekSummary,
+            usage30dSummary: usage.monthSummary,
+            usageTodaySummary: usage.todaySummary,
+            sparkQuotaWindows: cache.rateLimits.displaySparkWindows(now: now),
+            tasks: tasks,
+            isRunning: tasks.contains { $0.status == .running },
+            lastUpdated: now,
+            errorMessage: nil
+        )
+    }
+
+    private func cacheFastSnapshot(
+        threads: [ThreadRecord],
+        activeThreadIDs: Set<String>,
+        rateLimits: RateLimitSnapshot,
+        signaturePaths: [String],
+        rateLimitSource: RateLimitSourcePreference,
+        taskHistoryRange: TaskHistoryRange
+    ) {
+        let rolloutPaths = Array(Set(signaturePaths + threads.map(\.rolloutPath)).filter { !$0.isEmpty }).sorted()
+        guard let signature = makeSnapshotSignature(for: rolloutPaths) else {
+            return
+        }
+
+        cacheLock.lock()
+        fastCache = FastSnapshotCache(
+            createdAt: Date(),
+            signature: signature,
+            rolloutPaths: rolloutPaths,
+            threads: threads,
+            activeThreadIDs: activeThreadIDs,
+            rateLimits: rateLimits,
+            rateLimitSource: rateLimitSource,
+            taskHistoryRange: taskHistoryRange
+        )
+        cacheLock.unlock()
+    }
+
+    private func loadRecentThreads(range: TaskHistoryRange = .threeDays, now: Date = Date()) throws -> [ThreadRecord] {
+        let since = Int(now.timeIntervalSince1970) - range.seconds
+        let select = """
+        select
+          id,
+          coalesce(title, '未命名任务') as title,
+          coalesce(tokens_used, 0) as tokens_used,
+          model,
+          reasoning_effort,
+          coalesce(rollout_path, '') as rollout_path,
+          coalesce(updated_at, 0) as updated_at
+        from threads
+        """
+        let modernQuery = """
+        \(select)
+        where archived = 0
+          and updated_at >= \(since)
+          and coalesce(thread_source, '') != 'subagent'
+        order by updated_at desc
+        limit \(range.queryLimit);
+        """
+        if let records = try? Shell.sqliteJSON(
+            database: stateDatabase,
+            query: modernQuery,
+            as: [ThreadRecord].self
+        ) {
+            return withSessionIndexNames(records)
+        }
+
+        let legacyQuery = """
+        \(select)
+        where archived = 0
+          and updated_at >= \(since)
+        order by updated_at desc
+        limit \(range.queryLimit);
+        """
+        return withSessionIndexNames(
+            try Shell.sqliteJSON(database: stateDatabase, query: legacyQuery, as: [ThreadRecord].self)
+        ).filter { !isSubagentThread($0) }
+    }
+
+    private func loadRecentSessionThreads(
+        range: TaskHistoryRange,
+        now: Date,
+        includeSubagents: Bool = false,
+        knownTokens: [String: Int] = [:]
+    ) -> [ThreadRecord] {
+        let names = loadSessionIndexThreadNames()
+        return loadRecentSessionCandidates(
+            range: range,
+            now: now,
+            knownTokens: knownTokens
+        ).compactMap { candidate in
+            sessionThread(from: candidate, names: names, includeSubagents: includeSubagents)
+        }
+    }
+
+    private func loadRecentSessionThreads(
+        candidates: [RecentSessionCandidate],
+        names: [String: String],
+        includeSubagents: Bool = false
+    ) -> [ThreadRecord] {
+        candidates.compactMap { candidate in
+            sessionThread(from: candidate, names: names, includeSubagents: includeSubagents)
+        }
+    }
+
+    private func sessionThread(
+        from candidate: RecentSessionCandidate,
+        names: [String: String],
+        includeSubagents: Bool
+    ) -> ThreadRecord? {
+        let meta = sessionMeta(from: candidate.path)
+        guard includeSubagents || meta?.isSubagent != true else {
+            return nil
+        }
+
+        let runtime = sessionRuntimeInfo(from: candidate.path)
+        let title = names[candidate.sessionID] ?? sessionTitle(from: candidate.path) ?? "未命名任务"
+        let tokensUsed = tokenTotalForFastSnapshot(
+            path: candidate.path,
+            databaseTokens: candidate.databaseTokens
+        )
+        return ThreadRecord(
+            id: candidate.sessionID,
+            title: title,
+            tokensUsed: tokensUsed,
+            model: runtime?.model,
+            reasoningEffort: runtime?.reasoningEffort,
+            rolloutPath: candidate.path,
+            updatedAt: candidate.updatedAt
+        )
+    }
+
+    private func loadSessionUsageThreads(
+        range: TaskHistoryRange,
+        now: Date,
+        knownTokens: [String: Int] = [:],
+        knownThreadIDs: Set<String> = []
+    ) -> [ThreadRecord] {
+        loadRecentSessionCandidates(
+            range: range,
+            now: now,
+            knownTokens: knownTokens
+        ).compactMap { candidate in
+            guard !knownThreadIDs.contains(candidate.sessionID.lowercased()) else {
+                return nil
+            }
+            let tokensUsed = tokenTotalForPeriodUsage(
+                path: candidate.path,
+                databaseTokens: candidate.databaseTokens,
+                modifiedAt: candidate.modifiedAt,
+                now: now
+            )
+            guard tokensUsed > 0 else {
+                return nil
+            }
+
+            return ThreadRecord(
+                id: candidate.sessionID,
+                title: "",
+                tokensUsed: tokensUsed,
+                model: nil,
+                reasoningEffort: nil,
+                rolloutPath: candidate.path,
+                updatedAt: candidate.updatedAt
+            )
+        }
+    }
+
+    private func knownThreadIDsWithRolloutPaths(from threads: [ThreadRecord]) -> Set<String> {
+        Set(
+            threads.lazy
+                .filter {
+                    !$0.rolloutPath.isEmpty
+                        && FileManager.default.fileExists(atPath: $0.rolloutPath)
+                }
+                .map { $0.id.lowercased() }
+        )
+    }
+
+    private func loadRecentSessionCandidates(
+        range: TaskHistoryRange,
+        now: Date,
+        knownTokens: [String: Int],
+        limit: Int? = nil
+    ) -> [RecentSessionCandidate] {
+        let since = Int(now.timeIntervalSince1970) - range.seconds
+        let paths = recentTaskSessionPaths(limit: limit ?? max(range.queryLimit * 3, 80))
+        let pathSessionIDs = paths.compactMap { sessionID(from: $0)?.lowercased() }
+        var resolvedKnownTokens = knownTokens
+        let missingTokenIDs = pathSessionIDs.filter { resolvedKnownTokens[$0] == nil }
+        if !missingTokenIDs.isEmpty {
+            resolvedKnownTokens.merge(loadThreadTokenMap(for: missingTokenIDs), uniquingKeysWith: max)
+        }
+
+        return paths.compactMap { path in
+            guard let sessionID = sessionID(from: path),
+                  let attributes = try? FileManager.default.attributesOfItem(atPath: path),
+                  let modifiedAt = attributes[.modificationDate] as? Date else {
+                return nil
+            }
+
+            let updatedAt = Int(modifiedAt.timeIntervalSince1970)
+            guard updatedAt >= since else {
+                return nil
+            }
+
+            return RecentSessionCandidate(
+                path: path,
+                sessionID: sessionID,
+                modifiedAt: modifiedAt,
+                updatedAt: updatedAt,
+                databaseTokens: resolvedKnownTokens[sessionID.lowercased()] ?? 0
+            )
+        }
+    }
+
+    private func activeSessionThreadIDs(from threads: [ThreadRecord], now: Date) -> Set<String> {
+        return Set(threads.compactMap { thread in
+            sessionLooksActive(path: thread.rolloutPath, fallbackUpdatedAt: thread.updatedAt, now: now) ? thread.id : nil
+        })
+    }
+
+    private func isSubagentThread(_ thread: ThreadRecord) -> Bool {
+        guard !thread.rolloutPath.isEmpty,
+              let meta = sessionMeta(from: thread.rolloutPath) else {
+            return false
+        }
+        return meta.isSubagent
+    }
+
+    private func loadActiveSubagentParentThreads(
+        candidates: [RecentSessionCandidate],
+        names: [String: String],
+        now: Date
+    ) -> [ThreadRecord] {
+        let pathBySessionID = Dictionary(
+            candidates.map { ($0.sessionID.lowercased(), $0.path) },
+            uniquingKeysWith: { first, _ in first }
+        )
+
+        let activeSubagents: [(candidate: RecentSessionCandidate, parentThreadID: String)] = candidates.compactMap { candidate in
+            guard let meta = sessionMeta(from: candidate.path),
+                  meta.isSubagent,
+                  let parentThreadID = meta.parentThreadID?.lowercased(),
+                  !parentThreadID.isEmpty,
+                  sessionLooksActive(
+                    path: candidate.path,
+                    fallbackUpdatedAt: candidate.updatedAt,
+                    now: now
+                  ) else {
+                return nil
+            }
+            return (candidate, parentThreadID)
+        }
+
+        guard !activeSubagents.isEmpty else {
+            return []
+        }
+
+        let missingParentIDs = Set(activeSubagents.map(\.parentThreadID))
+            .subtracting(pathBySessionID.keys)
+        let missingParentPaths = sessionPaths(for: missingParentIDs)
+
+        let parents = activeSubagents.compactMap { item -> ThreadRecord? in
+            let parentThreadID = item.parentThreadID
+            let subagentUpdatedAt = item.candidate.updatedAt
+            let parentPath = pathBySessionID[parentThreadID] ?? missingParentPaths[parentThreadID]
+            let runtime = parentPath.flatMap(sessionRuntimeInfo(from:))
+            let title = parentPath.flatMap { names[parentThreadID] ?? sessionTitle(from: $0) }
+                ?? names[parentThreadID]
+                ?? "正在运行的 Codex 任务"
+            let parentUpdatedAt = parentPath.flatMap { path -> Int? in
+                guard let attributes = try? FileManager.default.attributesOfItem(atPath: path),
+                      let modifiedAt = attributes[.modificationDate] as? Date else {
+                    return nil
+                }
+                return Int(modifiedAt.timeIntervalSince1970)
+            } ?? 0
+            let updatedAt = max(parentUpdatedAt, subagentUpdatedAt)
+            return ThreadRecord(
+                id: parentThreadID,
+                title: title,
+                tokensUsed: parentPath.flatMap(sessionTokenTotal(from:)) ?? 0,
+                model: runtime?.model,
+                reasoningEffort: runtime?.reasoningEffort,
+                rolloutPath: parentPath ?? "",
+                updatedAt: updatedAt
+            )
+        }
+
+        return mergeThreadRecords(parents)
+    }
+
+    private func loadSubagentUsage(range: TaskHistoryRange, now: Date) -> [String: (count: Int, tokens: Int, summary: TokenUsageSummary)] {
+        let candidates = loadRecentSessionCandidates(range: range, now: now, knownTokens: [:])
+        return loadSubagentUsage(candidates: candidates, now: now)
+    }
+
+    private func loadSubagentUsage(
+        candidates: [RecentSessionCandidate],
+        now: Date
+    ) -> [String: (count: Int, tokens: Int, summary: TokenUsageSummary)] {
+        var usage: [String: (count: Int, tokens: Int, summary: TokenUsageSummary)] = [:]
+
+        for candidate in candidates {
+            guard let meta = sessionMeta(from: candidate.path),
+                  meta.isSubagent,
+                  let parentThreadID = meta.parentThreadID,
+                  !parentThreadID.isEmpty else {
+                continue
+            }
+
+            let key = parentThreadID.lowercased()
+            let current = usage[key] ?? (count: 0, tokens: 0, summary: .zero)
+            let isActive = sessionLooksActive(
+                path: candidate.path,
+                fallbackUpdatedAt: candidate.updatedAt,
+                now: now
+            )
+            let tokenTotal = tokenTotalForFastSnapshot(
+                path: candidate.path,
+                databaseTokens: candidate.databaseTokens,
+                allowInactiveScan: false
+            )
+            var tokenSummary = sessionTokenUsageSummary(from: candidate.path)
+                ?? .unpriced(totalTokens: tokenTotal)
+            if tokenSummary.totalTokens < tokenTotal {
+                tokenSummary.addUnpricedTokens(tokenTotal - tokenSummary.totalTokens)
+            }
+            var combinedSummary = current.summary
+            combinedSummary.add(tokenSummary)
+            usage[key] = (
+                count: current.count + (isActive ? 1 : 0),
+                tokens: current.tokens + tokenTotal,
+                summary: combinedSummary
+            )
+        }
+
+        return usage
+    }
+
+    private func withSubagentUsage(
+        _ threads: [ThreadRecord],
+        usage: [String: (count: Int, tokens: Int, summary: TokenUsageSummary)]
+    ) -> [ThreadRecord] {
+        guard !usage.isEmpty else {
+            return threads
+        }
+
+        return threads.map { thread in
+            guard let summary = usage[thread.id.lowercased()] else {
+                return thread
+            }
+            let count = summary.count
+            let parentTokens = parentTokenCount(for: thread)
+            let tokensUsed = max(thread.tokensUsed, parentTokens + summary.tokens)
+            var tokenUsage = thread.tokenUsage
+                ?? sessionTokenUsageSummary(from: thread.rolloutPath)
+                ?? .unpriced(totalTokens: parentTokens, model: thread.model)
+            if tokenUsage.totalTokens < parentTokens {
+                tokenUsage.addUnpricedTokens(parentTokens - tokenUsage.totalTokens, model: thread.model)
+            }
+            tokenUsage.add(summary.summary)
+            if tokenUsage.totalTokens < tokensUsed {
+                tokenUsage.addUnpricedTokens(tokensUsed - tokenUsage.totalTokens)
+            }
+
+            return ThreadRecord(
+                id: thread.id,
+                title: thread.title,
+                tokensUsed: tokensUsed,
+                model: thread.model,
+                reasoningEffort: thread.reasoningEffort,
+                rolloutPath: thread.rolloutPath,
+                updatedAt: thread.updatedAt,
+                activeSubagentCount: count,
+                tokenUsage: tokenUsage
+            )
+        }
+    }
+
+    private func parentTokenCount(for thread: ThreadRecord) -> Int {
+        guard !thread.rolloutPath.isEmpty else {
+            return thread.tokensUsed
+        }
+        return tokenTotalForFastSnapshot(path: thread.rolloutPath, databaseTokens: thread.tokensUsed)
+    }
+
+    private func tokenTotalForFastSnapshot(
+        path: String,
+        databaseTokens: Int,
+        allowInactiveScan: Bool = true
+    ) -> Int {
+        guard !path.isEmpty else {
+            return databaseTokens
+        }
+
+        let signature = fileSignature(path)
+        guard signature.exists else {
+            return databaseTokens
+        }
+
+        // Spawned Codex agents inherit the parent rollout and its database total.
+        // Their own usage must be derived from the child-only suffix instead.
+        if sessionMeta(from: path)?.isSubagent == true {
+            return sessionTokenTotal(from: path) ?? 0
+        }
+
+        guard allowInactiveScan || databaseTokens <= 0 else {
+            return databaseTokens
+        }
+
+        if databaseTokens > 0, signature.size > UsageScanPolicy.largeSessionTokenScanLimit {
+            return databaseTokens
+        }
+
+        return max(databaseTokens, sessionTokenTotal(from: path) ?? 0)
+    }
+
+    private func tokenTotalForPeriodUsage(
+        path: String,
+        databaseTokens: Int,
+        modifiedAt: Date,
+        now: Date
+    ) -> Int {
+        guard !path.isEmpty else {
+            return databaseTokens
+        }
+
+        let signature = fileSignature(path)
+        guard signature.exists else {
+            return databaseTokens
+        }
+
+        if sessionMeta(from: path)?.isSubagent == true {
+            return sessionTokenTotal(from: path) ?? 0
+        }
+
+        if databaseTokens > 0, signature.size > UsageScanPolicy.largeSessionTokenScanLimit {
+            return databaseTokens
+        }
+
+        let changedRecently = now.timeIntervalSince(modifiedAt) < UsageScanPolicy.recentSessionScanWindow
+        if changedRecently {
+            return max(databaseTokens, sessionTokenTotal(from: path) ?? 0)
+        }
+
+        if databaseTokens > 0 {
+            return databaseTokens
+        }
+
+        guard signature.size <= UsageScanPolicy.staleSessionTokenScanLimit else {
+            return 0
+        }
+
+        return sessionTokenTotal(from: path) ?? 0
+    }
+
+    private func tokenMap(from threads: [ThreadRecord]) -> [String: Int] {
+        Dictionary(
+            threads.map { ($0.id.lowercased(), $0.tokensUsed) },
+            uniquingKeysWith: max
+        )
+    }
+
+    private func loadThreadTokenMap(for ids: [String]) -> [String: Int] {
+        let uniqueIDs = Array(Set(ids.filter { !$0.isEmpty })).sorted()
+        guard !uniqueIDs.isEmpty else {
+            return [:]
+        }
+
+        let quotedIDs = uniqueIDs
+            .map { "'\($0.replacingOccurrences(of: "'", with: "''"))'" }
+            .joined(separator: ",")
+        let query = """
+        select id, coalesce(tokens_used, 0) as tokens_used
+        from threads
+        where id in (\(quotedIDs));
+        """
+
+        guard let records = try? Shell.sqliteJSON(database: stateDatabase, query: query, as: [ThreadTokenRecord].self) else {
+            return [:]
+        }
+
+        return Dictionary(
+            records.map { ($0.id.lowercased(), $0.tokensUsed) },
+            uniquingKeysWith: max
+        )
+    }
+
+    private func mergeThreadRecords(_ records: [ThreadRecord]) -> [ThreadRecord] {
+        var merged: [String: ThreadRecord] = [:]
+
+        for record in records {
+            guard !record.id.isEmpty else {
+                continue
+            }
+
+            if let existing = merged[record.id] {
+                merged[record.id] = mergeThreadRecord(existing, with: record)
+            } else {
+                merged[record.id] = record
+            }
+        }
+
+        return merged.values.sorted {
+            if $0.updatedAt == $1.updatedAt {
+                return $0.title < $1.title
+            }
+            return $0.updatedAt > $1.updatedAt
+        }
+    }
+
+    private func mergeThreadRecord(_ existing: ThreadRecord, with candidate: ThreadRecord) -> ThreadRecord {
+        let updatedAt = max(existing.updatedAt, candidate.updatedAt)
+        let title = bestTitle(existing.title, candidate.title)
+        let tokensUsed = max(existing.tokensUsed, candidate.tokensUsed)
+        let rolloutPath: String
+        if existing.rolloutPath.isEmpty
+            || !FileManager.default.fileExists(atPath: existing.rolloutPath) {
+            rolloutPath = candidate.rolloutPath
+        } else if candidate.rolloutPath.isEmpty
+            || !FileManager.default.fileExists(atPath: candidate.rolloutPath) {
+            rolloutPath = existing.rolloutPath
+        } else {
+            rolloutPath = candidate.updatedAt > existing.updatedAt
+                ? candidate.rolloutPath
+                : existing.rolloutPath
+        }
+        let tokenUsage: TokenUsageSummary?
+        switch (existing.tokenUsage, candidate.tokenUsage) {
+        case let (lhs?, rhs?):
+            tokenUsage = lhs.totalTokens >= rhs.totalTokens ? lhs : rhs
+        case let (lhs?, nil):
+            tokenUsage = lhs
+        case let (nil, rhs?):
+            tokenUsage = rhs
+        case (nil, nil):
+            tokenUsage = nil
+        }
+
+        return ThreadRecord(
+            id: existing.id,
+            title: title,
+            tokensUsed: tokensUsed,
+            model: existing.model ?? candidate.model,
+            reasoningEffort: existing.reasoningEffort ?? candidate.reasoningEffort,
+            rolloutPath: rolloutPath,
+            updatedAt: updatedAt,
+            activeSubagentCount: max(existing.activeSubagentCount, candidate.activeSubagentCount),
+            tokenUsage: tokenUsage
+        )
+    }
+
+    private func bestTitle(_ first: String, _ second: String) -> String {
+        let firstTrimmed = first.trimmingCharacters(in: .whitespacesAndNewlines)
+        let secondTrimmed = second.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if firstTrimmed.isEmpty || firstTrimmed == "未命名任务" {
+            return secondTrimmed.isEmpty ? "未命名任务" : secondTrimmed
+        }
+        return firstTrimmed
+    }
+
+    private func loadThreadsForPeriodUsage(now: Date) throws -> [ThreadRecord] {
+        let monthStart = Int(now.timeIntervalSince1970) - (30 * 24 * 60 * 60)
+        let modernQuery = """
+        select
+          id,
+          coalesce(title, '未命名任务') as title,
+          case
+            when coalesce(thread_source, '') = 'subagent' then 0
+            else coalesce(tokens_used, 0)
+          end as tokens_used,
+          model,
+          reasoning_effort,
+          coalesce(rollout_path, '') as rollout_path,
+          coalesce(updated_at, 0) as updated_at
+        from threads
+        where updated_at >= \(monthStart)
+        order by updated_at desc;
+        """
+        if let records = try? Shell.sqliteJSON(
+            database: stateDatabase,
+            query: modernQuery,
+            as: [ThreadRecord].self
+        ) {
+            return withSessionIndexNames(records)
+        }
+
+        let legacyQuery = """
+        select
+          id,
+          coalesce(title, '未命名任务') as title,
+          coalesce(tokens_used, 0) as tokens_used,
+          model,
+          reasoning_effort,
+          coalesce(rollout_path, '') as rollout_path,
+          coalesce(updated_at, 0) as updated_at
+        from threads
+        where updated_at >= \(monthStart)
+        order by updated_at desc;
+        """
+        return withSessionIndexNames(
+            try Shell.sqliteJSON(database: stateDatabase, query: legacyQuery, as: [ThreadRecord].self)
+        ).filter { !isSubagentThread($0) }
+    }
+
+    private func withSessionIndexNames(_ threads: [ThreadRecord]) -> [ThreadRecord] {
+        let indexedNames = loadSessionIndexThreadNames()
+        guard !indexedNames.isEmpty else {
+            return threads
+        }
+
+        return threads.map { thread in
+            guard let indexedName = indexedNames[thread.id],
+                  !indexedName.isEmpty,
+                  indexedName != thread.title else {
+                return thread
+            }
+
+            return ThreadRecord(
+                id: thread.id,
+                title: indexedName,
+                tokensUsed: thread.tokensUsed,
+                model: thread.model,
+                reasoningEffort: thread.reasoningEffort,
+                rolloutPath: thread.rolloutPath,
+                updatedAt: thread.updatedAt,
+                activeSubagentCount: thread.activeSubagentCount,
+                tokenUsage: thread.tokenUsage
+            )
+        }
+    }
+
+    private func loadSessionIndexThreadNames() -> [String: String] {
+        let signature = fileSignature(sessionIndexPath)
+
+        cacheLock.lock()
+        if let cached = sessionIndexNamesCache,
+           cached.signature == signature {
+            let names = cached.value ?? [:]
+            cacheLock.unlock()
+            return names
+        }
+        cacheLock.unlock()
+
+        guard let content = try? String(contentsOfFile: sessionIndexPath, encoding: .utf8) else {
+            cacheLock.lock()
+            sessionIndexNamesCache = FileValueCache(signature: signature, value: [:])
+            cacheLock.unlock()
+            return [:]
+        }
+
+        let decoder = JSONDecoder()
+        var names: [String: String] = [:]
+
+        for line in content.split(whereSeparator: \.isNewline) {
+            guard let record = try? decoder.decode(SessionIndexRecord.self, from: Data(line.utf8)) else {
+                continue
+            }
+
+            let name = record.threadName.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else {
+                continue
+            }
+            names[record.id] = name
+        }
+
+        cacheLock.lock()
+        sessionIndexNamesCache = FileValueCache(signature: signature, value: names)
+        cacheLock.unlock()
+        return names
+    }
+
+    private func loadPeriodUsage(
+        now: Date,
+        threads: [ThreadRecord],
+        isCancelled: @Sendable () -> Bool = { false }
+    ) throws -> PeriodUsage {
+        guard !isCancelled() else {
+            throw CancellationError()
+        }
+        let rolloutPaths = Array(Set(threads.map(\.rolloutPath)).filter { !$0.isEmpty }).sorted()
+        let signature = makeUsageSignature(for: rolloutPaths)
+        if let signature,
+           let cached = cachedPeriodUsage(now: now, signature: signature) {
+            return cached
+        }
+
+        guard let rolloutUsage = loadPeriodUsageFromRollouts(
+            now: now,
+            threads: threads,
+            isCancelled: isCancelled
+        ) else {
+            throw CancellationError()
+        }
+        guard !isCancelled() else {
+            throw CancellationError()
+        }
+        let logUsage = (try? loadPeriodUsageFromLogs(now: now)) ?? .zero
+        let usage = maxPeriodUsage(rolloutUsage, logUsage)
+
+        if let signature {
+            cachePeriodUsage(usage, signature: signature, now: now)
+        }
+
+        return usage
+    }
+
+    private func maxPeriodUsage(_ lhs: PeriodUsage, _ rhs: PeriodUsage) -> PeriodUsage {
+        func selectedSummary(
+            lhsTokens: Int,
+            lhsSummary: TokenUsageSummary,
+            rhsTokens: Int,
+            rhsSummary: TokenUsageSummary
+        ) -> TokenUsageSummary {
+            if lhsTokens >= rhsTokens {
+                return lhsSummary.totalTokens == lhsTokens
+                    ? lhsSummary
+                    : .unpriced(totalTokens: lhsTokens)
+            }
+            return rhsSummary.totalTokens == rhsTokens
+                ? rhsSummary
+                : .unpriced(totalTokens: rhsTokens)
+        }
+
+        return PeriodUsage(
+            day: max(lhs.day, rhs.day),
+            week: max(lhs.week, rhs.week),
+            month: max(lhs.month, rhs.month),
+            today: max(lhs.today, rhs.today),
+            daySummary: selectedSummary(
+                lhsTokens: lhs.day,
+                lhsSummary: lhs.daySummary,
+                rhsTokens: rhs.day,
+                rhsSummary: rhs.daySummary
+            ),
+            weekSummary: selectedSummary(
+                lhsTokens: lhs.week,
+                lhsSummary: lhs.weekSummary,
+                rhsTokens: rhs.week,
+                rhsSummary: rhs.weekSummary
+            ),
+            monthSummary: selectedSummary(
+                lhsTokens: lhs.month,
+                lhsSummary: lhs.monthSummary,
+                rhsTokens: rhs.month,
+                rhsSummary: rhs.monthSummary
+            ),
+            todaySummary: selectedSummary(
+                lhsTokens: lhs.today,
+                lhsSummary: lhs.todaySummary,
+                rhsTokens: rhs.today,
+                rhsSummary: rhs.todaySummary
+            )
+        )
+    }
+
+    private func cachedPeriodUsage(now: Date, signature: StoreSignature) -> PeriodUsage? {
+        cacheLock.lock()
+        let cache = periodUsageCache
+        cacheLock.unlock()
+
+        guard let cache,
+              cache.signature == signature,
+              calendar.isDate(cache.createdAt, inSameDayAs: now),
+              now.timeIntervalSince(cache.createdAt) < UsageScanPolicy.periodUsageCacheTTL else {
+            return nil
+        }
+        return cache.usage
+    }
+
+    private func cachePeriodUsage(_ usage: PeriodUsage, signature: StoreSignature, now: Date) {
+        cacheLock.lock()
+        periodUsageCache = PeriodUsageCache(createdAt: now, signature: signature, usage: usage)
+        cacheLock.unlock()
+    }
+
+    private func loadPeriodUsageFromLogs(now: Date) throws -> PeriodUsage {
+        let oldest = Int(now.timeIntervalSince1970) - (30 * 24 * 60 * 60)
+        let query = """
+        select ts, feedback_log_body
+        from logs
+        where target = 'codex_otel.trace_safe'
+          and feedback_log_body like '%event.kind=response.completed%'
+          and feedback_log_body like '%tool_token_count=%'
+          and ts >= \(oldest)
+        order by ts desc;
+        """
+
+        let records = try Shell.sqliteJSON(database: logsDatabase, query: query, as: [UsageLogRecord].self)
+        let dayStart = Int(now.timeIntervalSince1970) - (24 * 60 * 60)
+        let todayStart = Int(localDayStart(for: now).timeIntervalSince1970)
+        let weekStart = Int(now.timeIntervalSince1970) - (7 * 24 * 60 * 60)
+
+        var today = 0
+        var day = 0
+        var week = 0
+        var month = 0
+
+        for record in records {
+            guard let tokens = extractTokenCount(from: record.feedbackLogBody) else {
+                continue
+            }
+            month += tokens
+            if record.ts >= todayStart {
+                today += tokens
+            }
+            if record.ts >= weekStart {
+                week += tokens
+            }
+            if record.ts >= dayStart {
+                day += tokens
+            }
+        }
+
+        return PeriodUsage(
+            day: day,
+            week: week,
+            month: month,
+            today: today,
+            daySummary: .unpriced(totalTokens: day),
+            weekSummary: .unpriced(totalTokens: week),
+            monthSummary: .unpriced(totalTokens: month),
+            todaySummary: .unpriced(totalTokens: today)
+        )
+    }
+
+    private func loadPeriodUsageFromRollouts(
+        now: Date,
+        threads: [ThreadRecord],
+        isCancelled: @Sendable () -> Bool
+    ) -> PeriodUsage? {
+        let dayStart = now.addingTimeInterval(-24 * 60 * 60)
+        let todayStart = localDayStart(for: now)
+        let weekStart = now.addingTimeInterval(-7 * 24 * 60 * 60)
+        let monthStart = now.addingTimeInterval(-30 * 24 * 60 * 60)
+
+        var today = 0
+        var day = 0
+        var week = 0
+        var month = 0
+        var todaySummary = TokenUsageSummary.zero
+        var daySummary = TokenUsageSummary.zero
+        var weekSummary = TokenUsageSummary.zero
+        var monthSummary = TokenUsageSummary.zero
+
+        func add(summary: TokenUsageSummary, date: Date) {
+            guard summary.totalTokens > 0, date >= monthStart else {
+                return
+            }
+
+            month += summary.totalTokens
+            monthSummary.add(summary)
+            if date >= todayStart {
+                today += summary.totalTokens
+                todaySummary.add(summary)
+            }
+            if date >= weekStart {
+                week += summary.totalTokens
+                weekSummary.add(summary)
+            }
+            if date >= dayStart {
+                day += summary.totalTokens
+                daySummary.add(summary)
+            }
+        }
+
+        func add(tokens: Int, model: String?, date: Date) {
+            add(summary: .unpriced(totalTokens: tokens, model: model), date: date)
+        }
+
+        var recordsByPath: [String: ThreadRecord] = [:]
+        for thread in threads where !thread.rolloutPath.isEmpty {
+            if let existing = recordsByPath[thread.rolloutPath] {
+                recordsByPath[thread.rolloutPath] = mergeThreadRecord(existing, with: thread)
+            } else {
+                recordsByPath[thread.rolloutPath] = thread
+            }
+        }
+
+        let mainPaths = recordsByPath.values.compactMap { thread -> String? in
+            guard sessionMeta(from: thread.rolloutPath)?.isSubagent != true else {
+                return nil
+            }
+            return thread.rolloutPath
+        }.sorted()
+
+        if let mainUsage = loadPeriodUsageWithRipgrep(
+            now: now,
+            paths: mainPaths,
+            isCancelled: isCancelled
+        ) {
+            today = mainUsage.today
+            day = mainUsage.day
+            week = mainUsage.week
+            month = mainUsage.month
+            todaySummary = mainUsage.todaySummary
+            daySummary = mainUsage.daySummary
+            weekSummary = mainUsage.weekSummary
+            monthSummary = mainUsage.monthSummary
+
+            for thread in recordsByPath.values where sessionMeta(from: thread.rolloutPath)?.isSubagent == true {
+                guard !isCancelled() else {
+                    return nil
+                }
+                if let scanned = loadPeriodUsageFromRolloutTail(
+                    now: now,
+                    path: thread.rolloutPath,
+                    resetOnWorldState: true,
+                    initialModel: thread.model
+                ) {
+                    today += scanned.today
+                    day += scanned.day
+                    week += scanned.week
+                    month += scanned.month
+                    todaySummary.add(scanned.todaySummary)
+                    daySummary.add(scanned.daySummary)
+                    weekSummary.add(scanned.weekSummary)
+                    monthSummary.add(scanned.monthSummary)
+                } else {
+                    add(
+                        tokens: thread.tokensUsed,
+                        model: thread.model,
+                        date: Date(timeIntervalSince1970: TimeInterval(thread.updatedAt))
+                    )
+                }
+            }
+            return PeriodUsage(
+                day: day,
+                week: week,
+                month: month,
+                today: today,
+                daySummary: daySummary,
+                weekSummary: weekSummary,
+                monthSummary: monthSummary,
+                todaySummary: todaySummary
+            )
+        }
+
+        guard !isCancelled() else {
+            return nil
+        }
+
+        for thread in recordsByPath.values {
+            guard !isCancelled() else {
+                return nil
+            }
+            let signature = fileSignature(thread.rolloutPath)
+            if signature.exists {
+                if let scanned = loadPeriodUsageFromRolloutTail(
+                    now: now,
+                    path: thread.rolloutPath,
+                    resetOnWorldState: sessionMeta(from: thread.rolloutPath)?.isSubagent == true,
+                    initialModel: thread.model
+                ) {
+                    today += scanned.today
+                    day += scanned.day
+                    week += scanned.week
+                    month += scanned.month
+                    todaySummary.add(scanned.todaySummary)
+                    daySummary.add(scanned.daySummary)
+                    weekSummary.add(scanned.weekSummary)
+                    monthSummary.add(scanned.monthSummary)
+                }
+                continue
+            }
+
+            if thread.tokensUsed > 0 {
+                add(
+                    tokens: thread.tokensUsed,
+                    model: thread.model,
+                    date: Date(timeIntervalSince1970: TimeInterval(thread.updatedAt))
+                )
+            }
+        }
+
+        return PeriodUsage(
+            day: day,
+            week: week,
+            month: month,
+            today: today,
+            daySummary: daySummary,
+            weekSummary: weekSummary,
+            monthSummary: monthSummary,
+            todaySummary: todaySummary
+        )
+    }
+
+    private func loadPeriodUsageFromRolloutTail(
+        now: Date,
+        path: String,
+        resetOnWorldState: Bool = false,
+        initialModel: String? = nil
+    ) -> PeriodUsage? {
+        let signature = fileSignature(path)
+        guard signature.exists else {
+            return nil
+        }
+        let cacheKey = PeriodUsageTailCacheKey(
+            path: path,
+            resetOnWorldState: resetOnWorldState,
+            initialModel: initialModel
+        )
+
+        cacheLock.lock()
+        let cached = periodUsageTailCache[cacheKey]
+        cacheLock.unlock()
+        if let cached, cached.signature == signature {
+            return cached.value.map { periodUsage(from: $0, now: now) }
+        }
+
+        guard let tailEvents = usageEvents(
+            from: path,
+            lineLimit: UsageScanPolicy.periodUsageTailLineLimit,
+            resetOnWorldState: resetOnWorldState
+        ) else {
+            return nil
+        }
+
+        var events: [PeriodUsageEvent] = []
+        var currentModel = initialModel ?? sessionRuntimeInfo(from: path)?.model
+
+        for tailEvent in tailEvents {
+            switch tailEvent {
+            case .worldState:
+                if resetOnWorldState {
+                    events.removeAll(keepingCapacity: true)
+                    currentModel = nil
+                }
+            case .turnContext(let model):
+                if let model {
+                    currentModel = model
+                }
+            case .tokenCount(let timestampPrefix, let tokenUsage):
+                var summary = TokenUsageSummary.zero
+                summary.add(tokenUsage, model: currentModel)
+                events.append(
+                    PeriodUsageEvent(
+                        timestampPrefix: timestampPrefix,
+                        summary: summary
+                    )
+                )
+            }
+        }
+
+        cacheLock.lock()
+        periodUsageTailCache[cacheKey] = FileValueCache(signature: signature, value: events)
+        if periodUsageTailCache.count > UsageScanPolicy.periodUsageTailCacheCapacity {
+            let retainedKeys = Set(
+                periodUsageTailCache.keys
+                    .sorted { lhs, rhs in
+                        (periodUsageTailCache[lhs]?.signature.modifiedAt ?? 0)
+                            > (periodUsageTailCache[rhs]?.signature.modifiedAt ?? 0)
+                    }
+                    .prefix(UsageScanPolicy.periodUsageTailCacheCapacity)
+            )
+            periodUsageTailCache = periodUsageTailCache.filter { retainedKeys.contains($0.key) }
+        }
+        cacheLock.unlock()
+        return periodUsage(from: events, now: now)
+    }
+
+    private func periodUsage(from events: [PeriodUsageEvent], now: Date) -> PeriodUsage {
+        let dayCutoff = timestampSecondPrefix(for: now.addingTimeInterval(-24 * 60 * 60))
+        let todayCutoff = timestampSecondPrefix(for: localDayStart(for: now))
+        let weekCutoff = timestampSecondPrefix(for: now.addingTimeInterval(-7 * 24 * 60 * 60))
+        let monthCutoff = timestampSecondPrefix(for: now.addingTimeInterval(-30 * 24 * 60 * 60))
+        var usage = PeriodUsage.zero
+
+        for event in events where event.timestampPrefix >= monthCutoff {
+            usage.monthSummary.add(event.summary)
+            if event.timestampPrefix >= weekCutoff {
+                usage.weekSummary.add(event.summary)
+            }
+            if event.timestampPrefix >= dayCutoff {
+                usage.daySummary.add(event.summary)
+            }
+            if event.timestampPrefix >= todayCutoff {
+                usage.todaySummary.add(event.summary)
+            }
+        }
+
+        usage.day = usage.daySummary.totalTokens
+        usage.week = usage.weekSummary.totalTokens
+        usage.month = usage.monthSummary.totalTokens
+        usage.today = usage.todaySummary.totalTokens
+        return usage
+    }
+
+    private func loadPeriodUsageWithRipgrep(
+        now: Date,
+        paths: [String],
+        isCancelled: @Sendable () -> Bool = { false }
+    ) -> PeriodUsage? {
+        guard let executable = ripgrepExecutable(),
+              !paths.isEmpty,
+              !isCancelled() else {
+            return nil
+        }
+
+        let buckets = Dictionary(grouping: paths, by: periodUsageBucket(for:))
+        var staleBuckets: [Int: [String]] = [:]
+        var bucketSignatures: [Int: StoreSignature] = [:]
+
+        cacheLock.lock()
+        for bucket in buckets.keys.sorted() {
+            guard let bucketPaths = buckets[bucket] else {
+                continue
+            }
+            let sortedPaths = bucketPaths.sorted()
+            let signature = StoreSignature(
+                files: sortedPaths.map(fileSignature).sorted { $0.path < $1.path }
+            )
+            bucketSignatures[bucket] = signature
+
+            if periodUsageBatchCache[bucket]?.signature != signature {
+                staleBuckets[bucket] = sortedPaths
+            }
+        }
+        periodUsageBatchCache = periodUsageBatchCache.filter { buckets[$0.key] != nil }
+        cacheLock.unlock()
+
+        if !staleBuckets.isEmpty {
+            guard let refreshedEvents = periodUsageEvents(
+                executable: executable,
+                buckets: staleBuckets,
+                isCancelled: isCancelled
+            ) else {
+                return nil
+            }
+
+            cacheLock.lock()
+            for bucket in staleBuckets.keys.sorted() {
+                let bucketEvents = refreshedEvents[bucket] ?? []
+                if let signature = bucketSignatures[bucket] {
+                    periodUsageBatchCache[bucket] = PeriodUsageBatchCache(
+                        signature: signature,
+                        events: bucketEvents
+                    )
+                }
+            }
+            cacheLock.unlock()
+        }
+
+        cacheLock.lock()
+        let currentBatches = periodUsageBatchCache
+        cacheLock.unlock()
+
+        let dayCutoff = timestampSecondPrefix(for: now.addingTimeInterval(-24 * 60 * 60))
+        let todayCutoff = timestampSecondPrefix(for: localDayStart(for: now))
+        let weekCutoff = timestampSecondPrefix(for: now.addingTimeInterval(-7 * 24 * 60 * 60))
+        let monthCutoff = timestampSecondPrefix(for: now.addingTimeInterval(-30 * 24 * 60 * 60))
+
+        var todaySummary = TokenUsageSummary.zero
+        var daySummary = TokenUsageSummary.zero
+        var weekSummary = TokenUsageSummary.zero
+        var monthSummary = TokenUsageSummary.zero
+
+        for bucket in buckets.keys.sorted() {
+            guard let batch = currentBatches[bucket] else {
+                continue
+            }
+            for event in batch.events {
+                guard event.timestampPrefix >= monthCutoff else {
+                    continue
+                }
+
+                monthSummary.add(event.summary)
+                if event.timestampPrefix >= todayCutoff {
+                    todaySummary.add(event.summary)
+                }
+                if event.timestampPrefix >= weekCutoff {
+                    weekSummary.add(event.summary)
+                }
+                if event.timestampPrefix >= dayCutoff {
+                    daySummary.add(event.summary)
+                }
+            }
+        }
+
+        return PeriodUsage(
+            day: daySummary.totalTokens,
+            week: weekSummary.totalTokens,
+            month: monthSummary.totalTokens,
+            today: todaySummary.totalTokens,
+            daySummary: daySummary,
+            weekSummary: weekSummary,
+            monthSummary: monthSummary,
+            todaySummary: todaySummary
+        )
+    }
+
+    private func localDayStart(for date: Date) -> Date {
+        calendar.startOfDay(for: date)
+    }
+
+    private func periodUsageEvents(
+        executable: String,
+        buckets: [Int: [String]],
+        isCancelled: @Sendable () -> Bool
+    ) -> [Int: [PeriodUsageEvent]]? {
+        let arguments = buckets.keys.sorted().flatMap { bucket -> [String] in
+            ["__CODEX_NOTCH_BUCKET_\(bucket)"] + (buckets[bucket] ?? [])
+        }
+        guard let output = runRipgrepTokenSearch(
+            executable: executable,
+            paths: arguments,
+            isCancelled: isCancelled
+        ) else {
+            return nil
+        }
+
+        var eventsByBucket: [Int: [PeriodUsageEvent]] = [:]
+        var currentBucket: Int?
+        var currentEvents: [PeriodUsageEvent] = []
+        var currentModel: String?
+        let markerPrefix = "{\"__codex_notch_bucket\":"
+        let fileMarker = "{\"__codex_notch_file\":true}"
+
+        func flushCurrentBucket() {
+            guard let currentBucket else {
+                return
+            }
+            eventsByBucket[currentBucket] = currentEvents
+            currentEvents = []
+        }
+
+        for rawLine in output.split(separator: "\n", omittingEmptySubsequences: true) {
+            guard !isCancelled() else {
+                return nil
+            }
+            if rawLine.hasPrefix(markerPrefix) {
+                flushCurrentBucket()
+                let value = rawLine
+                    .dropFirst(markerPrefix.count)
+                    .prefix(while: { $0.isNumber })
+                currentBucket = Int(value)
+                currentModel = nil
+                continue
+            }
+
+            if rawLine.hasPrefix(fileMarker) {
+                currentModel = nil
+                continue
+            }
+
+            guard currentBucket != nil,
+                  let jsonStart = rawLine.firstIndex(of: "{") else {
+                continue
+            }
+            let line = String(rawLine[jsonStart...])
+            if let model = sessionDecoder.turnContextModel(from: line) {
+                currentModel = model
+                continue
+            }
+            guard let event = sessionDecoder.tokenUsageRecord(from: line) else {
+                continue
+            }
+            var summary = TokenUsageSummary.zero
+            summary.add(event.usage, model: currentModel)
+            currentEvents.append(
+                PeriodUsageEvent(
+                    timestampPrefix: event.timestampPrefix,
+                    summary: summary
+                )
+            )
+        }
+        flushCurrentBucket()
+        return eventsByBucket
+    }
+
+    private func periodUsageBucket(for path: String) -> Int {
+        var hash: UInt64 = 14_695_981_039_346_656_037
+        for byte in path.utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 1_099_511_628_211
+        }
+        return Int(hash % UInt64(UsageScanPolicy.periodUsageBucketCount))
+    }
+
+    private func runRipgrepTokenSearch(
+        executable: String,
+        paths: [String],
+        isCancelled: @Sendable () -> Bool
+    ) -> String? {
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-notch-token-lines-\(UUID().uuidString).txt")
+        defer {
+            try? FileManager.default.removeItem(at: outputURL)
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        process.arguments = [
+            "-c",
+            """
+            rg="$1"
+            out="$2"
+            bytes="$3"
+            shift 3
+            {
+              for path in "$@"; do
+                case "$path" in
+                  __CODEX_NOTCH_BUCKET_*)
+                    bucket="${path#__CODEX_NOTCH_BUCKET_}"
+                    printf '{"__codex_notch_bucket":%s,"token_count":false}\\n' "$bucket"
+                    ;;
+                  *)
+                    printf '{"__codex_notch_file":true}\\n'
+                    /usr/bin/tail -c "$bytes" -- "$path"
+                    printf '\\n'
+                    ;;
+                esac
+              done
+            } | "$rg" --fixed-strings --no-heading --color never \\
+                -e '"token_count"' -e '"turn_context"' \\
+                -e '"__codex_notch_bucket"' -e '"__codex_notch_file"' > "$out"
+            rg_status=$?
+            if [ "$rg_status" -eq 1 ]; then
+              exit 0
+            fi
+            exit "$rg_status"
+            """,
+            "codex-notch-token-search",
+            executable,
+            outputURL.path,
+            String(UsageScanPolicy.periodUsageTailLineLimit * Int(UsageScanPolicy.estimatedTokenLineBytes))
+        ] + paths
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+
+        do {
+            try process.run()
+        } catch {
+            return nil
+        }
+
+        let completed = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .utility).async {
+            process.waitUntilExit()
+            completed.signal()
+        }
+
+        let deadline = DispatchTime.now() + UsageScanPolicy.ripgrepTimeout
+        var didComplete = false
+        while !didComplete, !isCancelled(), DispatchTime.now() < deadline {
+            didComplete = completed.wait(timeout: .now() + .milliseconds(100)) == .success
+        }
+        if !didComplete {
+            Shell.terminateProcessTree(rootPID: process.processIdentifier, signal: SIGTERM)
+            if completed.wait(timeout: .now() + .milliseconds(200)) == .timedOut {
+                Shell.terminateProcessTree(rootPID: process.processIdentifier, signal: SIGKILL)
+                _ = completed.wait(timeout: .now() + .milliseconds(300))
+            }
+            return nil
+        }
+
+        guard let data = try? Data(contentsOf: outputURL) else {
+            return nil
+        }
+
+        if !data.isEmpty {
+            return String(decoding: data, as: UTF8.self)
+        }
+
+        guard process.terminationStatus == 0 else {
+            return nil
+        }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    private func ripgrepExecutable() -> String? {
+        ripgrepCandidates.first { FileManager.default.isExecutableFile(atPath: $0) }
+    }
+
+    private func loadActiveThreadIDs(now: Date) throws -> Set<String> {
+        let since = Int(now.timeIntervalSince1970) - UsageScanPolicy.runningActivityWindow
+        let records: [ActivityRecord]
+        do {
+            records = try Shell.sqliteJSON(
+                database: logsDatabase,
+                query: activeThreadActivityQuery(since: since, indexedByTimestamp: true),
+                as: [ActivityRecord].self
+            )
+        } catch {
+            records = try Shell.sqliteJSON(
+                database: logsDatabase,
+                query: activeThreadActivityQuery(since: since, indexedByTimestamp: false),
+                as: [ActivityRecord].self
+            )
+        }
+        let nowEpoch = Int(now.timeIntervalSince1970)
+
+        return Set(records.compactMap { record in
+            guard let threadId = record.threadId, !threadId.isEmpty else {
+                return nil
+            }
+            let activity = record.latestActivity ?? 0
+            let done = record.latestDone ?? 0
+            if activity > done && nowEpoch - activity < UsageScanPolicy.runningActivityWindow {
+                return threadId
+            }
+            if activity > 0 && activity >= done && nowEpoch - activity < 20 {
+                return threadId
+            }
+            return nil
+        })
+    }
+
+    private func activeThreadActivityQuery(since: Int, indexedByTimestamp: Bool) -> String {
+        let table = indexedByTimestamp ? "logs indexed by idx_logs_ts" : "logs"
+        let activityCondition = """
+        feedback_log_body like '%response.output_item.added%'
+              or feedback_log_body like '%response.output_text.delta%'
+              or feedback_log_body like '%"type":"task_started"%'
+              or feedback_log_body like '%"type": "task_started"%'
+              or feedback_log_body like '%"status":"in_progress"%'
+        """
+        let completionCondition = """
+        feedback_log_body like '%"phase":"final_answer"%'
+              or feedback_log_body like '%"phase":"final"%'
+              or feedback_log_body like '%"phase": "final_answer"%'
+              or feedback_log_body like '%"phase": "final"%'
+              or feedback_log_body like '%"type":"task_complete"%'
+              or feedback_log_body like '%"type": "task_complete"%'
+              or feedback_log_body like '%"type":"task_completed"%'
+              or feedback_log_body like '%"type": "task_completed"%'
+              or feedback_log_body like '%"type":"task_stopped"%'
+              or feedback_log_body like '%"type": "task_stopped"%'
+              or feedback_log_body like '%"type":"task_failed"%'
+              or feedback_log_body like '%"type": "task_failed"%'
+              or feedback_log_body like '%"type":"task_cancelled"%'
+              or feedback_log_body like '%"type": "task_cancelled"%'
+              or feedback_log_body like '%"type":"turn_complete"%'
+              or feedback_log_body like '%"type": "turn_complete"%'
+              or feedback_log_body like '%"type":"turn_completed"%'
+              or feedback_log_body like '%"type": "turn_completed"%'
+              or feedback_log_body like '%"type":"turn_aborted"%'
+              or feedback_log_body like '%"type": "turn_aborted"%'
+              or feedback_log_body like '%"type":"turn_failed"%'
+              or feedback_log_body like '%"type": "turn_failed"%'
+              or feedback_log_body like '%"type":"turn_cancelled"%'
+              or feedback_log_body like '%"type": "turn_cancelled"%'
+        """
+
+        return """
+        select
+          thread_id,
+          max(case when \(activityCondition) then ts else 0 end) as latest_activity,
+          max(case when \(completionCondition) then ts else 0 end) as latest_done
+        from \(table)
+        where thread_id is not null
+          and ts >= \(since)
+          and (
+            \(activityCondition)
+            or \(completionCondition)
+          )
+        group by thread_id;
+        """
+    }
+
+    private func buildTasks(from threads: [ThreadRecord], activeThreadIDs: Set<String>, now: Date) -> [CodexTask] {
+        let tasks = threads.map { thread -> CodexTask in
+            let updatedAt = Date(timeIntervalSince1970: TimeInterval(thread.updatedAt))
+            let status: TaskStatus = activeThreadIDs.contains(thread.id) ? .running : .recent
+            let model = thread.model ?? "模型未知"
+            let effort = localizedEffort(thread.reasoningEffort)
+            let detailPrefix = "\(model) · \(effort)"
+            let tokenUsage = taskTokenUsage(for: thread, isRunning: status == .running)
+
+            return CodexTask(
+                id: thread.id,
+                title: Formatters.shortTitle(thread.title),
+                status: status,
+                detailPrefix: detailPrefix,
+                tokenCount: max(thread.tokensUsed, tokenUsage.totalTokens),
+                tokenUsage: tokenUsage,
+                updatedAt: updatedAt,
+                activeSubagentCount: thread.activeSubagentCount
+            )
+        }
+
+        let running = tasks.filter { $0.status == .running }
+        if !running.isEmpty {
+            return running + tasks.filter { $0.status != .running }
+        }
+        return tasks
+    }
+
+    private func taskTokenUsage(for thread: ThreadRecord, isRunning: Bool) -> TokenUsageSummary {
+        if var summary = thread.tokenUsage {
+            if summary.totalTokens < thread.tokensUsed {
+                summary.addUnpricedTokens(thread.tokensUsed - summary.totalTokens, model: thread.model)
+            }
+            return summary
+        }
+
+        let signature = fileSignature(thread.rolloutPath)
+        if signature.exists,
+           (isRunning || signature.size <= UsageScanPolicy.largeSessionTokenScanLimit),
+           var summary = sessionTokenUsageSummary(from: thread.rolloutPath) {
+            if summary.totalTokens < thread.tokensUsed {
+                summary.addUnpricedTokens(thread.tokensUsed - summary.totalTokens, model: thread.model)
+            }
+            return summary
+        }
+
+        return .unpriced(totalTokens: thread.tokensUsed, model: thread.model)
+    }
+
+    private func sessionLooksActive(path: String, fallbackUpdatedAt: Int, now: Date) -> Bool {
+        guard !path.isEmpty else {
+            return false
+        }
+
+        let nowEpoch = Int(now.timeIntervalSince1970)
+        guard nowEpoch - fallbackUpdatedAt < UsageScanPolicy.runningActivityWindow else {
+            return false
+        }
+
+        guard let activityInfo = sessionActivityInfo(from: path) else {
+            return nowEpoch - fallbackUpdatedAt < 12
+        }
+
+        if let latestActivity = activityInfo.latestActivity {
+            let done = activityInfo.latestDone ?? .distantPast
+            if latestActivity > done,
+               now.timeIntervalSince(latestActivity) < TimeInterval(UsageScanPolicy.runningActivityWindow) {
+                return true
+            }
+            if now.timeIntervalSince(latestActivity) < 12,
+               activityInfo.latestDone == nil {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    private func sessionActivityInfo(from path: String) -> SessionActivityInfo? {
+        cachedFileValue(
+            path: path,
+            cached: { sessionActivityCache[path] },
+            store: { sessionActivityCache[path] = $0 }
+        ) {
+            parseSessionActivityInfo(from: path)
+        }
+    }
+
+    private func parseSessionActivityInfo(from path: String) -> SessionActivityInfo? {
+        guard let text = fileSuffix(from: path, maxBytes: 256 * 1024) else {
+            return nil
+        }
+        return sessionDecoder.activityInfo(from: text)
+    }
+
+    private func sessionTitle(from path: String) -> String? {
+        cachedFileValue(
+            path: path,
+            cached: { sessionTitleCache[path] },
+            store: { sessionTitleCache[path] = $0 }
+        ) {
+            parseSessionTitle(from: path)
+        }
+    }
+
+    private func parseSessionTitle(from path: String) -> String? {
+        guard let text = filePrefix(from: path, maxBytes: 256 * 1024) else {
+            return nil
+        }
+        return sessionDecoder.title(from: text)
+    }
+
+    private func sessionID(from path: String) -> String? {
+        let name = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
+        let pieces = name.split { character in
+            character == "-" || character == "_"
+        }
+        guard pieces.count >= 5 else {
+            return nil
+        }
+
+        let hex = CharacterSet(charactersIn: "0123456789abcdefABCDEF")
+        for start in 0...(pieces.count - 5) {
+            let idPieces = pieces[start..<(start + 5)].map(String.init)
+            guard idPieces.map(\.count) == [8, 4, 4, 4, 12],
+                  idPieces.joined().unicodeScalars.allSatisfy({ hex.contains($0) }) else {
+                continue
+            }
+            return idPieces.joined(separator: "-").lowercased()
+        }
+
+        return nil
+    }
+
+    private func sessionTokenTotal(from path: String) -> Int? {
+        let signature = fileSignature(path)
+        guard signature.exists else {
+            return nil
+        }
+
+        let isSubagent = sessionMeta(from: path)?.isSubagent == true
+
+        cacheLock.lock()
+        if let cached = sessionTokenTotalCache[path],
+           cached.signature == signature {
+            cacheLock.unlock()
+            return cached.foundTokenEvent ? cached.tokens : nil
+        }
+
+        let cached = sessionTokenTotalCache[path]
+        cacheLock.unlock()
+
+        let scanStart: UInt64
+        let initialTotal: Int
+        let initialSummary: TokenUsageSummary
+        let initialModel: String?
+        let initialPendingLine: String
+        let hadTokenEvent: Bool
+        if let cached,
+           cached.bytesScanned < signature.size,
+           cached.signature.modifiedAt <= signature.modifiedAt {
+            scanStart = cached.bytesScanned
+            initialTotal = cached.tokens
+            initialSummary = cached.summary
+            initialModel = cached.currentModel
+            initialPendingLine = cached.pendingLine
+            hadTokenEvent = cached.foundTokenEvent
+        } else {
+            scanStart = isSubagent
+                ? (lastWorldStateLineOffset(in: path, endingAt: signature.size) ?? 0)
+                : 0
+            initialTotal = 0
+            initialSummary = .zero
+            initialModel = sessionRuntimeInfo(from: path)?.model
+            initialPendingLine = ""
+            hadTokenEvent = false
+        }
+
+        guard let scan = scanSessionTokenTotal(
+            from: path,
+            startingAt: scanStart,
+            endingAt: signature.size,
+            initialTotal: initialTotal,
+            initialSummary: initialSummary,
+            initialModel: initialModel,
+            initialPendingLine: initialPendingLine,
+            hadTokenEvent: hadTokenEvent,
+            resetOnWorldState: isSubagent
+        ) else {
+            return nil
+        }
+
+        cacheLock.lock()
+        sessionTokenTotalCache[path] = SessionTokenTotalCache(
+            signature: signature,
+            bytesScanned: scan.bytesScanned,
+            tokens: scan.tokens,
+            summary: scan.summary,
+            currentModel: scan.currentModel,
+            pendingLine: scan.pendingLine,
+            foundTokenEvent: scan.foundTokenEvent
+        )
+        cacheLock.unlock()
+        return scan.foundTokenEvent ? scan.tokens : nil
+    }
+
+    private func sessionTokenUsageSummary(from path: String) -> TokenUsageSummary? {
+        guard sessionTokenTotal(from: path) != nil else {
+            return nil
+        }
+        cacheLock.lock()
+        let summary = sessionTokenTotalCache[path]?.summary
+        cacheLock.unlock()
+        return summary
+    }
+
+    private func scanSessionTokenTotal(
+        from path: String,
+        startingAt: UInt64 = 0,
+        endingAt: UInt64,
+        initialTotal: Int = 0,
+        initialSummary: TokenUsageSummary = .zero,
+        initialModel: String? = nil,
+        initialPendingLine: String = "",
+        hadTokenEvent: Bool = false,
+        resetOnWorldState: Bool = false
+    ) -> SessionTokenScanResult? {
+        guard FileManager.default.fileExists(atPath: path),
+              let handle = try? FileHandle(forReadingFrom: URL(fileURLWithPath: path)) else {
+            return nil
+        }
+        defer {
+            try? handle.close()
+        }
+
+        guard startingAt <= endingAt else {
+            return nil
+        }
+
+        do {
+            try handle.seek(toOffset: startingAt)
+        } catch {
+            return nil
+        }
+
+        var pending = initialPendingLine
+        var total = initialTotal
+        var summary = initialSummary
+        var currentModel = initialModel
+        var foundTokenEvent = hadTokenEvent
+        var bytesScanned = startingAt
+
+        while bytesScanned < endingAt {
+            let data: Data
+            do {
+                let remaining = endingAt - bytesScanned
+                let chunkSize = Int(min(UInt64(1024 * 1024), remaining))
+                data = try handle.read(upToCount: chunkSize) ?? Data()
+            } catch {
+                return nil
+            }
+            if data.isEmpty {
+                break
+            }
+            bytesScanned += UInt64(data.count)
+
+            pending += String(decoding: data, as: UTF8.self)
+            let lines = pending.split(separator: "\n", omittingEmptySubsequences: false)
+            guard let lastLine = lines.last else {
+                continue
+            }
+            pending = String(lastLine)
+
+            for rawLine in lines.dropLast() {
+                let line = String(rawLine)
+                if resetOnWorldState,
+                   sessionDecoder.isWorldStateLine(line) {
+                    total = 0
+                    summary = .zero
+                    currentModel = nil
+                    foundTokenEvent = false
+                    continue
+                }
+                if let model = sessionDecoder.turnContextModel(from: line) {
+                    currentModel = model
+                    continue
+                }
+                guard line.contains(#""token_count""#),
+                      let event = sessionDecoder.tokenUsageRecord(from: line) else {
+                    continue
+                }
+                total += event.tokens
+                summary.add(event.usage, model: currentModel)
+                foundTokenEvent = true
+            }
+        }
+
+        if resetOnWorldState,
+           sessionDecoder.isWorldStateLine(pending) {
+            total = 0
+            summary = .zero
+            currentModel = nil
+            foundTokenEvent = false
+            pending = ""
+        } else if let model = sessionDecoder.turnContextModel(from: pending) {
+            currentModel = model
+            pending = ""
+        } else if pending.contains(#""token_count""#),
+                  let event = sessionDecoder.tokenUsageRecord(from: pending) {
+            total += event.tokens
+            summary.add(event.usage, model: currentModel)
+            pending = ""
+            foundTokenEvent = true
+        }
+
+        return SessionTokenScanResult(
+            bytesScanned: bytesScanned,
+            tokens: total,
+            summary: summary,
+            currentModel: currentModel,
+            pendingLine: pending,
+            foundTokenEvent: foundTokenEvent
+        )
+    }
+
+    private func lastWorldStateLineOffset(in path: String, endingAt: UInt64) -> UInt64? {
+        guard endingAt > 0,
+              let handle = try? FileHandle(forReadingFrom: URL(fileURLWithPath: path)) else {
+            return nil
+        }
+        defer {
+            try? handle.close()
+        }
+
+        let maximumBytes = min(endingAt, UsageScanPolicy.largeSessionTokenScanLimit)
+        var suffixBytes = min(maximumBytes, UInt64(1024 * 1024))
+
+        while suffixBytes > 0 {
+            let suffixStart = endingAt - suffixBytes
+            let data: Data
+            do {
+                try handle.seek(toOffset: suffixStart)
+                data = try handle.readToEnd() ?? Data()
+            } catch {
+                return nil
+            }
+
+            var lineStart = data.startIndex
+            var lastOffset: UInt64?
+
+            for index in data.indices where data[index] == 0x0A {
+                let lineData = data[lineStart..<index]
+                let line = String(decoding: lineData, as: UTF8.self)
+                if sessionDecoder.isWorldStateLine(line) {
+                    lastOffset = suffixStart + UInt64(lineStart)
+                }
+                lineStart = data.index(after: index)
+            }
+
+            if lineStart < data.endIndex {
+                let line = String(decoding: data[lineStart..<data.endIndex], as: UTF8.self)
+                if sessionDecoder.isWorldStateLine(line) {
+                    lastOffset = suffixStart + UInt64(lineStart)
+                }
+            }
+
+            if let lastOffset {
+                return lastOffset
+            }
+            guard suffixBytes < maximumBytes else {
+                return nil
+            }
+            suffixBytes = min(maximumBytes, suffixBytes * 2)
+        }
+        return nil
+    }
+
+    private func filePrefix(from path: String, maxBytes: Int) -> String? {
+        guard FileManager.default.fileExists(atPath: path) else {
+            return nil
+        }
+
+        do {
+            let handle = try FileHandle(forReadingFrom: URL(fileURLWithPath: path))
+            defer {
+                try? handle.close()
+            }
+            let data = try handle.read(upToCount: maxBytes) ?? Data()
+            return String(decoding: data, as: UTF8.self)
+        } catch {
+            return nil
+        }
+    }
+
+    private func fileSuffix(from path: String, maxBytes: UInt64) -> String? {
+        guard FileManager.default.fileExists(atPath: path) else {
+            return nil
+        }
+
+        do {
+            let handle = try FileHandle(forReadingFrom: URL(fileURLWithPath: path))
+            defer {
+                try? handle.close()
+            }
+
+            let fileSize = try handle.seekToEnd()
+            let start = fileSize > maxBytes ? fileSize - maxBytes : 0
+            try handle.seek(toOffset: start)
+            let data = try handle.readToEnd() ?? Data()
+            return String(decoding: data, as: UTF8.self)
+        } catch {
+            return nil
+        }
+    }
+
+    private func cachedFileValue<Value>(
+        path: String,
+        cached: () -> FileValueCache<Value>?,
+        store: (FileValueCache<Value>) -> Void,
+        load: () -> Value?
+    ) -> Value? {
+        let signature = fileSignature(path)
+        guard signature.exists else {
+            return nil
+        }
+
+        cacheLock.lock()
+        if let cached = cached(),
+           cached.signature == signature {
+            let value = cached.value
+            cacheLock.unlock()
+            return value
+        }
+        cacheLock.unlock()
+
+        let value = load()
+        cacheLock.lock()
+        store(FileValueCache(signature: signature, value: value))
+        cacheLock.unlock()
+        return value
+    }
+
+    private func sessionMeta(from path: String) -> SessionMetaInfo? {
+        cachedFileValue(
+            path: path,
+            cached: { sessionMetaCache[path] },
+            store: { sessionMetaCache[path] = $0 }
+        ) {
+            parseSessionMeta(from: path)
+        }
+    }
+
+    private func parseSessionMeta(from path: String) -> SessionMetaInfo? {
+        guard let text = filePrefix(from: path, maxBytes: 256 * 1024) else {
+            return nil
+        }
+        return sessionDecoder.meta(from: text)
+    }
+
+    private func sessionRuntimeInfo(from path: String) -> SessionRuntimeInfo? {
+        cachedFileValue(
+            path: path,
+            cached: { sessionRuntimeInfoCache[path] },
+            store: { sessionRuntimeInfoCache[path] = $0 }
+        ) {
+            parseSessionRuntimeInfo(from: path)
+        }
+    }
+
+    private func parseSessionRuntimeInfo(from path: String) -> SessionRuntimeInfo? {
+        guard let text = filePrefix(from: path, maxBytes: 1_024 * 1_024) else {
+            return nil
+        }
+        return sessionDecoder.runtimeInfo(from: text)
+    }
+
+    private func candidateRateLimitPaths(from threads: [ThreadRecord]) -> [String] {
+        var seen = Set<String>()
+        var paths: [String] = []
+        let limit = UsageScanPolicy.rateLimitCandidateLimit
+        let threadPaths = threads
+            .sorted { $0.updatedAt > $1.updatedAt }
+            .prefix(limit)
+            .map(\.rolloutPath)
+
+        for path in threadPaths + recentSessionPaths(limit: limit) {
+            guard !path.isEmpty, seen.insert(path).inserted else {
+                continue
+            }
+            paths.append(path)
+            if paths.count == limit {
+                break
+            }
+        }
+
+        return paths
+    }
+
+    private func recentSessionActivityWatchPaths(limit: Int = UsageScanPolicy.activityWatchFileLimit) -> [String] {
+        let paths = recentTaskSessionPaths(limit: limit)
+        let directories = paths.map { URL(fileURLWithPath: $0).deletingLastPathComponent().path }
+        return paths + directories
+    }
+
+    private func uniqueExistingPaths(_ paths: [String]) -> [String] {
+        var seen = Set<String>()
+        return paths.compactMap { path in
+            guard !path.isEmpty else {
+                return nil
+            }
+            let normalizedPath = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+            guard FileManager.default.fileExists(atPath: normalizedPath),
+                  seen.insert(normalizedPath).inserted else {
+                return nil
+            }
+            return normalizedPath
+        }
+    }
+
+    private func recentTaskSessionPaths(limit: Int) -> [String] {
+        cacheLock.lock()
+        let cachedPaths = recentTaskPathsCache
+        cacheLock.unlock()
+
+        if let cachedPaths,
+           Date().timeIntervalSince(cachedPaths.createdAt) < 5 {
+            return Array(cachedPaths.paths.prefix(limit))
+        }
+
+        let paths = collectRecentSessionPaths(
+            roots: [codexDirectory.appendingPathComponent("sessions")],
+            limit: max(limit, UsageScanPolicy.recentTaskPathCacheCapacity)
+        )
+
+        cacheLock.lock()
+        recentTaskPathsCache = RecentPathsCache(createdAt: Date(), paths: paths)
+        cacheLock.unlock()
+
+        return Array(paths.prefix(limit))
+    }
+
+    private func recentSessionPaths(limit: Int) -> [String] {
+        cacheLock.lock()
+        let cachedPaths = recentPathsCache
+        cacheLock.unlock()
+
+        if let cachedPaths,
+           Date().timeIntervalSince(cachedPaths.createdAt) < 5 {
+            return Array(cachedPaths.paths.prefix(limit))
+        }
+
+        let roots = [
+            codexDirectory.appendingPathComponent("sessions"),
+            codexDirectory.appendingPathComponent("archived_sessions")
+        ]
+
+        let paths = collectRecentSessionPaths(
+            roots: roots,
+            limit: max(limit, UsageScanPolicy.recentRateLimitPathCacheCapacity)
+        )
+
+        cacheLock.lock()
+        recentPathsCache = RecentPathsCache(createdAt: Date(), paths: paths)
+        cacheLock.unlock()
+
+        return Array(paths.prefix(limit))
+    }
+
+    private func sessionPath(for sessionID: String) -> String? {
+        sessionPaths(for: [sessionID.lowercased()])[sessionID.lowercased()]
+    }
+
+    private func sessionPaths(for sessionIDs: Set<String>) -> [String: String] {
+        let normalizedIDs = Set(sessionIDs.map { $0.lowercased() }.filter { !$0.isEmpty })
+        guard !normalizedIDs.isEmpty else {
+            return [:]
+        }
+
+        let roots = [
+            codexDirectory.appendingPathComponent("sessions"),
+            codexDirectory.appendingPathComponent("archived_sessions")
+        ]
+
+        var paths: [String: String] = [:]
+        for path in collectRecentSessionPaths(roots: roots, limit: 1_000) {
+            guard let id = sessionID(from: path)?.lowercased(),
+                  normalizedIDs.contains(id),
+                  paths[id] == nil else {
+                continue
+            }
+            paths[id] = path
+            if paths.count == normalizedIDs.count {
+                break
+            }
+        }
+        return paths
+    }
+
+    private func collectRecentSessionPaths(roots: [URL], limit: Int) -> [String] {
+        var files: [(path: String, modifiedAt: Date)] = []
+        for root in roots {
+            guard let enumerator = FileManager.default.enumerator(
+                at: root,
+                includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            ) else {
+                continue
+            }
+
+            for case let url as URL in enumerator where url.pathExtension == "jsonl" {
+                guard let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .isRegularFileKey]),
+                      values.isRegularFile == true else {
+                    continue
+                }
+                files.append((url.path, values.contentModificationDate ?? .distantPast))
+            }
+        }
+
+        return files
+            .sorted { $0.modifiedAt > $1.modifiedAt }
+            .prefix(limit)
+            .map(\.path)
+    }
+
+    private func localizedEffort(_ effort: String?) -> String {
+        switch effort {
+        case "none":
+            "无推理"
+        case "minimal":
+            "极低推理"
+        case "low":
+            "低推理"
+        case "medium":
+            "中等推理"
+        case "high":
+            "高推理"
+        case "xhigh":
+            "超高推理"
+        case let value? where !value.isEmpty:
+            value
+        default:
+            "推理未知"
+        }
+    }
+
+    private func loadRateLimits(from paths: [String], source: RateLimitSourcePreference, now: Date) -> RateLimitSnapshot {
+        switch source {
+        case .appServerFirst:
+            RateLimitSnapshot.preferringAppServer(
+                appServer: loadAppServerRateLimits(now: now),
+                localFiles: loadLatestRateLimits(from: paths)
+            )
+        case .localFilesOnly:
+            loadLatestRateLimits(from: paths)
+        }
+    }
+
+    private func loadLatestRateLimits(from paths: [String]) -> RateLimitSnapshot {
+        let snapshots = paths
+            .filter { !$0.isEmpty && FileManager.default.fileExists(atPath: $0) }
+            .compactMap { readRateLimitSnapshot(from: $0) }
+        let sparkWindows = mergedSparkQuotaWindows(from: snapshots)
+
+        if let codexSnapshot = snapshots
+            .filter(\.isPrimaryCodexLimit)
+            .max(by: { ($0.capturedAt ?? .distantPast) < ($1.capturedAt ?? .distantPast) }) {
+            var result = codexSnapshot
+            result.sparkWindows = sparkWindows
+            return result
+        }
+
+        let latestNonSparkSnapshot = snapshots
+            .filter {
+                !$0.windows.isEmpty
+                    || $0.primaryPercent != nil
+                    || $0.secondaryPercent != nil
+            }
+            .max(by: { ($0.capturedAt ?? .distantPast) < ($1.capturedAt ?? .distantPast) })
+        if var latestSnapshot = latestNonSparkSnapshot {
+            latestSnapshot.sparkWindows = sparkWindows
+            return latestSnapshot
+        }
+
+        return RateLimitSnapshot(
+            primaryPercent: nil,
+            secondaryPercent: nil,
+            primaryResetsAt: nil,
+            secondaryResetsAt: nil,
+            capturedAt: nil,
+            isPrimaryCodexLimit: false,
+            sparkWindows: sparkWindows
+        )
+    }
+
+    private func mergedSparkQuotaWindows(from snapshots: [RateLimitSnapshot]) -> [UsageQuotaWindow] {
+        Dictionary(
+            grouping: snapshots.flatMap(\.sparkWindows),
+            by: { $0.shortLabel.lowercased() }
+        )
+        .values
+        .compactMap { windows in
+            windows.max { lhs, rhs in
+                (lhs.resetsAt ?? .distantPast) < (rhs.resetsAt ?? .distantPast)
+            }
+        }
+        .sorted { lhs, rhs in
+            rateLimitSortOrder(lhs.shortLabel) < rateLimitSortOrder(rhs.shortLabel)
+        }
+    }
+
+    private func loadAppServerRateLimits(now: Date) -> RateLimitSnapshot? {
+        cacheLock.lock()
+        let cached = appServerRateLimitCache
+        cacheLock.unlock()
+
+        if let cached {
+            switch cached.state {
+            case .success(let snapshot) where now.timeIntervalSince(cached.createdAt) < UsageScanPolicy.appServerSuccessCacheTTL:
+                return snapshot
+            case .failure where now.timeIntervalSince(cached.createdAt) < UsageScanPolicy.appServerFailureCacheTTL:
+                return cached.lastSuccessfulSnapshot
+            default:
+                break
+            }
+        }
+
+        guard let appServerExecutable,
+              FileManager.default.fileExists(atPath: appServerExecutable) else {
+            cacheAppServerRateLimits(.failure, now: now)
+            return cached?.lastSuccessfulSnapshot
+        }
+
+        let output = try? Shell.runJSONRPC(
+            appServerExecutable, ["app-server", "--stdio"],
+            input: appServerRateLimitInput(), responseID: 2, timeout: 4
+        )
+        guard let output,
+              let snapshot = parseAppServerRateLimits(output: output, now: now) else {
+            cacheAppServerRateLimits(.failure, now: now)
+            return cached?.lastSuccessfulSnapshot
+        }
+
+        cacheAppServerRateLimits(.success(snapshot), now: now)
+        return snapshot
+    }
+
+    private func cacheAppServerRateLimits(_ state: AppServerRateLimitCache.State, now: Date) {
+        cacheLock.lock()
+        let lastSuccessfulSnapshot: RateLimitSnapshot?
+        switch state {
+        case .success(let snapshot): lastSuccessfulSnapshot = snapshot
+        case .failure: lastSuccessfulSnapshot = appServerRateLimitCache?.lastSuccessfulSnapshot
+        }
+        appServerRateLimitCache = AppServerRateLimitCache(
+            createdAt: now, state: state, lastSuccessfulSnapshot: lastSuccessfulSnapshot
+        )
+        cacheLock.unlock()
+    }
+
+    private func appServerRateLimitInput() -> String {
+        let initialize = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"clientInfo\":{\"name\":\"codex-notch\",\"version\":\"\(AppInfo.version)\"},\"capabilities\":{\"experimentalApi\":true}}}"
+        let initialized = #"{"jsonrpc":"2.0","method":"initialized"}"#
+        let readRateLimits = #"{"jsonrpc":"2.0","id":2,"method":"account/rateLimits/read","params":null}"#
+
+        return [initialize, initialized, readRateLimits, ""].joined(separator: "\n")
+    }
+
+    func parseAppServerRateLimits(output: String, now: Date) -> RateLimitSnapshot? {
+        for line in output.split(separator: "\n", omittingEmptySubsequences: true).reversed() {
+            guard let data = line.data(using: .utf8),
+                  let response = try? JSONDecoder().decode(AppServerRateLimitResponse.self, from: data),
+                  response.id == 2,
+                  let result = response.result else {
+                continue
+            }
+
+            let snapshot = result.rateLimitsByLimitId?["codex"] ?? result.rateLimits
+            guard snapshot.limitId == nil || snapshot.limitId == "codex" else {
+                continue
+            }
+
+            let windows = rateLimitWindows(
+                primary: rateLimitWindow(
+                    snapshot.primary,
+                    fallbackID: "primary",
+                    fallbackLabel: snapshot.secondary == nil ? "7d" : "5h"
+                ),
+                secondary: rateLimitWindow(snapshot.secondary, fallbackID: "secondary", fallbackLabel: "7d")
+            )
+            guard windows.contains(where: { $0.remainingPercent != nil }) else {
+                continue
+            }
+            let sparkWindows = (result.rateLimitsByLimitId ?? [:])
+                .filter { key, value in
+                    isSparkRateLimit(key) || isSparkRateLimit(value.limitId) || isSparkRateLimit(value.limitName)
+                }
+                .values
+                .flatMap { sparkSnapshot in
+                    rateLimitWindows(
+                        primary: rateLimitWindow(
+                            sparkSnapshot.primary,
+                            fallbackID: "spark-primary",
+                            fallbackLabel: sparkSnapshot.secondary == nil ? "7d" : "5h"
+                        ),
+                        secondary: rateLimitWindow(
+                            sparkSnapshot.secondary,
+                            fallbackID: "spark-secondary",
+                            fallbackLabel: "7d"
+                        )
+                    )
+                }
+            let resetCredits = appServerResetCredits(from: data, now: now)
+            return RateLimitSnapshot(
+                primaryPercent: percent(for: "5h", in: windows),
+                secondaryPercent: percent(for: "7d", in: windows),
+                primaryResetsAt: resetTimestamp(for: "5h", in: windows),
+                secondaryResetsAt: resetTimestamp(for: "7d", in: windows),
+                capturedAt: now,
+                isPrimaryCodexLimit: true,
+                windows: windows,
+                sparkWindows: sparkWindows,
+                resetCredits: resetCredits,
+                planType: snapshot.planType
+            )
+        }
+
+        return nil
+    }
+
+    private func appServerResetCredits(from responseData: Data, now: Date) -> RateLimitResetCredits? {
+        guard let response = try? JSONSerialization.jsonObject(with: responseData) as? [String: Any],
+              let result = response["result"] as? [String: Any],
+              let payload = result["rateLimitResetCredits"] ?? result["rate_limit_reset_credits"],
+              JSONSerialization.isValidJSONObject(payload),
+              let data = try? JSONSerialization.data(withJSONObject: payload) else {
+            return nil
+        }
+        return try? RateLimitResetCreditsDecoder.decode(data, now: now)
+    }
+
+    private func readRateLimitSnapshot(from rolloutPath: String) -> RateLimitSnapshot? {
+        let signature = fileSignature(rolloutPath)
+        guard signature.exists else {
+            return nil
+        }
+
+        cacheLock.lock()
+        if let cached = rateLimitFileCache[rolloutPath],
+           cached.signature == signature {
+            let snapshot = cached.value
+            cacheLock.unlock()
+            return snapshot
+        }
+        cacheLock.unlock()
+
+        guard let output = tokenCountLines(from: rolloutPath, lineLimit: 600) else {
+            return nil
+        }
+
+        let snapshot = parseRateLimitSnapshot(from: output)
+        cacheLock.lock()
+        rateLimitFileCache[rolloutPath] = FileValueCache(signature: signature, value: snapshot)
+        if rateLimitFileCache.count > UsageScanPolicy.rateLimitCandidateLimit * 4 {
+            let retainedPaths = Set(
+                rateLimitFileCache.keys
+                    .sorted { lhs, rhs in
+                        (rateLimitFileCache[lhs]?.signature.modifiedAt ?? 0)
+                            > (rateLimitFileCache[rhs]?.signature.modifiedAt ?? 0)
+                    }
+                    .prefix(UsageScanPolicy.rateLimitCandidateLimit * 2)
+            )
+            rateLimitFileCache = rateLimitFileCache.filter { retainedPaths.contains($0.key) }
+        }
+        cacheLock.unlock()
+        return snapshot
+    }
+
+    private func parseRateLimitSnapshot(from output: String) -> RateLimitSnapshot? {
+        let lines = output.split(separator: "\n", omittingEmptySubsequences: true).reversed()
+        var codexSnapshot: RateLimitSnapshot?
+        var sparkWindows: [UsageQuotaWindow] = []
+        var sparkCapturedAt: Date?
+
+        for line in lines {
+            guard line.contains("\"token_count\""),
+                  let data = line.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let timestamp = object["timestamp"] as? String,
+                  let capturedAt = parseTimestamp(timestamp),
+                  let payload = object["payload"] as? [String: Any],
+                  payload["type"] as? String == "token_count",
+                  let rateLimits = payload["rate_limits"] as? [String: Any] else {
+                continue
+            }
+
+            let limitID = rateLimits["limit_id"] as? String
+            let limitName = rateLimits["limit_name"] as? String
+            let planType = rateLimits["plan_type"] as? String
+                ?? rateLimits["planType"] as? String
+            let isSpark = isSparkRateLimit(limitID) || isSparkRateLimit(limitName)
+            guard limitID == nil || limitID == "codex" || isSpark else {
+                continue
+            }
+            let primary = rateLimits["primary"] as? [String: Any]
+            let secondary = rateLimits["secondary"] as? [String: Any]
+            let windows = rateLimitWindows(
+                primary: rateLimitWindow(
+                    primary,
+                    fallbackID: "primary",
+                    fallbackLabel: secondary == nil ? "7d" : "5h"
+                ),
+                secondary: rateLimitWindow(secondary, fallbackID: "secondary", fallbackLabel: "7d")
+            )
+            let primaryPercent = percent(for: "5h", in: windows)
+            let secondaryPercent = percent(for: "7d", in: windows)
+            let primaryResetsAt = resetTimestamp(for: "5h", in: windows)
+            let secondaryResetsAt = resetTimestamp(for: "7d", in: windows)
+
+            guard primaryPercent != nil || secondaryPercent != nil || !windows.isEmpty else {
+                continue
+            }
+
+            if isSpark {
+                if sparkWindows.isEmpty {
+                    sparkWindows = windows
+                    sparkCapturedAt = capturedAt
+                }
+            } else if codexSnapshot == nil {
+                codexSnapshot = RateLimitSnapshot(
+                    primaryPercent: primaryPercent,
+                    secondaryPercent: secondaryPercent,
+                    primaryResetsAt: primaryResetsAt,
+                    secondaryResetsAt: secondaryResetsAt,
+                    capturedAt: capturedAt,
+                    isPrimaryCodexLimit: limitID == "codex",
+                    windows: windows,
+                    planType: planType
+                )
+            }
+
+            if codexSnapshot != nil, !sparkWindows.isEmpty {
+                break
+            }
+        }
+
+        if var codexSnapshot {
+            codexSnapshot.sparkWindows = sparkWindows
+            return codexSnapshot
+        }
+        if !sparkWindows.isEmpty {
+            return RateLimitSnapshot(
+                primaryPercent: nil,
+                secondaryPercent: nil,
+                primaryResetsAt: nil,
+                secondaryResetsAt: nil,
+                capturedAt: sparkCapturedAt,
+                isPrimaryCodexLimit: false,
+                sparkWindows: sparkWindows
+            )
+        }
+
+        return nil
+    }
+
+    private func rateLimitWindow(
+        _ window: AppServerRateLimitWindow?,
+        fallbackID: String,
+        fallbackLabel: String
+    ) -> UsageQuotaWindow? {
+        guard let window else {
+            return nil
+        }
+        return makeRateLimitWindow(
+            usedPercent: window.usedPercent,
+            resetsAt: window.resetsAt,
+            durationMinutes: window.windowDurationMins,
+            fallbackID: fallbackID,
+            fallbackLabel: fallbackLabel
+        )
+    }
+
+    private func rateLimitWindow(
+        _ window: [String: Any]?,
+        fallbackID: String,
+        fallbackLabel: String
+    ) -> UsageQuotaWindow? {
+        guard let window else {
+            return nil
+        }
+        return makeRateLimitWindow(
+            usedPercent: intValue(window["used_percent"] ?? window["usedPercent"]),
+            resetsAt: intValue(window["resets_at"] ?? window["resetsAt"]),
+            durationMinutes: intValue(
+                window["window_duration_mins"]
+                    ?? window["windowDurationMins"]
+                    ?? window["window_minutes"]
+                    ?? window["windowMinutes"]
+                    ?? window["limit_window_minutes"]
+                    ?? window["limitWindowMinutes"]
+            ),
+            fallbackID: fallbackID,
+            fallbackLabel: fallbackLabel
+        )
+    }
+
+    private func makeRateLimitWindow(
+        usedPercent: Int?,
+        resetsAt: Int?,
+        durationMinutes: Int?,
+        fallbackID: String,
+        fallbackLabel: String
+    ) -> UsageQuotaWindow? {
+        guard usedPercent != nil || resetsAt != nil || durationMinutes != nil else {
+            return nil
+        }
+
+        let label = rateLimitLabel(durationMinutes: durationMinutes) ?? fallbackLabel
+        return UsageQuotaWindow(
+            id: "\(fallbackID)-\(label)",
+            shortLabel: label,
+            remainingPercent: remainingPercent(fromUsedPercent: usedPercent),
+            resetsAt: resetsAt.map { Date(timeIntervalSince1970: TimeInterval($0)) }
+        )
+    }
+
+    private func rateLimitWindows(
+        primary: UsageQuotaWindow?,
+        secondary: UsageQuotaWindow?
+    ) -> [UsageQuotaWindow] {
+        [primary, secondary]
+            .compactMap { $0 }
+            .sorted { lhs, rhs in
+                rateLimitSortOrder(lhs.shortLabel) < rateLimitSortOrder(rhs.shortLabel)
+            }
+    }
+
+    private func rateLimitLabel(durationMinutes: Int?) -> String? {
+        guard let durationMinutes else {
+            return nil
+        }
+        switch durationMinutes {
+        case 300:
+            return "5h"
+        case 10_080:
+            return "7d"
+        default:
+            if durationMinutes % 1_440 == 0 {
+                return "\(durationMinutes / 1_440)d"
+            }
+            if durationMinutes % 60 == 0 {
+                return "\(durationMinutes / 60)h"
+            }
+            return "\(durationMinutes)m"
+        }
+    }
+
+    private func isSparkRateLimit(_ value: String?) -> Bool {
+        let normalized = value?.lowercased() ?? ""
+        return normalized.contains("spark")
+    }
+
+    private func rateLimitSortOrder(_ label: String) -> Int {
+        switch label {
+        case "5h":
+            return 0
+        case "7d":
+            return 1
+        default:
+            return 2
+        }
+    }
+
+    private func percent(for label: String, in windows: [UsageQuotaWindow]) -> Int? {
+        windows.first { $0.shortLabel == label }?.remainingPercent
+    }
+
+    private func resetTimestamp(for label: String, in windows: [UsageQuotaWindow]) -> Int? {
+        guard let date = windows.first(where: { $0.shortLabel == label })?.resetsAt else {
+            return nil
+        }
+        return Int(date.timeIntervalSince1970)
+    }
+
+    private func extractTokenCount(from text: String) -> Int? {
+        guard let match = text.firstMatch(of: tokenPattern) else {
+            return nil
+        }
+        return Int(match.1)
+    }
+
+    private func tokenCountLines(from rolloutPath: String, lineLimit: Int) -> String? {
+        guard FileManager.default.fileExists(atPath: rolloutPath) else {
+            return nil
+        }
+
+        do {
+            let handle = try FileHandle(forReadingFrom: URL(fileURLWithPath: rolloutPath))
+            defer {
+                try? handle.close()
+            }
+
+            let fileSize = try handle.seekToEnd()
+            let bytesPerLine = UsageScanPolicy.estimatedTokenLineBytes
+            let maxBytes = min(fileSize, UInt64(lineLimit) * bytesPerLine)
+            try handle.seek(toOffset: fileSize - maxBytes)
+            let data = try handle.readToEnd() ?? Data()
+            let text = String(decoding: data, as: UTF8.self)
+            let lines = text
+                .split(separator: "\n", omittingEmptySubsequences: true)
+                .filter { $0.contains("\"token_count\"") }
+                .suffix(lineLimit)
+
+            return lines.joined(separator: "\n")
+        } catch {
+            return nil
+        }
+    }
+
+    private func usageEvents(
+        from rolloutPath: String,
+        lineLimit: Int,
+        resetOnWorldState: Bool
+    ) -> [CodexUsageTailEvent]? {
+        guard FileManager.default.fileExists(atPath: rolloutPath) else {
+            return nil
+        }
+
+        do {
+            let data = try Data(
+                contentsOf: URL(fileURLWithPath: rolloutPath),
+                options: .mappedIfSafe
+            )
+            let bytesPerLine = UsageScanPolicy.estimatedTokenLineBytes
+            let maximumBytes = UInt64(lineLimit) * bytesPerLine
+            let start = max(0, data.count - Int(min(UInt64(data.count), maximumBytes)))
+            return CodexUsageEventLineScanner.events(
+                in: data,
+                lineLimit: lineLimit,
+                dropLeadingPartialLine: start > 0,
+                startingAt: start,
+                resetAfterLastWorldState: resetOnWorldState
+            )
+        } catch {
+            return nil
+        }
+    }
+
+    private func tokenCountTokens(from line: String) -> Int? {
+        sessionDecoder.tokenCountTokens(from: line)
+    }
+
+    private func parseTokenCountEvent(_ line: String) -> (date: Date, tokens: Int)? {
+        guard let event = sessionDecoder.tokenCountEvent(from: line) else {
+            return nil
+        }
+        return (event.date, event.tokens)
+    }
+
+    private func timestampSecondPrefix(for date: Date) -> String {
+        sessionDecoder.timestampSecondPrefix(for: date)
+    }
+
+    private func timestampSecondPrefix(from timestamp: String) -> String? {
+        sessionDecoder.timestampSecondPrefix(from: timestamp)
+    }
+
+    private func parseTimestamp(_ value: String) -> Date? {
+        sessionDecoder.parseTimestamp(value)
+    }
+
+    private func makeUsageSignature(for rolloutPaths: [String]) -> StoreSignature? {
+        let databasePaths = sqliteFileSet(stateDatabase) + sqliteFileSet(logsDatabase) + [sessionIndexPath]
+        let paths = databasePaths + rolloutPaths.filter { !$0.isEmpty }
+        guard !paths.isEmpty else {
+            return nil
+        }
+
+        return StoreSignature(files: paths.map(fileSignature).sorted { $0.path < $1.path })
+    }
+
+    private func makeSnapshotSignature(for rolloutPaths: [String]) -> StoreSignature? {
+        let databasePaths = sqliteFileSet(stateDatabase) + sqliteFileSet(logsDatabase) + [sessionIndexPath]
+        let paths = databasePaths + rolloutPaths.filter { !$0.isEmpty }
+        guard !paths.isEmpty else {
+            return nil
+        }
+
+        return StoreSignature(files: paths.map(fileSignature).sorted { $0.path < $1.path })
+    }
+
+    private func sqliteFileSet(_ database: String) -> [String] {
+        [
+            database,
+            "\(database)-wal",
+            "\(database)-shm"
+        ]
+    }
+
+    private func fileSignature(_ path: String) -> FileSignature {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: path) else {
+            return FileSignature(path: path, exists: false, size: 0, modifiedAt: 0, fileID: 0)
+        }
+
+        let size = (attributes[.size] as? NSNumber)?.uint64Value ?? 0
+        let modifiedAt = (attributes[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        let fileID = (attributes[.systemFileNumber] as? NSNumber)?.uint64Value ?? 0
+        return FileSignature(path: path, exists: true, size: size, modifiedAt: modifiedAt, fileID: fileID)
+    }
+
+    private func intValue(_ value: Any?) -> Int? {
+        if let int = value as? Int {
+            return int
+        }
+        if let string = value as? String {
+            return Int(string.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        if let double = value as? Double {
+            return Int(double.rounded())
+        }
+        if let number = value as? NSNumber {
+            return number.intValue
+        }
+        return nil
+    }
+
+    private func remainingPercent(fromUsedPercent value: Any?) -> Int? {
+        guard let usedPercent = intValue(value) else {
+            return nil
+        }
+        return min(100, max(0, 100 - usedPercent))
+    }
+}
+
+private struct FastSnapshotCache {
+    let createdAt: Date
+    let signature: StoreSignature
+    let rolloutPaths: [String]
+    let threads: [ThreadRecord]
+    let activeThreadIDs: Set<String>
+    let rateLimits: RateLimitSnapshot
+    let rateLimitSource: RateLimitSourcePreference
+    let taskHistoryRange: TaskHistoryRange
+}
+
+private struct RecentPathsCache {
+    let createdAt: Date
+    let paths: [String]
+}
+
+private struct SessionTokenTotalCache {
+    let signature: FileSignature
+    let bytesScanned: UInt64
+    let tokens: Int
+    let summary: TokenUsageSummary
+    let currentModel: String?
+    let pendingLine: String
+    let foundTokenEvent: Bool
+}
+
+private struct SessionTokenScanResult {
+    let bytesScanned: UInt64
+    let tokens: Int
+    let summary: TokenUsageSummary
+    let currentModel: String?
+    let pendingLine: String
+    let foundTokenEvent: Bool
+}
+
+private struct FileValueCache<Value> {
+    let signature: FileSignature
+    let value: Value?
+}
+
+private struct RecentSessionCandidate {
+    let path: String
+    let sessionID: String
+    let modifiedAt: Date
+    let updatedAt: Int
+    let databaseTokens: Int
+}
+
+private struct AppServerRateLimitCache {
+    let createdAt: Date
+    let state: State
+    let lastSuccessfulSnapshot: RateLimitSnapshot?
+
+    enum State {
+        case success(RateLimitSnapshot)
+        case failure
+    }
+}
+
+private struct PeriodUsageCache {
+    let createdAt: Date
+    let signature: StoreSignature
+    let usage: PeriodUsage
+}
+
+private struct PeriodUsageBatchCache {
+    let signature: StoreSignature
+    let events: [PeriodUsageEvent]
+}
+
+private struct PeriodUsageEvent {
+    let timestampPrefix: String
+    let summary: TokenUsageSummary
+}
+
+private struct PeriodUsageTailCacheKey: Hashable {
+    let path: String
+    let resetOnWorldState: Bool
+    let initialModel: String?
+}
+
+private struct AppServerRateLimitResponse: Decodable {
+    let id: Int?
+    let result: AppServerRateLimitResult?
+}
+
+private struct AppServerRateLimitResult: Decodable {
+    let rateLimits: AppServerRateLimitSnapshot
+    let rateLimitsByLimitId: [String: AppServerRateLimitSnapshot]?
+}
+
+private struct AppServerRateLimitSnapshot: Decodable {
+    let limitId: String?
+    let limitName: String?
+    let primary: AppServerRateLimitWindow?
+    let secondary: AppServerRateLimitWindow?
+    let planType: String?
+
+    enum CodingKeys: String, CodingKey {
+        case limitId
+        case limitIdSnake = "limit_id"
+        case limitName
+        case limitNameSnake = "limit_name"
+        case primary
+        case secondary
+        case planType
+        case planTypeSnake = "plan_type"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        limitId = try container.decodeIfPresent(String.self, forKey: .limitId)
+            ?? container.decodeIfPresent(String.self, forKey: .limitIdSnake)
+        limitName = try container.decodeIfPresent(String.self, forKey: .limitName)
+            ?? container.decodeIfPresent(String.self, forKey: .limitNameSnake)
+        primary = try container.decodeIfPresent(AppServerRateLimitWindow.self, forKey: .primary)
+        secondary = try container.decodeIfPresent(AppServerRateLimitWindow.self, forKey: .secondary)
+        planType = try container.decodeIfPresent(String.self, forKey: .planType)
+            ?? container.decodeIfPresent(String.self, forKey: .planTypeSnake)
+    }
+}
+
+private struct AppServerRateLimitWindow: Decodable {
+    let usedPercent: Int?
+    let resetsAt: Int?
+    let windowDurationMins: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case usedPercent
+        case usedPercentSnake = "used_percent"
+        case resetsAt
+        case resetsAtSnake = "resets_at"
+        case windowDurationMins
+        case windowDurationMinsSnake = "window_duration_mins"
+        case windowMinutes = "window_minutes"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        usedPercent = try Self.decodeInt(from: container, keys: [.usedPercent, .usedPercentSnake])
+        resetsAt = try Self.decodeInt(from: container, keys: [.resetsAt, .resetsAtSnake])
+        windowDurationMins = try Self.decodeInt(
+            from: container,
+            keys: [.windowDurationMins, .windowDurationMinsSnake, .windowMinutes]
+        )
+    }
+
+    private static func decodeInt(
+        from container: KeyedDecodingContainer<CodingKeys>,
+        keys: [CodingKeys]
+    ) throws -> Int? {
+        for key in keys {
+            if let int = try? container.decodeIfPresent(Int.self, forKey: key) {
+                return int
+            }
+            if let double = try? container.decodeIfPresent(Double.self, forKey: key) {
+                return Int(double.rounded())
+            }
+            if let string = try? container.decodeIfPresent(String.self, forKey: key),
+               let int = Int(string.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                return int
+            }
+        }
+        return nil
+    }
+}
+
+private struct StoreSignature: Equatable {
+    let files: [FileSignature]
+}
+
+private struct FileSignature: Equatable {
+    let path: String
+    let exists: Bool
+    let size: UInt64
+    let modifiedAt: TimeInterval
+    let fileID: UInt64
+}

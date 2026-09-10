@@ -1,10 +1,5 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -euo pipefail
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$ROOT"
-./scripts/check-offline.sh
-swift test
-swift run codex-monitor --demo --format json > /dev/null
-for file in Sources/CodexMonitorApp/*.swift; do
-  swiftc -frontend -parse "$file"
-done
+cd "$(dirname "$0")/.."
+python3 scripts/verify-upstream.py
+./scripts/run-regression-tests.sh
