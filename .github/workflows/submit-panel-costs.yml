@@ -1,0 +1,116 @@
+name: 放大面板与代理费用验证
+on:
+  push:
+    branches: [feat/expanded-panel-costs-20260910]
+    paths:
+      - .github/panel-costs-transfer/**
+      - .github/workflows/submit-panel-costs.yml
+permissions:
+  contents: read
+concurrency:
+  group: panel-costs-transfer
+  cancel-in-progress: false
+jobs:
+  validate:
+    if: github.repository == 'yzin-17/codex-monitor'
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: 校验并应用完整源码补丁
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64, gzip, hashlib, os
+          from pathlib import Path
+          parts = sorted(Path('.github/panel-costs-transfer').glob('*'))
+          assert [p.name for p in parts] == ['001','002a','002b','002c','003a','003b1','003b2','003b3','003b4','003c']
+          text = ''.join(p.read_text().strip() for p in parts)
+          patch = gzip.decompress(base64.b64decode(text, validate=True))
+          assert hashlib.sha256(patch).hexdigest() == '0979b449a28faf82de1f4c3bf2d19cd1fb90ca743a0086c0893575113594ca70'
+          Path(os.environ['RUNNER_TEMP'], 'panel-costs.patch').write_bytes(patch)
+          print('完整补丁 SHA256 校验通过，共', len(patch), '字节')
+          PY
+          git apply --check --index "$RUNNER_TEMP/panel-costs.patch"
+          git apply --index "$RUNNER_TEMP/panel-costs.patch"
+          printf '0.2.1\n' > VERSION
+          git add VERSION
+          git rm -r -- .github/panel-costs-transfer .github/workflows/submit-panel-costs.yml
+          git diff --cached --check
+          python3 scripts/verify-upstream.py
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          TREE="$(git write-tree)"
+          CANDIDATE="$(printf '%s\n' 'feat: enlarge expanded panel and show conversation agent costs' '' '保留 ALight 原版与四主标签；展开面板按屏幕限制放大，点击对话展开主代理、子代理及 Skill 关联回合费用。' '补充 27 项费用、日志读取和布局测试；费用只作 API 等价估算，不重复归因 Skill。' | git commit-tree "$TREE" -p "$GITHUB_SHA")"
+          git update-ref refs/heads/validated-panel "$CANDIDATE"
+          mkdir -p "$RUNNER_TEMP/validated" .baseline-output/ui
+          printf '%s\n' "$CANDIDATE" > "$RUNNER_TEMP/validated/candidate.txt"
+          printf '%s\n' "$TREE" > "$RUNNER_TEMP/validated/tree.txt"
+      - name: macOS 回归、五页截图与双架构构建
+        env:
+          CODEX_MONITOR_SNAPSHOT_DIR: ${{ github.workspace }}/.baseline-output/ui
+        shell: bash
+        run: |
+          set -euo pipefail
+          swift --version
+          ./scripts/build.sh 2>&1 | tee .baseline-output/build.log
+          codesign --verify --deep --strict dist/CodexMonitor.app
+          for page in codex performance skills codexRadar conversation-costs; do test -s ".baseline-output/ui/$page.png"; done
+          test -s dist/codex-monitor-0.2.1-arm64.dmg
+          test -s dist/codex-monitor-0.2.1-amd64.dmg
+          git diff --quiet
+          git bundle create "$RUNNER_TEMP/validated/candidate.bundle" refs/heads/validated-panel
+          cd "$RUNNER_TEMP/validated"
+          shasum -a 256 candidate.bundle > SHA256SUMS
+      - name: 保存原生截图、日志与安装包
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: panel-costs-native
+          path: |
+            .baseline-output/ui/*.png
+            .baseline-output/build.log
+            dist/*.dmg
+          include-hidden-files: true
+          retention-days: 14
+          if-no-files-found: warn
+      - name: 保存通过验证的源码提交
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: validated-panel-candidate
+          path: ${{ runner.temp }}/validated/
+          retention-days: 2
+          if-no-files-found: error
+  publish:
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: validated-panel-candidate
+          path: ${{ runner.temp }}/validated
+      - name: 仅推送已验证提交至功能分支
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARTIFACT="$RUNNER_TEMP/validated"
+          (cd "$ARTIFACT" && sha256sum --check SHA256SUMS)
+          CANDIDATE="$(cat "$ARTIFACT/candidate.txt")"
+          TREE="$(cat "$ARTIFACT/tree.txt")"
+          [[ "$CANDIDATE" =~ ^[0-9a-f]{40}$ && "$TREE" =~ ^[0-9a-f]{40}$ ]]
+          git fetch "$ARTIFACT/candidate.bundle" refs/heads/validated-panel:refs/remotes/validated/candidate
+          test "$(git rev-parse refs/remotes/validated/candidate)" = "$CANDIDATE"
+          test "$(git rev-parse "$CANDIDATE^{tree}")" = "$TREE"
+          test "$(git rev-parse "$CANDIDATE^")" = "$GITHUB_SHA"
+          test "$(git ls-remote origin refs/heads/feat/expanded-panel-costs-20260910 | cut -f1)" = "$GITHUB_SHA"
+          git push origin "$CANDIDATE:refs/heads/feat/expanded-panel-costs-20260910"
+          echo "已推送经过 macOS 验证的提交：$CANDIDATE"
