@@ -29,7 +29,7 @@ private struct ReferenceLoginManager: LaunchAtLoginManaging {
     let reloaded = referenceSettings(defaults)
     #expect(!reloaded.skillInsightsEnabled)
     #expect(reloaded.performanceMonitoringEnabled)
-    #expect(DetailPage.allCases.map(\.title) == ["Codex", "性能", "Skills", "Codex Radar", "远程账号", "NewAPI", "Sub2API"])
+    #expect(DetailPage.allCases.map(\.title) == ["Codex", "性能", "Skills", "Codex Radar", "重置预测", "远程账号", "NewAPI", "Sub2API"])
 }
 
 @Test func referencePerformanceCadenceRemainsBounded() {
@@ -191,10 +191,17 @@ private func referenceCatalog(at now: Date) throws -> SkillCatalogSnapshot {
     let remote = RemoteMonitorViewModel(settings: settings)
     let newAPI = BalanceMonitorViewModel(source: .newAPI, settings: settings)
     let subAPI = BalanceMonitorViewModel(source: .subAPI, settings: settings)
+    usage.publicInsights.installPreview([
+        .init(source: .openAIStatus, fetchedAt: Date(), updatedAt: Date(), summary: "All Systems Operational",
+              components: [.init(id: "api", name: "Codex API", state: "operational"),
+                           .init(id: "desktop", name: "Codex in ChatGPT Desktop", state: "operational")], overallIndicator: "none"),
+        .init(source: .observatory, fetchedAt: Date(), updatedAt: Date(), summary: "合成数据：根据公开历史和信号生成的社区概率，仅供参考。", probabilities: [12:20, 24:38, 48:69, 72:83], announcement: "无明确重置预告"),
+        .init(source: .willReset, fetchedAt: Date(), updatedAt: Date(), summary: "合成数据：未校准的社区评分，不代表可靠发生率。", probabilities: [48:23])
+    ])
     let overlay = OverlayState(); overlay.isExpanded = true; overlay.setDetailPresentationPhase(.visible)
     let output = ProcessInfo.processInfo.environment["CODEX_MONITOR_SNAPSHOT_DIR"].map { URL(fileURLWithPath: $0) }
     if let output { try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true) }
-    for (page, expanded) in [(DetailPage.codex, false), (.performance, false), (.skills, false), (.codexRadar, false), (.remoteCodex, false), (.codex, true)] {
+    for (page, expanded) in [(DetailPage.codex, false), (.performance, false), (.skills, false), (.codexRadar, false), (.resetPrediction, false), (.remoteCodex, false), (.codex, true)] {
         let firstTask = usage.snapshot.tasks[0]
         let childUsage = usage.snapshot.tasks[1].tokenUsage
         let sample = ConversationCostDetails(rootID: firstTask.id,
@@ -289,7 +296,20 @@ private func referenceCatalog(at now: Date) throws -> SkillCatalogSnapshot {
         Spacer()
     }.padding(18).background(Color.black)
     try await captureCustomization(AnyView(providerPanel), size: .init(width: 680, height: 520), name: "codex-accounts", output: output)
+    let resumeID = "11111111-1111-4111-8111-111111111111"
+    let resume = CLIResumeStore(home: URL(fileURLWithPath: "/synthetic/codex"), defaults: defaults, automatic: false,
+        inspector: { _, _, _ in .init(context: .init(threadID: resumeID, path: "/synthetic/log", cwd: "/synthetic/project", model: "gpt-test", effort: "high", sandbox: "workspace-write", approval: "on-request", fileSize: 0, modifiedAt: Date()), identity: .init(workspaceID: "synthetic-workspace", subject: "synthetic-user", label: "合成示例账号"), lastTurnID: "synthetic-turn", quotaPaused: true, lastTurnStatus: "failed", usage: .init(quotas: [.init(id: "primary_window", label: "5h", usedPercent: 100, resetsAt: Date().addingTimeInterval(3600), durationSeconds: 18000)]), checkedAt: Date()) },
+        runner: { _, _, _ in })
+    resume.prepare(resumeID)
+    try await Task.sleep(for: .milliseconds(100))
+    try await captureCustomization(AnyView(VStack(alignment: .leading) {
+        Text("原生 SwiftUI · 合成数据 · 不执行真实 CLI").font(.caption).foregroundStyle(MonitorTheme.textSecondary)
+        CLIResumeControl(threadID: resumeID, store: resume)
+        Spacer()
+    }.padding(16).background(Color.black)), size: .init(width: 680, height: 440), name: "cli-resume", output: output)
+    await resume.shutdown()
     previewStore.stop()
+    await usage.shutdownExtensions()
 }
 
 @MainActor private func captureCustomization(_ view: AnyView, size: NSSize, name: String, output: URL?) async throws {

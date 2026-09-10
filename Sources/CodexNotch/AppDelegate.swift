@@ -45,6 +45,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
+    private var shutdownRequested = false
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard !shutdownRequested else { return .terminateLater }
+        shutdownRequested = true
+        Task { @MainActor in
+            await overlayController?.shutdownAutomation()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
     }
@@ -127,6 +138,7 @@ final class TopAnchoredClippingView: NSView {
 
 @MainActor
 final class NotchOverlayController {
+    func shutdownAutomation() async { await viewModel.shutdownExtensions() }
     private let settings = CodexNotchSettings(loadSecretsSynchronously: false)
     private lazy var viewModel = UsageViewModel(
         settings: settings,

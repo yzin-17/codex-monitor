@@ -6,6 +6,7 @@ enum DetailPage: String, CaseIterable, Identifiable {
     case performance
     case skills
     case codexRadar
+    case resetPrediction
     case remoteCodex
     case newAPI
     case subAPI
@@ -20,6 +21,8 @@ enum DetailPage: String, CaseIterable, Identifiable {
             "性能"
         case .skills:
             "Skills"
+        case .resetPrediction:
+            "重置预测"
         case .codexRadar:
             "Codex Radar"
         case .remoteCodex:
@@ -353,6 +356,7 @@ struct DetailPanelView: View {
     @State private var expandedTaskID: String?
     @State private var geometryRevision = 0
     private let previewCosts: [String: ConversationCostDetails]
+    @ObservedObject private var publicInsights: PublicInsightsStore
     @ObservedObject private var preferences: HUDPreferences
     @ObservedObject private var codexAccounts: CodexAccountsStore
     @State private var remoteSection = "gateway"
@@ -378,6 +382,7 @@ struct DetailPanelView: View {
         self.previewCosts = previewCosts
         self.preferences = settings.hudPreferences
         self.codexAccounts = settings.codexAccounts
+        self.publicInsights = viewModel.publicInsights
     }
 
 
@@ -419,7 +424,14 @@ struct DetailPanelView: View {
                         case .codex:
                             localContent
                         case .performance:
-                            ScrollView(.vertical) { PerformancePanelView(viewModel: performanceViewModel) }
+                            ScrollView {
+                                VStack(spacing: 12) {
+                                    PerformancePanelView(viewModel: performanceViewModel)
+                                    PublicInsightCard(source: .openAIStatus, store: publicInsights)
+                                }
+                            }
+                        case .resetPrediction:
+                            ResetPredictionPanel(store: publicInsights)
                         case .skills:
                             if settings.skillInsightsEnabled {
                                 SkillInsightsPanelView(viewModel: skillInsights)
@@ -567,6 +579,8 @@ struct DetailPanelView: View {
             "性能监测"
         case .skills:
             "Skill Insights"
+        case .resetPrediction:
+            "社区重置预测"
         case .codexRadar:
             "CodexRadar"
         case .remoteCodex:
@@ -586,6 +600,8 @@ struct DetailPanelView: View {
             return performanceViewModel.isRefreshing ? "采样中" : "本机进程"
         case .skills:
             return skillInsights.isAnalyzing ? "分析中" : skillInsights.snapshot.quality.rawValue
+        case .resetPrediction:
+            return "独立来源 · 仅供参考"
         case .codexRadar:
             return codexRadarHeaderStatus
         case .remoteCodex:
@@ -610,6 +626,8 @@ struct DetailPanelView: View {
             MonitorTheme.radarBaseline
         case .skills:
             MonitorTheme.healthy
+        case .resetPrediction:
+            MonitorTheme.textSecondary
         case .codexRadar:
             codexRadarHeaderColor
         case .remoteCodex:
@@ -676,6 +694,8 @@ struct DetailPanelView: View {
             performanceViewModel.isRefreshing
         case .skills:
             skillInsights.isAnalyzing
+        case .resetPrediction:
+            publicInsights.refreshing.contains(.observatory) || publicInsights.refreshing.contains(.willReset)
         case .codexRadar:
             codexRadarViewModel.isRefreshing
         case .remoteCodex:
@@ -695,6 +715,8 @@ struct DetailPanelView: View {
             "刷新性能采样"
         case .skills:
             "分析最近 7 天 Skills"
+        case .resetPrediction:
+            "刷新已启用的预测来源"
         case .codexRadar:
             "刷新 CodexRadar"
         case .remoteCodex:
@@ -731,7 +753,7 @@ struct DetailPanelView: View {
         .frame(height: IslandMetrics.detailPageSwitcherHeight)
     }
 
-    private var availablePages: [DetailPage] { [.codex, .performance, .skills, .codexRadar, .remoteCodex] }
+    private var availablePages: [DetailPage] { [.codex, .performance, .skills, .codexRadar, .resetPrediction, .remoteCodex] }
 
     private var selectedPage: DetailPage {
         if detailPage == .newAPI || detailPage == .subAPI { return .remoteCodex }
@@ -802,6 +824,9 @@ struct DetailPanelView: View {
             onLocalRefresh()
         case .performance:
             performanceViewModel.refreshNow()
+            publicInsights.refresh(.openAIStatus)
+        case .resetPrediction:
+            publicInsights.refreshPredictions()
         case .skills:
             skillInsights.analyzeRecentWeek()
         case .codexRadar:
@@ -832,6 +857,7 @@ struct DetailPanelView: View {
                                 skillsEnabled: settings.skillInsightsEnabled,
                                 makeLoader: { viewModel.makeConversationCostLoader() },
                                 preview: previewCosts[task.id],
+                                resumeStore: viewModel.cliResume,
                                 onToggle: { expandedTaskID = expandedTaskID == task.id ? nil : task.id })
                         }
 
@@ -1474,6 +1500,7 @@ private struct TaskRow: View {
     let skillsEnabled: Bool
     let makeLoader: () -> ConversationCostLoader?
     let preview: ConversationCostDetails?
+    let resumeStore: CLIResumeStore
     let onToggle: () -> Void
 
     var body: some View {
@@ -1516,6 +1543,7 @@ private struct TaskRow: View {
                 ConversationCostExpansion(task: task, skillsEnabled: skillsEnabled,
                     makeLoader: makeLoader, preview: preview)
                     .id(task.id)
+                CLIResumeControl(threadID: task.id, store: resumeStore)
             }
         }
         .padding(.horizontal, 10).padding(.vertical, 8)
