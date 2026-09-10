@@ -39,7 +39,7 @@
       "source": "ALight",
       "source_path": "Sources/CodexNotch/AppDelegate.swift",
       "source_sha256": "b5c0fb7bdb9a0074b590026cbab51eb6288f0550b9e21a95907dcbdfffb61268",
-      "sha256": "8982142f7070776568235f6a7742e8608c253d9a2bb5171ba2ce62471b13819b",
+      "sha256": "f20b617163be10b5346bdfc442a25bd1f8473e51e1eb6644a187fd025cfb6af5",
       "modified": true
     },
     {
@@ -47,7 +47,7 @@
       "source": "ALight",
       "source_path": "Sources/CodexNotch/AppInfo.swift",
       "source_sha256": "7c9d5a288cb5785c1f7057d2abd516d402d7aa7b6f775ed3a12267bcde390470",
-      "sha256": "f280bf583374deda93675a4f9c3c23aa7fad35583639365c27e04739c7fa6ddb",
+      "sha256": "249e3a7d3e79f5358104b5fa28a7e328146bd0ba6144ad4e3a578b0c98d37050",
       "modified": true
     },
     {
@@ -151,8 +151,8 @@
       "source": "ALight",
       "source_path": "Sources/CodexNotch/CodexUsageStore.swift",
       "source_sha256": "7bd5f39236f6b80284c4743d3f991d11a672a800973b6aaf434be08a8225dc55",
-      "sha256": "7bd5f39236f6b80284c4743d3f991d11a672a800973b6aaf434be08a8225dc55",
-      "modified": false
+      "sha256": "1f1e9d7bc7e19a78f033544d7219bd022d7719fd44eba9dd50c78e9499cbd534",
+      "modified": true
     },
     {
       "path": "Sources/CodexNotch/DetailPresentation.swift",
@@ -215,7 +215,7 @@
       "source": "ALight",
       "source_path": "Sources/CodexNotch/NotchIslandView.swift",
       "source_sha256": "91a5306792dae38db297ae62ac091e94784164584ec709aeae7a268b4b29d185",
-      "sha256": "595cf585d94fda73622ac8d77768b1a8e50e576249a039a47bda7815b1e6e179",
+      "sha256": "c9e629b79611a75af0b807499563e94b9e3eefd0699c246b5bca2ab474a22443",
       "modified": true
     },
     {
@@ -335,15 +335,15 @@
       "source": "ALight",
       "source_path": "Sources/CodexNotch/UsageViewModel.swift",
       "source_sha256": "7c9eca99726d1de59ecf770a6693b1d728ce2593ad92d7ae211e1f2db2657cb0",
-      "sha256": "7c9eca99726d1de59ecf770a6693b1d728ce2593ad92d7ae211e1f2db2657cb0",
-      "modified": false
+      "sha256": "e403dfbf91bd03937b15107f04ad405177d61e9847250166942061ab13153fab",
+      "modified": true
     },
     {
       "path": "Tests/CodexNotchRegressionTests/main.swift",
       "source": "ALight",
       "source_path": "Tests/CodexNotchRegressionTests/main.swift",
       "source_sha256": "26f5b9745537bd65d1615c4cfe0ec93a89ec1e456d2a9bd6b1b463bde2bc442a",
-      "sha256": "098fc33da61c18a41cd6cbde4ea002819c86e53373c357e80faed011abc941a8",
+      "sha256": "af067953acb4311ed13b22a9d1876662287dd8a9f2f989c070df11ebf61f1566",
       "modified": true
     },
     {
@@ -559,7 +559,7 @@
       "source": "ALight",
       "source_path": "scripts/build-app.sh",
       "source_sha256": "7e46a226628a043a4de048870804997263b9ae552d3195bf667cb963ed631b1c",
-      "sha256": "f7644a6f7655699f48aa7b751a75a29e0a10c686951953c7205848f241a426b6",
+      "sha256": "cff055cb55c76c89d94a4d04d35c50cbf41d760027b6fe530feb4aab3ae66ed6",
       "modified": true
     },
     {

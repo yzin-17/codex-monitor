@@ -32,6 +32,8 @@ private enum UsageScanPolicy {
 
 final class CodexUsageStore: @unchecked Sendable {
     private let codexDirectory: URL
+    /// 明细与列表共用真实数据目录；仅供本机只读分析。
+    var conversationDataDirectory: URL { codexDirectory }
     private let stateDatabase: String
     private let logsDatabase: String
     private let sessionIndexPath: String

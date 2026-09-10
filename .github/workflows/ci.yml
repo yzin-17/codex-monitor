@@ -22,9 +22,9 @@ jobs:
           swift --version
           ./scripts/build.sh 2>&1 | tee .baseline-output/build.log
           codesign --verify --deep --strict dist/CodexMonitor.app
-          for page in codex performance skills codexRadar; do test -s ".baseline-output/ui/$page.png"; done
-          test -s dist/codex-monitor-0.2.0-arm64.dmg
-          test -s dist/codex-monitor-0.2.0-amd64.dmg
+          for page in codex performance skills codexRadar conversation-costs; do test -s ".baseline-output/ui/$page.png"; done
+          test -s dist/codex-monitor-0.2.1-arm64.dmg
+          test -s dist/codex-monitor-0.2.1-amd64.dmg
           ls -lh dist
       - name: 保存原生截图、日志与测试安装包
         if: always()

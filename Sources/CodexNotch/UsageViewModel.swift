@@ -62,6 +62,11 @@ final class UsageViewModel: ObservableObject {
             .store(in: &cancellables)
     }
 
+    func makeConversationCostLoader() -> ConversationCostLoader? {
+        guard !isPreviewMode else { return nil }
+        return ConversationCostLoader(codexHome: store.conversationDataDirectory)
+    }
+
     func refresh(bypassFastCache: Bool = false) {
         guard !isPreviewMode else {
             return

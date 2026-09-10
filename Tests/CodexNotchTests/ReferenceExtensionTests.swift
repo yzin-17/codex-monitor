@@ -194,12 +194,21 @@ private func referenceCatalog(at now: Date) throws -> SkillCatalogSnapshot {
     let overlay = OverlayState(); overlay.isExpanded = true; overlay.setDetailPresentationPhase(.visible)
     let output = ProcessInfo.processInfo.environment["CODEX_MONITOR_SNAPSHOT_DIR"].map { URL(fileURLWithPath: $0) }
     if let output { try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true) }
-    for page in [DetailPage.codex, .performance, .skills, .codexRadar] {
+    for (page, expanded) in [(DetailPage.codex, false), (.performance, false), (.skills, false), (.codexRadar, false), (.codex, true)] {
+        let firstTask = usage.snapshot.tasks[0]
+        let childUsage = usage.snapshot.tasks[1].tokenUsage
+        let sample = ConversationCostDetails(rootID: firstTask.id,
+            agents: [
+                .init(id: firstTask.id, parentID: nil, depth: 0, model: "gpt-5.6-sol", usage: firstTask.tokenUsage, hasUsage: true, complete: true),
+                .init(id: "demo-child", parentID: firstTask.id, depth: 1, model: "gpt-5.6-luna", usage: childUsage, hasUsage: true, complete: true)
+            ], skills: [.init(id: "/synthetic/skills/code-review/SKILL.md", name: "code-review", usage: childUsage, turns: 1, agentIDs: ["demo-child"])],
+            pending: false, diagnostics: [], observedAt: Date())
         let view = DetailPanelView(viewModel: usage, remoteViewModel: remote, newAPIViewModel: newAPI,
             subAPIViewModel: subAPI, codexRadarViewModel: radar, performanceViewModel: perf,
             skillInsights: skills, overlayState: overlay, settings: settings, onSettings: {},
             onLocalRefresh: {}, onRemoteRefresh: {}, onNewAPIRefresh: {}, onSubAPIRefresh: {},
-            onCodexRadarRefresh: {}, initialPage: page)
+            onCodexRadarRefresh: {}, initialPage: page,
+            initialExpandedTaskID: expanded ? firstTask.id : nil, previewCosts: expanded ? [firstTask.id: sample] : [:])
         let content = VStack(spacing: 0) {
             Text("原生 SwiftUI · 合成数据 · \(page.title)").font(.system(size: 10)).foregroundStyle(.white.opacity(0.6)).padding(6)
             view
@@ -226,7 +235,7 @@ private func referenceCatalog(at now: Date) throws -> SkillCatalogSnapshot {
         #expect(bitmap.pixelsHigh >= 400)
         if let output {
             let png = try #require(bitmap.representation(using: .png, properties: [:]))
-            try png.write(to: output.appendingPathComponent("\(page.rawValue).png"))
+            try png.write(to: output.appendingPathComponent(expanded ? "conversation-costs.png" : "\(page.rawValue).png"))
         }
         window.orderOut(nil)
         window.contentView = nil

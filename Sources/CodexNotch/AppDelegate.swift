@@ -339,7 +339,7 @@ final class NotchOverlayController {
             }
         )
         let detailHostingView = NSHostingView(rootView: detailView)
-        let detailContentSize = NSSize(width: IslandMetrics.width, height: currentDetailHeight())
+        let detailContentSize = expandedPanelLayout().frame.size
         detailHostingView.frame = NSRect(origin: .zero, size: detailContentSize)
         detailHostingView.wantsLayer = true
         detailHostingView.layer?.backgroundColor = NSColor.clear.cgColor
@@ -916,13 +916,11 @@ final class NotchOverlayController {
         layout: IslandLayout? = nil
     ) -> DetailWindowFrames {
         let layout = layout ?? currentDetailIslandLayout(for: screen)
-        let detailHeight = currentDetailHeight(for: screen, layout: layout)
-        return DetailWindowFrameCalculator.calculate(
-            screenFrame: screen.frame,
-            layoutWidth: layout.width,
-            collapsedHeight: layout.collapsedHeight,
-            detailHeight: detailHeight,
-            overlap: IslandMetrics.detailOverlap
+        let expanded = expandedPanelLayout(for: screen, layout: layout).frame
+        return DetailWindowFrames(
+            collapsed: CGRect(x: expanded.minX, y: expanded.maxY - IslandMetrics.detailOverlap,
+                              width: expanded.width, height: IslandMetrics.detailOverlap),
+            expanded: expanded
         )
     }
 
@@ -993,32 +991,18 @@ final class NotchOverlayController {
         )
     }
 
-    private func currentDetailHeight(
+    private func expandedPanelLayout(
         for screen: NSScreen? = NSScreen.main ?? NSScreen.screens.first,
         layout: IslandLayout? = nil
-    ) -> CGFloat {
-        let layout = layout ?? currentDetailIslandLayout(for: screen)
-        let safeAreaTop = ScreenNotchGeometry.topSafeInset(for: screen)
-        let topPadding = IslandMetrics.detailContentTopPadding(
-            safeAreaTop: safeAreaTop,
-            collapsedHeight: layout.collapsedHeight
-        )
-        let enabledExternalRows = [
-            settings.remoteMonitorEnabled ? remoteViewModel.snapshot.accounts.count : nil,
-            settings.newAPIMonitorEnabled ? newAPIViewModel.snapshot.accounts.count : nil,
-            settings.subAPIMonitorEnabled ? subAPIViewModel.snapshot.accounts.count : nil
-        ].compactMap { $0 }
-
-        let accountRows = enabledExternalRows.isEmpty ? nil : max(1, enabledExternalRows.max() ?? 1)
-        let usesTallRemoteRows = remoteViewModel.snapshot.accounts.contains { $0.displayQuotaWindows.count > 2 }
-        return IslandMetrics.combinedDetailHeight(
-            accountRows: accountRows,
-            showsPeriodUsage: settings.showPeriodUsage,
-            showsSparkQuota: settings.showSparkQuota,
-            usesTallRemoteRows: usesTallRemoteRows,
-            topPadding: topPadding
+    ) -> ExpandedPanelLayout {
+        ExpandedPanelLayout.make(
+            screenFrame: screen?.frame ?? CGRect(x: 0, y: 0, width: 1440, height: 900),
+            visibleFrame: screen?.visibleFrame ?? .zero,
+            collapsedHeight: (layout ?? currentDetailIslandLayout(for: screen)).collapsedHeight,
+            overlap: IslandMetrics.detailOverlap
         )
     }
+
 }
 
 @MainActor

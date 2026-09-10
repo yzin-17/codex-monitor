@@ -364,6 +364,9 @@ struct DetailPanelView: View {
     let onCodexRadarRefresh: () -> Void
     @State private var detailPage: DetailPage = .codex
     @State private var showsRemoteUsageInfo = false
+    @State private var expandedTaskID: String?
+    @State private var geometryRevision = 0
+    private let previewCosts: [String: ConversationCostDetails]
 
     init(viewModel: UsageViewModel, remoteViewModel: RemoteMonitorViewModel,
          newAPIViewModel: BalanceMonitorViewModel, subAPIViewModel: BalanceMonitorViewModel,
@@ -372,7 +375,8 @@ struct DetailPanelView: View {
          settings: CodexNotchSettings, onSettings: @escaping () -> Void,
          onLocalRefresh: @escaping () -> Void, onRemoteRefresh: @escaping () -> Void,
          onNewAPIRefresh: @escaping () -> Void, onSubAPIRefresh: @escaping () -> Void,
-         onCodexRadarRefresh: @escaping () -> Void, initialPage: DetailPage = .codex) {
+         onCodexRadarRefresh: @escaping () -> Void, initialPage: DetailPage = .codex,
+         initialExpandedTaskID: String? = nil, previewCosts: [String: ConversationCostDetails] = [:]) {
         self.viewModel = viewModel; self.remoteViewModel = remoteViewModel
         self.newAPIViewModel = newAPIViewModel; self.subAPIViewModel = subAPIViewModel
         self.codexRadarViewModel = codexRadarViewModel; self.performanceViewModel = performanceViewModel
@@ -381,6 +385,8 @@ struct DetailPanelView: View {
         self.onRemoteRefresh = onRemoteRefresh; self.onNewAPIRefresh = onNewAPIRefresh
         self.onSubAPIRefresh = onSubAPIRefresh; self.onCodexRadarRefresh = onCodexRadarRefresh
         _detailPage = State(initialValue: initialPage)
+        _expandedTaskID = State(initialValue: initialExpandedTaskID)
+        self.previewCosts = previewCosts
     }
 
 
@@ -456,11 +462,22 @@ struct DetailPanelView: View {
             .animation(detailContentAnimation, value: overlayState.detailPresentationPhase)
             .allowsHitTesting(showsDetailContent)
         }
-        .frame(width: islandLayout.width, height: detailHeight)
-        .clipShape(BottomRoundedRectangle(radius: 24))
+        .frame(width: expandedLayout.logicalSize.width, height: expandedLayout.logicalSize.height)
+        .scaleEffect(expandedLayout.contentScale, anchor: .topLeading)
+        .frame(width: expandedLayout.frame.width, height: expandedLayout.frame.height, alignment: .topLeading)
+        .clipShape(BottomRoundedRectangle(radius: 24 * expandedLayout.contentScale))
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)) { _ in
+            geometryRevision += 1
+        }
         .onAppear { synchronizeExtensionVisibility() }
-        .onChange(of: detailPage) { _, _ in synchronizeExtensionVisibility() }
-        .onChange(of: overlayState.detailPresentationPhase) { _, _ in synchronizeExtensionVisibility() }
+        .onChange(of: detailPage) { _, _ in
+            expandedTaskID = nil
+            synchronizeExtensionVisibility()
+        }
+        .onChange(of: overlayState.detailPresentationPhase) { _, phase in
+            if !phase.showsContent { expandedTaskID = nil }
+            synchronizeExtensionVisibility()
+        }
         .onDisappear { performanceViewModel.setDetailVisible(false) }
     }
 
@@ -487,30 +504,13 @@ struct DetailPanelView: View {
         snapshot.tasks
     }
 
-    private var detailHeight: CGFloat {
-        guard settings.remoteMonitorEnabled else {
-            let balanceRows = [
-                settings.newAPIMonitorEnabled ? newAPIViewModel.snapshot.accounts.count : nil,
-                settings.subAPIMonitorEnabled ? subAPIViewModel.snapshot.accounts.count : nil
-            ].compactMap { $0 }
-            return IslandMetrics.combinedDetailHeight(
-                accountRows: balanceRows.isEmpty ? nil : max(1, balanceRows.max() ?? 1),
-                showsPeriodUsage: settings.showPeriodUsage,
-                showsSparkQuota: settings.showSparkQuota,
-                topPadding: detailTopPadding
-            )
-        }
-        let rows = [
-            remoteViewModel.snapshot.accounts.count,
-            settings.newAPIMonitorEnabled ? newAPIViewModel.snapshot.accounts.count : nil,
-            settings.subAPIMonitorEnabled ? subAPIViewModel.snapshot.accounts.count : nil
-        ].compactMap { $0 }
-        return IslandMetrics.combinedDetailHeight(
-            accountRows: max(1, rows.max() ?? 1),
-            showsPeriodUsage: settings.showPeriodUsage,
-            showsSparkQuota: settings.showSparkQuota,
-            usesTallRemoteRows: remoteViewModel.snapshot.accounts.contains { $0.displayQuotaWindows.count > 2 },
-            topPadding: detailTopPadding
+    private var expandedLayout: ExpandedPanelLayout {
+        _ = geometryRevision
+        return ExpandedPanelLayout.make(
+            screenFrame: currentScreen?.frame ?? CGRect(x: 0, y: 0, width: 1440, height: 900),
+            visibleFrame: currentScreen?.visibleFrame ?? .zero,
+            collapsedHeight: islandLayout.collapsedHeight,
+            overlap: IslandMetrics.detailOverlap
         )
     }
 
@@ -813,7 +813,12 @@ struct DetailPanelView: View {
                 ScrollView(.vertical, showsIndicators: false) {
                     LazyVStack(spacing: 7) {
                         ForEach(displayedTasks) { task in
-                            TaskRow(task: task, now: context.date)
+                            TaskRow(task: task, now: context.date,
+                                isExpanded: expandedTaskID == task.id,
+                                skillsEnabled: settings.skillInsightsEnabled,
+                                makeLoader: { viewModel.makeConversationCostLoader() },
+                                preview: previewCosts[task.id],
+                                onToggle: { expandedTaskID = expandedTaskID == task.id ? nil : task.id })
                         }
 
                         if displayedTasks.isEmpty {
@@ -1451,78 +1456,64 @@ private struct RefreshIcon: View {
 private struct TaskRow: View {
     let task: CodexTask
     let now: Date
+    let isExpanded: Bool
+    let skillsEnabled: Bool
+    let makeLoader: () -> ConversationCostLoader?
+    let preview: ConversationCostDetails?
+    let onToggle: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 8) {
-                Text(task.title)
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.92))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-
-                Spacer(minLength: 4)
-
-                Text(task.status.label)
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(statusColor)
-            }
-
-            HStack(spacing: 6) {
-                Text(task.displayDetail(now: now))
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.56))
-                    .lineLimit(1)
-
-                Spacer(minLength: 8)
-
-                if let badgeText = TaskBadgeFormatter.subagentBadgeText(for: task.activeSubagentCount) {
-                    Text(badgeText)
-                        .font(.system(size: 9, weight: .bold, design: .rounded))
-                        .foregroundStyle(Color(red: 0.61, green: 0.95, blue: 0.68))
-                        .lineLimit(1)
-                        .fixedSize(horizontal: true, vertical: false)
-                        .layoutPriority(2)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 2)
-                        .background(
-                            Color(red: 0.61, green: 0.95, blue: 0.68).opacity(0.11),
-                            in: RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        )
+                Button(action: onToggle) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        HStack(spacing: 6) {
+                            Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                                .font(.system(size: 8, weight: .bold)).frame(width: 9)
+                            Text(task.title)
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(.white.opacity(0.92))
+                                .lineLimit(1).truncationMode(.tail)
+                            Spacer(minLength: 4)
+                            Text(task.status.label)
+                                .font(.system(size: 10, weight: .bold)).foregroundStyle(statusColor)
+                        }
+                        HStack(spacing: 6) {
+                            Text(task.displayDetail(now: now))
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.56)).lineLimit(1)
+                            if let badge = TaskBadgeFormatter.subagentBadgeText(for: task.activeSubagentCount) {
+                                Text(badge).font(.system(size: 9, weight: .bold, design: .rounded))
+                                    .foregroundStyle(statusColor).lineLimit(1)
+                                    .padding(.horizontal, 5).padding(.vertical, 2)
+                                    .background(statusColor.opacity(0.11), in: RoundedRectangle(cornerRadius: 4))
+                            }
+                        }
+                    }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                 }
-
-                Color.clear
-                    .frame(width: 108, height: 12)
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(isExpanded ? "收起" : "展开")对话费用：\(task.title)")
+                .help("查看主代理、子代理及 Skill 关联回合费用")
+                TokenUsageTrigger(title: "\(task.title) Token 构成",
+                    tokenText: Formatters.compactTokens(task.tokenCount), summary: task.tokenUsage, style: .task)
+                    .frame(width: 94, height: 36)
+            }
+            if isExpanded {
+                ConversationCostExpansion(task: task, skillsEnabled: skillsEnabled,
+                    makeLoader: makeLoader, preview: preview)
+                    .id(task.id)
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
-        )
-        .overlay(alignment: .bottomTrailing) {
-            TokenUsageTrigger(
-                title: "\(task.title) Token 构成",
-                tokenText: Formatters.compactTokens(task.tokenCount),
-                summary: task.tokenUsage,
-                style: .task
-            )
-            .frame(width: 108, height: 36)
-            .padding(.trailing, 5)
-            .padding(.bottom, 2)
-        }
+        .padding(.horizontal, 10).padding(.vertical, 8)
+        .background(Color.white.opacity(isExpanded ? 0.065 : 0.035), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.08), lineWidth: 1))
     }
 
     private var statusColor: Color {
         switch task.status {
-        case .running:
-            Color(red: 0.61, green: 0.95, blue: 0.68)
-        case .recent:
-            Color(red: 0.50, green: 0.78, blue: 1.00)
-        case .idle:
-            .white.opacity(0.48)
+        case .running: Color(red: 0.61, green: 0.95, blue: 0.68)
+        case .recent: Color(red: 0.50, green: 0.78, blue: 1.00)
+        case .idle: .white.opacity(0.48)
         }
     }
 }
