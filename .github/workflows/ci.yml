@@ -1,17 +1,36 @@
-name: 本地核心与 macOS 构建
+name: 原版基线与 macOS 构建
 on:
   push:
+    branches: [main]
   pull_request:
 permissions:
   contents: read
 jobs:
   macos:
     runs-on: macos-15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-      - name: 工具链
-        run: swift --version
-      - name: 测试、离线边界与桌面构建
-        run: ./scripts/build.sh
-      - name: 产物信息
-        run: ls -lh dist && codesign -dv dist/CodexMonitor.app
+        with:
+          persist-credentials: false
+      - name: 原版回归、扩展测试、四页原生截图与双架构构建
+        env:
+          CODEX_MONITOR_SNAPSHOT_DIR: ${{ github.workspace }}/.baseline-output/ui
+        run: |
+          set -euo pipefail
+          mkdir -p .baseline-output/ui
+          swift --version
+          ./scripts/build.sh 2>&1 | tee .baseline-output/build.log
+          codesign --verify --deep --strict dist/CodexMonitor.app
+          ls -lh dist
+      - name: 保存原生截图、日志与测试安装包
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: codex-monitor-native
+          path: |
+            .baseline-output/ui/*.png
+            .baseline-output/build.log
+            dist/*.dmg
+          retention-days: 14
+          if-no-files-found: error
