@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           fetch-depth: 0
-      - name: 应用固定增量并校验原版一致性
+      - name: 修复 Settings Skills 枚举分支并核验
         id: apply
         shell: bash
         run: |
@@ -26,14 +26,33 @@ jobs:
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test "$(git ls-remote origin "refs/heads/$branch" | cut -f1)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain)"
-          test -f UPSTREAM.md
-          python3 scripts/verify-alight-baseline.py --apply
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, json
+          target = Path('Sources/CodexNotch/SettingsView.swift')
+          before = '        case .codex, .launch, .about:\n'
+          after = '        case .skills:\n            break\n' + before
+          code = target.read_text()
+          assert code.count(before) == 1
+          target.write_text(code.replace(before, after, 1))
+          check = Path('scripts/verify-alight-baseline.py')
+          text = check.read_text()
+          anchor = '    return s.encode()\n'
+          patch = '    if path == "Sources/CodexNotch/SettingsView.swift":\n        s = replace_once(s, ' + repr(before) + ', ' + repr(after) + ')\n'
+          assert text.count(anchor) == 1
+          check.write_text(text.replace(anchor, patch + anchor, 1))
+          path = Path('docs/upstream/alight-manifest.json')
+          manifest = json.loads(path.read_text())
+          for entry in manifest['customized']:
+              if entry['path'] == str(target):
+                  entry['sha256'] = hashlib.sha256(target.read_bytes()).hexdigest()
+          path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n')
+          PY
           python3 scripts/verify-alight-baseline.py
-          git add -u
-          git add docs/upstream/alight-manifest.json
+          git add Sources/CodexNotch/SettingsView.swift scripts/verify-alight-baseline.py docs/upstream/alight-manifest.json
           git config user.name 'codex-monitor maintenance'
           git config user.email '30586807+yzin-17@users.noreply.github.com'
-          git commit -m 'feat: integrate local Skills tab into original ALight UI' -m '保留原版布局、交互、统计及远程功能；仅新增 Skills 接入、应用标识隔离和干净构建目录修复。'
+          git commit -m 'fix: handle Skills settings tab without triggering unrelated refresh'
           git push origin "HEAD:refs/heads/$branch"
           echo "head=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
   verify:
@@ -57,7 +76,7 @@ jobs:
         run: |
           set -euo pipefail
           ./scripts/build-app.sh > "$RUNNER_TEMP/build.log" 2>&1 || { tail -180 "$RUNNER_TEMP/build.log"; exit 1; }
-          grep -E 'Executed [0-9]+ tests|Test run with|Test run started|All regression|Built |error:' "$RUNNER_TEMP/build.log" || true
+          grep -E 'Executed [0-9]+ tests|Test run with|All regression|Built |error:' "$RUNNER_TEMP/build.log" || true
           codesign --verify --deep --strict dist/CodexMonitor.app
           ls -lh dist/*.dmg
           git archive --format=zip HEAD > dist/codex-monitor-alight-source.zip
