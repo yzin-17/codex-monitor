@@ -1,0 +1,117 @@
+name: 纠正为 ALight 原始基线
+on:
+  push:
+    branches: [fix/alight-baseline-20260910]
+    paths:
+      - tools/import_reference.py
+      - tools/baseline-files/**
+      - .github/workflows/rebase-reference.yml
+permissions:
+  contents: read
+concurrency:
+  group: correct-alight-baseline
+  cancel-in-progress: false
+jobs:
+  validate:
+    if: github.repository == 'yzin-17/codex-monitor'
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: 取回固定原始源码并执行可复现移植
+        env:
+          ALIGHT_SHA: ec9363d56a3692903f5ccb7462df2a0fbafc7297
+          JACKIE_SHA: 6cd6c00aa7327a79a8b4256cf8ec2573375832f3
+        run: |
+          set -euo pipefail
+          git fetch --no-tags https://github.com/ALight777/codex-monitor.git "$ALIGHT_SHA"
+          mkdir -p "$RUNNER_TEMP/alight-source"
+          git archive "$ALIGHT_SHA" | tar -x -C "$RUNNER_TEMP/alight-source"
+          git clone --quiet https://github.com/jackiemingnew/codex-monitor-macos.git "$RUNNER_TEMP/jackie-source"
+          git -C "$RUNNER_TEMP/jackie-source" checkout --quiet --detach "$JACKIE_SHA"
+          test "$(git -C "$RUNNER_TEMP/jackie-source" rev-parse HEAD)" = "$JACKIE_SHA"
+          python3 tools/import_reference.py --alight "$RUNNER_TEMP/alight-source" --jackie "$RUNNER_TEMP/jackie-source" --target "$GITHUB_WORKSPACE"
+          python3 scripts/verify-upstream.py
+          git add -A
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          TREE="$(git write-tree)"
+          CANDIDATE="$(printf '%s\n' 'feat: replace independent rewrite with ALight baseline and Jackie extensions' '' '保留 ALight 原始源码、资源、测试和 Git 历史；接入性能及 Skills。' '原始 Codex、Radar、远程账号及余额功能保持，四主标签实际接线。' | git commit-tree "$TREE" -p "$GITHUB_SHA" -p "$ALIGHT_SHA")"
+          git update-ref refs/heads/candidate "$CANDIDATE"
+          mkdir -p .baseline-output/ui "$RUNNER_TEMP/validated"
+          printf '%s\n' "$CANDIDATE" > "$RUNNER_TEMP/validated/candidate.txt"
+          printf '%s\n' "$TREE" > "$RUNNER_TEMP/validated/tree.txt"
+          git archive --format=tar.gz "$CANDIDATE" > .baseline-output/corrected-source.tar.gz
+      - name: macOS 原始回归与扩展测试、四页原生截图、ARM64 和 Intel 打包
+        env:
+          CODEX_MONITOR_SNAPSHOT_DIR: ${{ github.workspace }}/.baseline-output/ui
+        run: |
+          set -euo pipefail
+          swift --version
+          ./scripts/build.sh 2>&1 | tee .baseline-output/build.log
+          codesign --verify --deep --strict dist/CodexMonitor.app
+          test -f .baseline-output/ui/codex.png
+          test -f .baseline-output/ui/performance.png
+          test -f .baseline-output/ui/skills.png
+          test -f .baseline-output/ui/codexRadar.png
+          test -f dist/codex-monitor-0.2.0-arm64.dmg
+          test -f dist/codex-monitor-0.2.0-amd64.dmg
+          git bundle create "$RUNNER_TEMP/validated/candidate.bundle" refs/heads/candidate
+          cd "$RUNNER_TEMP/validated"
+          shasum -a 256 candidate.bundle > SHA256SUMS
+      - name: 保存实际原生截图与构建诊断
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: alight-native-preview
+          path: |
+            .baseline-output/ui/*.png
+            .baseline-output/build.log
+            .baseline-output/corrected-source.tar.gz
+            dist/*.dmg
+          include-hidden-files: true
+          retention-days: 14
+          if-no-files-found: warn
+      - name: 保存通过验证的提交
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: validated-alight-candidate
+          path: ${{ runner.temp }}/validated/
+          retention-days: 1
+          if-no-files-found: error
+  publish:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: validated-alight-candidate
+          path: ${{ runner.temp }}/validated
+      - name: 只快进纠正分支，不执行上游代码，不修改 main
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/validated"
+          sha256sum -c SHA256SUMS
+          CANDIDATE="$(cat candidate.txt)"
+          [[ "$CANDIDATE" =~ ^[0-9a-f]{40}$ ]]
+          cd "$GITHUB_WORKSPACE"
+          git bundle verify "$RUNNER_TEMP/validated/candidate.bundle"
+          git fetch "$RUNNER_TEMP/validated/candidate.bundle" refs/heads/candidate:refs/heads/candidate
+          test "$(git rev-parse candidate)" = "$CANDIDATE"
+          test "$(git rev-parse candidate^1)" = "$GITHUB_SHA"
+          test "$(git rev-parse candidate^2)" = ec9363d56a3692903f5ccb7462df2a0fbafc7297
+          test "$(git rev-parse candidate^{tree})" = "$(cat "$RUNNER_TEMP/validated/tree.txt")"
+          REMOTE="$(git ls-remote origin refs/heads/fix/alight-baseline-20260910 | cut -f1)"
+          test "$REMOTE" = "$GITHUB_SHA"
+          git push origin "$CANDIDATE:refs/heads/fix/alight-baseline-20260910"
+          test "$(git ls-remote origin refs/heads/fix/alight-baseline-20260910 | cut -f1)" = "$CANDIDATE"
+          printf 'Validated correction commit: %s\n' "$CANDIDATE" >> "$GITHUB_STEP_SUMMARY"
