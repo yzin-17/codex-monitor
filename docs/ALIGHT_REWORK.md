@@ -15,19 +15,32 @@
 1. 同一 DetailPanelView 里增加 Skills Tab，在原设置里增加 Skills 页面；不另建主窗口。
 2. Skills 目录/读取证据解析复用本仓库此前独立实现的 Core 模块，仅供 Skills 增量使用；原 Token/额度/价格链路仍全部由 ALight 实现负责。
 3. 新功能只手动分片分析，支持取消、目录快照导入、7/30 天筛选、对话跳转和脱敏导出；关闭时取消分析。启用状态和逐 Skill Token 不猜测。
-4. 应用名、Bundle ID、Keychain service 和派生目录与原版隔离。替换本仓库旧版需明确 --replace 并保留备份；不强制终止应用，不移除 quarantine。
-5. 修复上游干净克隆首次打包时 dist 不存在导致 find 失败的问题，仅增加 mkdir -p。
+4. 应用名、Bundle ID、Keychain service 和派生目录与原版隔离，包括原版用整段字符串构造的 Radar/模型价格缓存路径。替换本仓库旧版需明确 --replace 并保留备份；不强制终止应用，不移除 quarantine。
+5. 修复上游干净克隆首次打包时 dist 不存在导致 find 失败的问题；图标生成后恢复原有源图标，避免构建污染工作区使下一次基线校验失败。
+6. 一次性导入与补丁作业在完成后移除；常规 CI 仅 contents:read，不留后台写仓库的自动任务。
 
-## 已完成的原版验证
+## 原版验证
 
-Actions `34448792635` 的原版验证：Swift 6.1.2 / macOS ARM64 上原版 Release 编译、86 项 Swift Testing 和独立回归程序通过；之后原版构建脚本在缺少 dist 时失败。该失败有明确日志，不改写成打包成功；由本次最小目录修复处理。
+Actions `34448792635`：Swift 6.1.2 / macOS ARM64 上原版 Release 编译、86 项 Swift Testing 和独立回归程序通过；之后原版构建脚本在缺少 dist 时失败。该失败有明确日志，不改写成打包成功，由最小目录修复处理。
 
-## 增量验收
+## 增量验证：已执行
 
-- 原版哈希与允许增量由 scripts/verify-alight-baseline.py 校验；默认只校验，不生成或覆盖代码。
-- 原版 86 项测试与独立回归保留；Core 原有 56 项测试保留；新增 5 项 Skills 适配测试。
-- 增量 macOS 编译、双架构 DMG 和签名结果以当前提交对应的 Actions 为准，不能用原版测试代替。
-- 尚未在用户 Mac 实测：实际刘海/外屏布局、动画、真实日志对账、文件选择器和深链接。源文件沿用原版不等于已经完成视觉验收。
+源码 `e95d50625f70bac72e1f0e0955ff2918e0864f20`，Actions [34450589972](https://github.com/yzin-17/codex-monitor/actions/runs/34450589972)，2026-09-10 07:41 UTC 完成，结果 success。
+
+| 项目 | 实际结果 |
+| --- | --- |
+| 原版文件校验 | 当时 73 文件中 65 完全未改、8 处为显式允许的身份/导航/安装变更 |
+| Core XCTest | 56 项通过，0 失败 |
+| Swift Testing | 91 项通过：原版 86 项 + 新增 Skills 适配 5 项 |
+| 原版独立回归程序 | All regression tests passed |
+| ARM64 / Intel Release 编译与 DMG | 两种架构均已构建 |
+| 主机架构应用签名校验 | 通过，ad-hoc 签名，不是 Apple 公证 |
+
+之后的 `8385fd6b6aa49f0d50cb283210fd104c3bc51757` 只补齐缓存路径隔离和打包后源图标恢复，不改页面与数据算法；其构建以及最终 PR 的最新验证，以相应 Actions 为准。最终文件清单在 `docs/upstream/alight-manifest.json`，常规 CI 对允许的改动逐项检查。
+
+## 图形与实机边界
+
+CI 使用原版自带 `--qa-static-preview --qa-expanded` 在临时 Mac 运行器尝试启动和截取窗口预览，关闭远程数据源。该截图只包含合成数据，不读取用户账号；截图失败时单独显示图形步骤失败，不把其当成成功验收。用户实际刘海/外屏布局、交互、真实日志对账、文件选择器和深链接仍需实机确认。原版代码复用与编译成功不等于已经做过逐像素视觉对比。
 
 ## 安全与授权
 

@@ -31,6 +31,15 @@ jobs:
           python3 scripts/verify-alight-baseline.py
           git diff --exit-code
           ls -lh dist/*.dmg
+      - name: 原版静态测试数据窗口预览
+        id: ui_smoke
+        continue-on-error: true
+        run: ./scripts/ci-ui-smoke.sh
+      - name: 记录图形环境验证状态
+        if: always()
+        env:
+          UI_OUTCOME: ${{ steps.ui_smoke.outcome }}
+        run: echo "图形环境冒烟结果：$UI_OUTCOME；不等同人工视觉验收。" >> "$GITHUB_STEP_SUMMARY"
       - name: 验证安装包
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -38,11 +47,14 @@ jobs:
           path: dist/*.dmg
           retention-days: 7
           if-no-files-found: error
-      - name: 构建日志
+      - name: 构建日志与可用的窗口预览
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: build-log-${{ github.sha }}
-          path: ${{ runner.temp }}/build.log
+          name: validation-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/build.log
+            ${{ runner.temp }}/ui-preview.png
+            ${{ runner.temp }}/ui-smoke.log
           retention-days: 7
           if-no-files-found: ignore
