@@ -1,0 +1,109 @@
+name: 一次性恢复 ALight 原始基线
+on:
+  push:
+    branches: [rework/alight-baseline-skills]
+permissions:
+  contents: read
+jobs:
+  import:
+    if: github.repository == 'yzin-17/codex-monitor' && contains(github.event.head_commit.message, '[import-alight]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: write
+    outputs:
+      head: ${{ steps.restore.outputs.head }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+      - name: 导入固定原版源码并保留双方历史
+        id: restore
+        shell: bash
+        run: |
+          set -euo pipefail
+          upstream=ec9363d56a3692903f5ccb7462df2a0fbafc7297
+          branch=rework/alight-baseline-skills
+          start=$(git rev-parse HEAD)
+          test "$start" = "$GITHUB_SHA"
+          test "$(git ls-remote origin "refs/heads/$branch" | cut -f1)" = "$start"
+          test ! -e UPSTREAM.md
+          test -z "$(git status --porcelain)"
+          git fetch --no-tags https://github.com/ALight777/codex-monitor.git "$upstream"
+          test "$(git rev-parse FETCH_HEAD)" = "$upstream"
+          test "$(git rev-parse "$upstream^{tree}")" = c76ee52f0d4eb60b26b8283cc1755c4e88a8a820
+          saved=$(mktemp -d)
+          trap 'rm -rf "$saved"' EXIT
+          git archive HEAD .github | tar -x -C "$saved"
+          git show HEAD:LICENSE > "$saved/independent-MIT.txt"
+          git read-tree --reset -u "$upstream"
+          cp -R "$saved/.github" .
+          mkdir -p licenses
+          cp "$saved/independent-MIT.txt" licenses/independent-MIT.txt
+          cat > UPSTREAM.md <<'EOF'
+          # ALight 原版基线
+
+          原项目：https://github.com/ALight777/codex-monitor
+
+          固定提交：`ec9363d56a3692903f5ccb7462df2a0fbafc7297`（v0.1.17）。
+
+          本次按用户要求，先完整恢复原项目源码、UI、运行逻辑、资源、测试和脚本，再做小范围定制。原项目历史作为合并父提交保留；此前独立重写版仍保留在 Git 历史中，不再用其主窗口或 Token 引擎替代原版。
+
+          基线提交的上游文件内容与文件模式逐项一致，后续定制在单独提交中进行。不将 ALight 最新版和用户截图所处版本之间的差异说成已完成逐像素验证。
+
+          上游固定提交未附独立 LICENSE。本仓库保留来源与作者，不把原版代码改称自研或擅自套用本仓库 MIT；公开再分发授权仍需确认。此前独立实现及后续原创增量的 MIT 声明见 licenses/independent-MIT.txt。
+
+          原版包含 Radar、模型价格网络更新、远程账号与余额等功能，也会使用本机 Codex app-server；这次恢复保留其代码和默认开关，不再沿用旧版“整个应用完全离线”的说明。Skills 增量保持本地只读，不需要账户登录。
+          EOF
+          cat > LICENSE <<'EOF'
+          本仓库包含 ALight777/codex-monitor 原版源码及 yzin 的定制增量。
+          上游来源和固定版本见 UPSTREAM.md。上游未附明确许可证，本文件不授予原版代码额外权利。
+          licenses/independent-MIT.txt 仅适用于此前独立实现和本仓库原创增量，不覆盖上游继承代码。
+          EOF
+          cat > AGENTS.md <<'EOF'
+          # 项目开发规则
+
+          ## 基线优先
+          以 UPSTREAM.md 固定的 ALight 原项目为基础。先保留原版样式、布局、动效、交互和功能，再按明确需求增量删改。禁止再用独立侧栏主窗口或新的统计引擎替换原版。上游来源和作者必须保留。
+
+          ## 变更与安全
+          主线重做通过独立分支和 PR，不重写现有 main 历史。原版功能暂不删除，新增 Skills 为本地只读模块；未经明确需求不增加新的账户登录或外传会话。安装和数据标识必须与原版隔离，不强制退出 Codex，不降低系统安全设置。
+
+          ## 文档与验证
+          新增说明性文档使用中文，上游原文保留。Specs/tasks 带日期。原版回归、增量测试、Mac 构建与真实视觉验收分别记录；编译成功不等于截图验收。未知 Skill 启用状态、读取效果和逐 Skill Token 不得猜测。
+          EOF
+          git add .github UPSTREAM.md LICENSE AGENTS.md licenses
+          git config user.name 'codex-monitor maintenance'
+          git config user.email '30586807+yzin-17@users.noreply.github.com'
+          tree=$(git write-tree)
+          head=$(printf '%s\n' 'chore: restore ALight v0.1.17 source and UI baseline' '' '保留全部上游文件与作者历史；暂不删减原功能。独立重写版留在原有历史。' | git commit-tree "$tree" -p "$start" -p "$upstream")
+          git reset --hard "$head"
+          python3 - "$upstream" <<'PY'
+          import subprocess, sys
+          def tree(ref):
+              data = subprocess.check_output(['git', 'ls-tree', '-rz', ref])
+              return {line.split(b'\t', 1)[1]: line.split(b'\t', 1)[0] for line in data.split(b'\0') if line}
+          expected, actual = tree(sys.argv[1]), tree('HEAD')
+          wrong = [p for p, entry in expected.items() if actual.get(p) != entry]
+          assert not wrong, wrong
+          print(f'原版基线核验：{len(expected)} 个上游文件内容及模式全部一致。')
+          PY
+          git push origin "HEAD:refs/heads/$branch"
+          echo "head=$head" >> "$GITHUB_OUTPUT"
+  verify-original:
+    needs: import
+    runs-on: macos-15
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ needs.import.outputs.head }}
+          persist-credentials: false
+      - name: 原版测试与双架构打包
+        run: |
+          swift --version
+          ./scripts/build-app.sh
+          codesign --verify --deep --strict 'dist/codex监测.app'
+          ls -lh dist/*.dmg

@@ -1,4 +1,4 @@
-name: 本地核心与 macOS 构建
+name: macOS 原版与增量验证
 on:
   push:
   pull_request:
@@ -6,12 +6,18 @@ permissions:
   contents: read
 jobs:
   macos:
+    if: "!contains(github.event.head_commit.message, '[import-alight]')"
     runs-on: macos-15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
       - name: 工具链
         run: swift --version
-      - name: 测试、离线边界与桌面构建
-        run: ./scripts/build.sh
+      - name: 原版与增量测试、构建
+        run: |
+          if [[ -f scripts/verify-alight-baseline.py ]]; then python3 scripts/verify-alight-baseline.py; fi
+          if [[ -f scripts/build-app.sh ]]; then ./scripts/build-app.sh; else ./scripts/build.sh; fi
       - name: 产物信息
-        run: ls -lh dist && codesign -dv dist/CodexMonitor.app
+        run: ls -lh dist
