@@ -1,0 +1,100 @@
+name: 固定运行状态与原版配色验证
+on:
+  push:
+    branches: [feat/hud-status-style-20260910]
+permissions:
+  contents: read
+concurrency:
+  group: hud-status-style-validation
+  cancel-in-progress: false
+jobs:
+  validate:
+    if: contains(github.event.head_commit.message, '[style-apply]')
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: 应用本轮增量源码
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64, lzma, os
+          from pathlib import Path
+          parts = sorted(Path('tools/hud-style-transfer').glob('*'))
+          patch = lzma.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts), validate=True))
+          Path(os.environ['RUNNER_TEMP'], 'hud-style.patch').write_bytes(patch)
+          PY
+          git apply --check --index "$RUNNER_TEMP/hud-style.patch"
+          git apply --index "$RUNNER_TEMP/hud-style.patch"
+          if test -f tools/hud-style-fixes.py; then python3 tools/hud-style-fixes.py; git rm tools/hud-style-fixes.py; fi
+          git rm -r tools/hud-style-transfer
+          git add -A
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          CANDIDATE="$(printf '%s\n' 'feat: preserve fixed runtime status and upstream HUD palette' '' '合并外观与刘海几何，增加空格和条件布局控件，不更换原版功能与账号边界。' | git commit-tree "$(git write-tree)" -p "$GITHUB_SHA")"
+          git update-ref refs/heads/validated-hud-style "$CANDIDATE"
+          mkdir -p "$RUNNER_TEMP/validated" .baseline-output/ui
+          printf '%s\n' "$CANDIDATE" > "$RUNNER_TEMP/validated/candidate.txt"
+      - name: macOS 全量回归、原生截图与双架构打包
+        env:
+          CODEX_MONITOR_SNAPSHOT_DIR: ${{ github.workspace }}/.baseline-output/ui
+        shell: bash
+        run: |
+          set -euo pipefail
+          swift --version
+          ./scripts/build.sh > .baseline-output/build.log 2>&1 || { tail -180 .baseline-output/build.log; exit 1; }
+          grep -E 'Test run with|All regression|Built |error:' .baseline-output/build.log || true
+          codesign --verify --deep --strict dist/CodexMonitor.app
+          for page in codex performance skills codexRadar conversation-costs hud-menu-bar hud-layout codex-accounts hud-fixed-status hud-status-only; do
+            test -s ".baseline-output/ui/$page.png"
+          done
+          VERSION="$(tr -d '\r\n' < VERSION)"
+          test -s "dist/codex-monitor-$VERSION-arm64.dmg"
+          test -s "dist/codex-monitor-$VERSION-amd64.dmg"
+          git diff --quiet
+          git bundle create "$RUNNER_TEMP/validated/candidate.bundle" refs/heads/validated-hud-style
+      - name: 保存原生截图、构建日志与安装包
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: hud-style-native
+          path: |
+            .baseline-output/ui/*.png
+            .baseline-output/build.log
+            dist/*.dmg
+          include-hidden-files: true
+          retention-days: 14
+          if-no-files-found: warn
+      - name: 保存已验证源码提交
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: validated-hud-style
+          path: ${{ runner.temp }}/validated/
+          retention-days: 2
+          if-no-files-found: error
+  publish:
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: validated-hud-style
+          path: ${{ runner.temp }}/validated
+      - name: 快进已验证的功能分支
+        shell: bash
+        run: |
+          set -euo pipefail
+          CANDIDATE="$(cat "$RUNNER_TEMP/validated/candidate.txt")"
+          git fetch "$RUNNER_TEMP/validated/candidate.bundle" refs/heads/validated-hud-style:refs/remotes/validated/hud-style
+          test "$(git ls-remote origin refs/heads/feat/hud-status-style-20260910 | cut -f1)" = "$GITHUB_SHA"
+          git push origin "$CANDIDATE:refs/heads/feat/hud-status-style-20260910"
