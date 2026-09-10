@@ -34,4 +34,12 @@ s=s.replace('''        if !interactive { query[kSecUseAuthenticationUI as String
             context.interactionNotAllowed = true
             query[kSecUseAuthenticationContext as String] = context
         }''',1)
+s=s.replace('accounts = defaults.data(forKey: "codexAccounts.v1").flatMap','let loadedAccounts = defaults.data(forKey: "codexAccounts.v1").flatMap',1)
+s=s.replace('accounts = Array(accounts.filter { ids.insert($0.id).inserted }.prefix(30))','accounts = Array(loadedAccounts.filter { ids.insert($0.id).inserted }.prefix(30))',1)
+p.write_text(s)
+p=root/'Sources/CodexNotch/NotchIslandView.swift'
+s=p.read_text().replace('if preferences.value.mode.usesCompactOverlay(hasNotch: (currentScreen?.safeAreaInsets.top ?? 0) > 0) { return 16 }','if preferences.value.mode.usesCompactOverlay(hasNotch: (currentScreen?.safeAreaInsets.top ?? 0) > 0) { return selectedPage == .codex ? 38 : 16 }',1)
+s=s.replace('''                IslandMetrics.quotaResetTopPadding(
+                    safeAreaTop:''','''                preferences.value.mode.usesCompactOverlay(hasNotch: (currentScreen?.safeAreaInsets.top ?? 0) > 0) ? 8 : IslandMetrics.quotaResetTopPadding(
+                    safeAreaTop:''',1)
 p.write_text(s)
