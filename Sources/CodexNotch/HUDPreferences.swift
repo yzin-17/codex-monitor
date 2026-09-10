@@ -12,6 +12,14 @@ struct HUDConfiguration: Codable, Equatable, Sendable {
     var showRemaining = true
     var layout = HUDLayout.compact
     var providerLayouts: [String: HUDLayout] = [:]
+    var hudTransparency: Double {
+        get { 1 - normalized.hudOpacity }
+        set { hudOpacity = 1 - min(1, max(0, newValue.isFinite ? newValue : 0)) }
+    }
+    var panelTransparency: Double {
+        get { 1 - normalized.panelOpacity }
+        set { panelOpacity = 1 - min(0.65, max(0, newValue.isFinite ? newValue : 0)) }
+    }
     var normalized: Self {
         var copy = self
         copy.maximumWidth = maximumWidth.isFinite ? min(360, max(90, maximumWidth)) : 220

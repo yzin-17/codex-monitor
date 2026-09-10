@@ -433,14 +433,23 @@ struct DetailPanelView: View {
                             codexRadarContent
                         case .remoteCodex:
                             VStack(spacing: 10) {
-                                Picker("远程账户类型", selection: $remoteSection) {
-                                    Text("网关账户").tag("gateway")
-                                    Text("Codex 账号").tag("codex")
-                                }.pickerStyle(.segmented)
-                                if remoteSection == "gateway" { remoteContent }
-                                else {
+                                HStack(spacing: 5) {
+                                    ForEach(RemoteSourceCategory.allCases) { category in
+                                        Button { remoteSection = category.rawValue } label: {
+                                            Text(category.title).font(.system(size: 11, weight: .semibold))
+                                                .foregroundStyle(remoteSection == category.rawValue ? MonitorTheme.textPrimary : MonitorTheme.textSecondary)
+                                                .frame(maxWidth: .infinity).padding(.vertical, 7)
+                                                .background(remoteSection == category.rawValue ? Color.white.opacity(0.12) : Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 6))
+                                        }.buttonStyle(.plain)
+                                    }
+                                }.accessibilityLabel("远程数据源类型")
+                                switch remoteSection {
+                                case "codex":
                                     ScrollView { CodexAccountsPanel(store: codexAccounts,
                                         preferences: preferences, onSettings: onSettings) }
+                                case "newapi": balanceContent(newAPIViewModel)
+                                case "subapi": balanceContent(subAPIViewModel)
+                                default: remoteContent
                                 }
                             }
                         case .newAPI:
@@ -465,11 +474,15 @@ struct DetailPanelView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .clipShape(RoundedRectangle(cornerRadius: 20))
+        .foregroundStyle(MonitorTheme.textPrimary)
+        .environment(\.colorScheme, .dark)
+        .preferredColorScheme(.dark)
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)) { _ in
             geometryRevision += 1
         }
-        .onAppear { synchronizeExtensionVisibility() }
+        .onAppear { migrateRemotePage(); synchronizeExtensionVisibility() }
         .onChange(of: detailPage) { _, _ in
+            migrateRemotePage()
             expandedTaskID = nil
             synchronizeExtensionVisibility()
         }
@@ -579,6 +592,8 @@ struct DetailPanelView: View {
             if remoteSection == "codex" {
                 return !codexAccounts.monitoringEnabled ? "未启用" : codexAccounts.states.values.contains(where: \.isRefreshing) ? "读取中" : "\(codexAccounts.accounts.filter(\.enabled).count) 个账户"
             }
+            if remoteSection == "newapi" { return balanceHeaderStatus(newAPIViewModel.snapshot) }
+            if remoteSection == "subapi" { return balanceHeaderStatus(subAPIViewModel.snapshot) }
             return remoteHeaderStatus
         case .newAPI:
             return balanceHeaderStatus(newAPIViewModel.snapshot)
@@ -598,7 +613,7 @@ struct DetailPanelView: View {
         case .codexRadar:
             codexRadarHeaderColor
         case .remoteCodex:
-            remoteSection == "codex" ? (codexAccounts.states.values.contains(where: { $0.error != nil }) ? .orange : .white.opacity(0.70)) : remoteStatusColor
+            remoteSection == "codex" ? (codexAccounts.states.values.contains(where: { $0.error != nil }) ? .orange : .white.opacity(0.70)) : remoteSection == "newapi" ? balanceStatusColor(newAPIViewModel.snapshot) : remoteSection == "subapi" ? balanceStatusColor(subAPIViewModel.snapshot) : remoteStatusColor
         case .newAPI:
             balanceStatusColor(newAPIViewModel.snapshot)
         case .subAPI:
@@ -664,7 +679,7 @@ struct DetailPanelView: View {
         case .codexRadar:
             codexRadarViewModel.isRefreshing
         case .remoteCodex:
-            remoteSection == "codex" ? codexAccounts.states.values.contains(where: \.isRefreshing) : remoteViewModel.isRefreshing
+            remoteSection == "codex" ? codexAccounts.states.values.contains(where: \.isRefreshing) : remoteSection == "newapi" ? newAPIViewModel.isRefreshing : remoteSection == "subapi" ? subAPIViewModel.isRefreshing : remoteViewModel.isRefreshing
         case .newAPI:
             newAPIViewModel.isRefreshing
         case .subAPI:
@@ -716,20 +731,16 @@ struct DetailPanelView: View {
         .frame(height: IslandMetrics.detailPageSwitcherHeight)
     }
 
-    private var availablePages: [DetailPage] {
-        var pages: [DetailPage] = [.codex, .performance, .skills, .codexRadar]
-        pages.append(.remoteCodex) // 保留网关，新增 Codex 账号从此入口配置。
-        if settings.newAPIMonitorEnabled {
-            pages.append(.newAPI)
-        }
-        if settings.subAPIMonitorEnabled {
-            pages.append(.subAPI)
-        }
-        return pages
-    }
+    private var availablePages: [DetailPage] { [.codex, .performance, .skills, .codexRadar, .remoteCodex] }
 
     private var selectedPage: DetailPage {
-        availablePages.contains(detailPage) ? detailPage : .codex
+        if detailPage == .newAPI || detailPage == .subAPI { return .remoteCodex }
+        return availablePages.contains(detailPage) ? detailPage : .codex
+    }
+
+    private func migrateRemotePage() {
+        if detailPage == .newAPI { remoteSection = "newapi" }
+        if detailPage == .subAPI { remoteSection = "subapi" }
     }
 
     @ViewBuilder
@@ -797,6 +808,8 @@ struct DetailPanelView: View {
             onCodexRadarRefresh()
         case .remoteCodex:
             if remoteSection == "codex" { codexAccounts.refreshAll(interactive: true) }
+            else if remoteSection == "newapi" { onNewAPIRefresh() }
+            else if remoteSection == "subapi" { onSubAPIRefresh() }
             else { onRemoteRefresh() }
         case .newAPI:
             onNewAPIRefresh()
@@ -1609,13 +1622,14 @@ private struct RemoteAccountRow: View {
                         .monospacedDigit()
                         .foregroundStyle(window.reachesThreshold ? Color(red: 1.0, green: 0.55, blue: 0.25) : .white.opacity(0.62))
                         .lineLimit(1)
-                        .minimumScaleFactor(layoutMode == .full ? 0.72 : 0.58)
+                        .minimumScaleFactor(layoutMode != .compact ? 0.72 : 0.58)
                         .layoutPriority(1)
                 }
 
                 if account.resetCredits != nil {
                     ResetCreditsIndicator(
                         resetCredits: account.resetCredits,
+                        showsCountdown: layoutMode == .spacious,
                         fontSize: layoutMode.resetCreditFontSize,
                         foregroundColor: .white.opacity(0.58)
                     )

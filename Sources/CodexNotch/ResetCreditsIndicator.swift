@@ -23,6 +23,22 @@ struct ResetCreditsDisplay: Equatable {
         "剩余重置次数：\(availableCount)"
     }
 
+    func nearestExpiry(at now: Date) -> Date? {
+        guard availableCount > 0 else { return nil }
+        return expiryDates.filter { $0 > now }.min()
+    }
+
+    func nearestExpiryText(at now: Date) -> String? {
+        guard availableCount > 0 else { return nil }
+        guard let date = nearestExpiry(at: now) else {
+            return expiryDates.isEmpty ? "到期时间未知" : "到期信息待刷新"
+        }
+        let minutes = max(1, Int(ceil(date.timeIntervalSince(now) / 60)))
+        if minutes >= 1440 { return "最近到期 \(minutes / 1440)天\((minutes % 1440) / 60)小时" }
+        if minutes >= 60 { return "最近到期 \(minutes / 60)小时\(minutes % 60)分" }
+        return "最近到期 \(minutes)分"
+    }
+
     var showsInfoButton: Bool {
         availableCount > 0 && !expiryDates.isEmpty
     }
@@ -49,31 +65,33 @@ enum ResetCreditsPlacement {
 enum ResetCreditsLayoutMode: Equatable {
     case full
     case compact
+    case spacious
 
     var trailingWidth: CGFloat {
         switch self {
         case .full: 190
+        case .spacious: 280
         case .compact: 148
         }
     }
 
     var quotaSpacing: CGFloat {
         switch self {
-        case .full: 5
+        case .full, .spacious: 5
         case .compact: 2
         }
     }
 
     var quotaFontSize: CGFloat {
         switch self {
-        case .full: 8.4
+        case .full, .spacious: 8.4
         case .compact: 7.6
         }
     }
 
     var resetCreditFontSize: CGFloat {
         switch self {
-        case .full: 7.7
+        case .full, .spacious: 7.7
         case .compact: 6.8
         }
     }
@@ -104,7 +122,7 @@ enum ResetCreditsLayout {
         guard hasResetCredits, availableWidth >= fullMinimumAvailableWidth else {
             return .compact
         }
-        return .full
+        return availableWidth >= 426 ? .spacious : .full
     }
 
     static func estimatedLeadingWidth(
@@ -122,6 +140,7 @@ struct ResetCreditExpiryRow: Equatable {
 
 struct ResetCreditsIndicator: View {
     let resetCredits: RateLimitResetCredits?
+    var showsCountdown = true
     var fontSize: CGFloat = 8.4
     var foregroundColor: Color = .white.opacity(0.58)
 
@@ -141,6 +160,15 @@ struct ResetCreditsIndicator: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.62)
                     .layoutPriority(1)
+
+                TimelineView(.periodic(from: .now, by: 60)) { context in
+                    if showsCountdown, let text = display.nearestExpiryText(at: context.date) {
+                        Text(text)
+                            .font(.system(size: fontSize, weight: .semibold, design: .rounded))
+                            .monospacedDigit().foregroundStyle(foregroundColor)
+                            .lineLimit(1).help("最近一笔可用重置次数的到期倒计时，不是 5h/7d 额度自动恢复时间。")
+                    }
+                }
 
                 if display.showsInfoButton {
                     Button {

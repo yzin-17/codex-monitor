@@ -620,7 +620,7 @@ final class NotchOverlayController {
             accounts: settings.codexAccounts, settings: settings)
         let width = HUDMetricStrip.measuredWidth(layout: settings.hudPreferences.value.layout(for: data.providerID),
             data: data, remaining: settings.hudPreferences.value.showRemaining, menuBar: true)
-        return FloatingHUDGeometry.frame(screen: screen.frame, menuBarHeight: NSStatusBar.system.thickness,
+        return FloatingHUDGeometry.frame(screen: screen.frame, menuBarHeight: MenuBarMetrics.height(for: screen),
             contentSize: .init(width: width + 16 + 9 + HUDRuntimeStatus.reservedWidth, height: 20),
             maximumWidth: settings.hudPreferences.value.normalized.maximumWidth,
             position: settings.hudPreferences.value.normalized.horizontalPosition)

@@ -194,7 +194,7 @@ private func referenceCatalog(at now: Date) throws -> SkillCatalogSnapshot {
     let overlay = OverlayState(); overlay.isExpanded = true; overlay.setDetailPresentationPhase(.visible)
     let output = ProcessInfo.processInfo.environment["CODEX_MONITOR_SNAPSHOT_DIR"].map { URL(fileURLWithPath: $0) }
     if let output { try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true) }
-    for (page, expanded) in [(DetailPage.codex, false), (.performance, false), (.skills, false), (.codexRadar, false), (.codex, true)] {
+    for (page, expanded) in [(DetailPage.codex, false), (.performance, false), (.skills, false), (.codexRadar, false), (.remoteCodex, false), (.codex, true)] {
         let firstTask = usage.snapshot.tasks[0]
         let childUsage = usage.snapshot.tasks[1].tokenUsage
         let sample = ConversationCostDetails(rootID: firstTask.id,
@@ -256,7 +256,7 @@ private func referenceCatalog(at now: Date) throws -> SkillCatalogSnapshot {
     prefs.value.layout = .detailed
     let hud = ConfigurableHUDView(preferences: prefs, accounts: previewStore, usage: usage,
         remote: remote, newAPI: newAPI, subAPI: subAPI, settings: settings, menuBar: true)
-    try await captureCustomization(AnyView(hud), size: .init(width: 220, height: 22), name: "hud-menu-bar", output: output)
+    try await captureCustomization(AnyView(hud), size: .init(width: 220, height: MenuBarMetrics.height()), name: "hud-menu-bar", output: output)
     // 切换右侧来源后，本机运行指示不被账户状态替换；清空布局也只清空右侧。
     prefs.value.sourceID = previewStore.accounts[0].hudID
     #expect(hud.data.state == "OFF")
@@ -264,9 +264,9 @@ private func referenceCatalog(at now: Date) throws -> SkillCatalogSnapshot {
     prefs.value.maximumWidth = 360
     prefs.value.layout = .init(lines: [["primary", "space:8", "weekly", "tokensToday"]])
     prefs.value.sourceID = "local"
-    try await captureCustomization(AnyView(hud), size: .init(width: 360, height: 22), name: "hud-fixed-status", output: output)
+    try await captureCustomization(AnyView(hud), size: .init(width: 360, height: MenuBarMetrics.height()), name: "hud-fixed-status", output: output)
     prefs.value.layout = .init(lines: [[]])
-    try await captureCustomization(AnyView(hud), size: .init(width: 100, height: 22), name: "hud-status-only", output: output)
+    try await captureCustomization(AnyView(hud), size: .init(width: 100, height: MenuBarMetrics.height()), name: "hud-status-only", output: output)
     prefs.value.layout = .detailed
     prefs.value.maximumWidth = 220
     // 覆盖式 NSPanel 浮窗，实际菜单高度内，没有创建 NSStatusItem。
@@ -302,7 +302,7 @@ private func referenceCatalog(at now: Date) throws -> SkillCatalogSnapshot {
     try await Task.sleep(for: .milliseconds(200))
     host.layoutSubtreeIfNeeded(); host.displayIfNeeded()
     if name == "hud-menu-bar" {
-        #expect(host.bounds.height <= min(22, NSStatusBar.system.thickness))
+        #expect(host.bounds.height == MenuBarMetrics.height())
         #expect(window.contentView?.bounds.height == host.bounds.height)
     }
     let bitmap = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))

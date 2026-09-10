@@ -70,7 +70,7 @@ import Testing
     for barHeight: CGFloat in [20, 22, 24, 32] {
         for position in [0.0, 0.5, 1.0] {
             let f = FloatingHUDGeometry.frame(screen: screen, menuBarHeight: barHeight, contentSize: .init(width: 160, height: 20), maximumWidth: 220, position: position)
-            #expect(f.width == 160 && f.height == min(22, barHeight))
+            #expect(f.width == 160 && f.height == barHeight)
             #expect(f.maxY <= screen.maxY && f.minY >= screen.maxY - barHeight)
             #expect(f.minX >= screen.minX && f.maxX <= screen.maxX)
         }
