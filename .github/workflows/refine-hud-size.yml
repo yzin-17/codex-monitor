@@ -35,6 +35,23 @@ jobs:
           p=Path('Tests/CodexNotchTests/ReferenceExtensionTests.swift')
           s=p.read_text().replace('    host.layoutSubtreeIfNeeded(); host.displayIfNeeded()\n    let bitmap', '    host.layoutSubtreeIfNeeded(); host.displayIfNeeded()\n    if name == "hud-menu-bar" {\n        #expect(host.bounds.height <= min(22, NSStatusBar.system.thickness))\n        #expect(window.contentView?.bounds.height == host.bounds.height)\n    }\n    let bitmap',1)
           p.write_text(s)
+          p=Path('Tests/CodexNotchTests/HUDCustomizationTests.swift')
+          s=p.read_text()
+          start=s.index('@Test func floatingHUDStaysInsideMenuBarAndHasNoNotchGap()')
+          end=s.index('@Test func revealStartsInsideHUDAndKeepsTopEdgeAndFontSize()',start)
+          s=s[:start]+'''@Test func floatingHUDStaysInsideMenuBarAndHasNoNotchGap() {
+              let screen = CGRect(x: -1920, y: -100, width: 1920, height: 1080)
+              for barHeight: CGFloat in [20, 22, 24, 32] {
+                  for position in [0.0, 0.5, 1.0] {
+                      let f = FloatingHUDGeometry.frame(screen: screen, menuBarHeight: barHeight, contentSize: .init(width: 160, height: 20), maximumWidth: 220, position: position)
+                      #expect(f.width == 160 && f.height == min(22, barHeight))
+                      #expect(f.maxY <= screen.maxY && f.minY >= screen.maxY - barHeight)
+                      #expect(f.minX >= screen.minX && f.maxX <= screen.maxX)
+                  }
+              }
+          }
+          '''+s[end:]
+          p.write_text(s)
           PY
           git add -A
           git diff --cached --check
