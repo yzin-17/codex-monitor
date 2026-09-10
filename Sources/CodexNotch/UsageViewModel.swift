@@ -8,6 +8,16 @@ final class UsageViewModel: ObservableObject {
     @Published private(set) var isRefreshingUsage = false
     @Published private(set) var hasLoadedUsageTotals = false
 
+    lazy var publicInsights = PublicInsightsStore(defaults: settings.preferenceStore, automatic: !isPreviewMode)
+    lazy var cliResume = CLIResumeStore(home: store.conversationDataDirectory,
+        defaults: settings.preferenceStore, automatic: !isPreviewMode,
+        activeThreads: { [weak self] in Set(self?.snapshot.tasks.filter { $0.status == .running }.map(\.id) ?? []) })
+
+    func shutdownExtensions() async {
+        publicInsights.stop()
+        await cliResume.shutdown()
+    }
+
     private let store: CodexUsageStore
     private let settings: CodexNotchSettings
     private let isPreviewMode: Bool
@@ -60,6 +70,9 @@ final class UsageViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
+        // 恢复已经明确启用的检查，不依赖用户打开某个页面。
+        _ = publicInsights
+        _ = cliResume
     }
 
     func makeConversationCostLoader() -> ConversationCostLoader? {
@@ -135,6 +148,7 @@ final class UsageViewModel: ObservableObject {
     }
 
     func resumeAfterSystemActivity() {
+        publicInsights.refreshIfNeeded()
         TokenPricingUpdater.shared.refreshIfDue()
         fastTimer?.invalidate()
         fastTimer = nil
