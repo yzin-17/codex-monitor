@@ -4,20 +4,43 @@ on:
   pull_request:
 permissions:
   contents: read
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   macos:
-    if: "!contains(github.event.head_commit.message, '[import-alight]')"
+    if: "!contains(github.event.head_commit.message, '[import-alight]') && !contains(github.event.head_commit.message, '[apply-alight]')"
     runs-on: macos-15
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
+          fetch-depth: 0
           persist-credentials: false
-      - name: 工具链
-        run: swift --version
-      - name: 原版与增量测试、构建
+      - name: 工具链与原版一致性
         run: |
-          if [[ -f scripts/verify-alight-baseline.py ]]; then python3 scripts/verify-alight-baseline.py; fi
-          if [[ -f scripts/build-app.sh ]]; then ./scripts/build-app.sh; else ./scripts/build.sh; fi
-      - name: 产物信息
-        run: ls -lh dist
+          swift --version
+          python3 scripts/verify-alight-baseline.py
+      - name: 原版回归、Skills 测试与双架构打包
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/build-app.sh > "$RUNNER_TEMP/build.log" 2>&1 || { tail -180 "$RUNNER_TEMP/build.log"; exit 1; }
+          grep -E 'Executed [0-9]+ tests|Test run with|All regression|Built |error:' "$RUNNER_TEMP/build.log" || true
+          codesign --verify --deep --strict dist/CodexMonitor.app
+          ls -lh dist/*.dmg
+      - name: 验证安装包
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: codex-monitor-alight-${{ github.sha }}
+          path: dist/*.dmg
+          retention-days: 7
+          if-no-files-found: error
+      - name: 构建日志
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: build-log-${{ github.sha }}
+          path: ${{ runner.temp }}/build.log
+          retention-days: 7
+          if-no-files-found: ignore
