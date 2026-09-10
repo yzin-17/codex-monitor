@@ -20,11 +20,11 @@ import Testing
     let layout = HUDLayout.detailed.inserting(.primary, row: 1, before: .tokensToday)
     #expect(layout.lines[1].first == "primary")
     #expect(layout.lines.joined().filter { $0 == "primary" }.count == 1)
-    #expect(layout.inserting(.primary, row: 0, before: .state).lines[0].first == "primary")
+    #expect(layout.inserting(.primary, row: 0, before: .weekly).lines[0].first == "primary")
 }
 @Test func hudEmptySecondLinePersistsUntilRemoved() {
     #expect(HUDLayout(lines: [["primary"], []]).normalized.lines.count == 2)
-    #expect(HUDLayout(lines: [["primary"]]).removing(.primary) == .compact)
+    #expect(HUDLayout(lines: [["primary"]]).removing(.primary).lines == [[]])
 }
 @Test func hudMalformedDimensionsAreBounded() {
     var c = HUDConfiguration(); c.maximumWidth = .nan; c.hudOpacity = 100; c.panelOpacity = -3
@@ -212,4 +212,26 @@ private final class TestCodexVault: @unchecked Sendable {
         #expect(content.frame.size == NSSize(width: 680, height: 720))
         #expect(content.frame.midX == clip.bounds.midX && content.frame.maxY == clip.bounds.maxY)
     }
+}
+
+@Test @MainActor func legacyBackdropDefaultsMigrateButCustomOpacitySurvives() throws {
+    let suite = "hud-palette-\(UUID())", defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    var previous = HUDConfiguration(); previous.hudOpacity = 0.30; previous.panelOpacity = 0.78
+    defaults.set(try JSONEncoder().encode(previous), forKey: HUDPreferences.key)
+    let prefs = HUDPreferences(defaults: defaults)
+    #expect(prefs.value.hudOpacity == 0.985 && prefs.value.panelOpacity == 0.985)
+    prefs.value.hudOpacity = 0.55; prefs.value.panelOpacity = 0.65
+    let reloaded = HUDPreferences(defaults: defaults)
+    #expect(reloaded.value.hudOpacity == 0.55 && reloaded.value.panelOpacity == 0.65)
+}
+@Test @MainActor func neutralHUDDoesNotInstallWallpaperTintMaterial() {
+    let host = NSHostingView(rootView: HUDGlassBackground(opacity: 0.985))
+    host.frame = NSRect(x: 0, y: 0, width: 220, height: 22)
+    host.layoutSubtreeIfNeeded()
+    func containsVisualEffect(_ view: NSView) -> Bool {
+        view is NSVisualEffectView || view.subviews.contains(where: containsVisualEffect)
+    }
+    #expect(!containsVisualEffect(host))
+    #expect(HUDMetricStrip.measuredWidth(layout: .init(lines: [["space:8", "space:16"]]), data: .init(), remaining: true, menuBar: true) == 29)
 }

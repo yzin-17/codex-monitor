@@ -1,136 +1,54 @@
 import AppKit
 import SwiftUI
 
-// Jackie 的 NSVisualEffectView / hudWindow / behindWindow 组合；不对文字设置透明度。
-struct MonitorGlass: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView(); view.material = .hudWindow
-        view.blendingMode = .behindWindow; view.state = .active; view.isEmphasized = false
-        return view
-    }
-    func updateNSView(_ view: NSVisualEffectView, context: Context) {}
-}
+// 使用原版中性黑底，不使用会吸收壁纸色的 behindWindow/hudWindow 材质。
+// 透明度只影响背景，正文与状态色始终取 MonitorTheme。
 struct HUDGlassBackground: View {
     var opacity: Double
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     var body: some View {
-        ZStack {
-            if !reduceTransparency { MonitorGlass() }
-            Color.black.opacity(reduceTransparency ? 0.96 : opacity)
-        }
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(.white.opacity(0.10), lineWidth: 0.5))
+        Color.black.opacity(reduceTransparency ? 1 : min(1, max(0, opacity)))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(MonitorTheme.panelStroke, lineWidth: MonitorTheme.Stroke.hairline))
     }
 }
-struct HUDEntityData: Equatable {
-    var providerID = "codex"
-    var provider = "Codex"
-    var account = "本机"
-    var state = "IDLE"
-    var primary: Double?
-    var weekly: Double?
-    var resetsAt: Date?
-    var balance: String?
-    var todayTokens: String?
-    var costToday: String?
-    var cost30d: String?
-    var warning: String?
-    var primaryLabel = "5h"
-    var automatic: Double? { [primary, weekly].compactMap { $0 }.min() }
-    func text(_ metric: HUDMetric, remaining: Bool, now: Date = Date()) -> String {
-        func percent(_ number: Double?) -> String {
-            guard let number, number.isFinite else { return "—" }
-            return "\(Int((remaining ? number : 100 - number).rounded()))%"
-        }
-        switch metric {
-        case .icon: return "◉"
-        case .provider: return provider
-        case .account: return account
-        case .state: return state
-        case .primary: return "\(primaryLabel) \(percent(primary))"
-        case .weekly: return "7d \(percent(weekly))"
-        case .automatic: return percent(automatic)
-        case .usageBar: return percent(automatic)
-        case .tokensToday: return todayTokens.map { "T \($0)" } ?? "T —"
-        case .balance: return balance ?? "余额 —"
-        case .costToday: return costToday.map { "今日 \($0)" } ?? "今日 —"
-        case .cost30d: return cost30d.map { "30天 \($0)" } ?? "30天 —"
-        case .resetCountdown:
-            guard let resetsAt else { return "重置 —" }
-            let seconds = max(0, resetsAt.timeIntervalSince(now))
-            if seconds == 0 { return "待刷新" }
-            if seconds >= 86400 { return "\(Int(seconds / 86400))d \(Int(seconds.truncatingRemainder(dividingBy: 86400) / 3600))h" }
-            return "\(Int(seconds / 3600))h \(Int(seconds.truncatingRemainder(dividingBy: 3600) / 60))m"
-        case .resetTime:
-            guard let resetsAt else { return "重置 —" }
-            let formatter = DateFormatter(); formatter.dateFormat = "M/d HH:mm"; return formatter.string(from: resetsAt)
+extension HUDTone {
+    var color: Color {
+        switch self {
+        case .primary: MonitorTheme.textPrimary; case .secondary: MonitorTheme.textSecondary
+        case .tertiary: MonitorTheme.textTertiary; case .healthy: MonitorTheme.healthy
+        case .warning: MonitorTheme.warning; case .critical: MonitorTheme.critical
         }
     }
-    @MainActor static func resolve(source: String, usage: UsageViewModel, remote: RemoteMonitorViewModel,
-                                   newAPI: BalanceMonitorViewModel, subAPI: BalanceMonitorViewModel,
-                                   accounts: CodexAccountsStore, settings: CodexNotchSettings) -> Self {
-        if source == "legacy" {
-            let selected = settings.notchDisplaySource
-            var target = "local"
-            if selected == .remoteCodex || (selected == .automatic && remote.snapshot.panelSeverity != .none) {
-                target = remote.snapshot.accounts.first.map { "remote:\($0.id)" } ?? "unavailable"
-            } else if selected == .newAPI || (selected == .automatic && newAPI.snapshot.panelSeverity != .none) {
-                target = newAPI.snapshot.accounts.first.map { "newapi:\($0.id)" } ?? "unavailable"
-            } else if selected == .subAPI || (selected == .automatic && subAPI.snapshot.panelSeverity != .none) {
-                target = subAPI.snapshot.accounts.first.map { "subapi:\($0.id)" } ?? "unavailable"
-            }
-            return resolve(source: target, usage: usage, remote: remote, newAPI: newAPI, subAPI: subAPI, accounts: accounts, settings: settings)
+}
+
+/// 固定区域：只表达本机 Codex 是否在执行，不能从布局删除，也不跟随远程来源切换。
+struct HUDRuntimeStatus: View {
+    let isRunning: Bool
+    var enablePulse = false
+    var compact = false
+    var narrow = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var pulse = false
+    private var activePulse: Bool { isRunning && enablePulse && !reduceMotion }
+    static let reservedWidth: CGFloat = 47
+    var body: some View {
+        HStack(spacing: 5) {
+            Circle().fill(isRunning ? MonitorTheme.running : MonitorTheme.neutral)
+                .frame(width: 8, height: 8)
+                .shadow(color: isRunning ? MonitorTheme.running.opacity(0.40) : .clear, radius: 4)
+                .opacity(activePulse && pulse ? 0.60 : 1)
+            Text(isRunning ? "RUN" : "IDLE")
+                .font(.system(size: narrow ? 8.5 : compact ? 10 : 10.5, weight: .bold))
+                .foregroundStyle(isRunning ? MonitorTheme.textPrimary : MonitorTheme.textSecondary)
         }
-        var d = Self()
-        if source == "local" {
-            let s = usage.snapshot
-            d.primary = s.primaryPercent.map(Double.init); d.weekly = s.secondaryPercent.map(Double.init)
-            d.state = s.isRunning ? "RUN" : "IDLE"
-            d.resetsAt = [s.primaryResetsAt, s.secondaryResetsAt].compactMap { $0 }.min()
-            if usage.hasLoadedUsageTotals {
-                d.todayTokens = Formatters.compactTokens(s.usageToday)
-                func amount(_ u: TokenUsageSummary) -> String? {
-                    u.costUSD.map { String(format: "%@%.2f USD", u.isComplete ? "≈" : "≥", $0) }
-                }
-                d.costToday = amount(s.usageTodaySummary); d.cost30d = amount(s.usage30dSummary)
-            }
-            d.warning = s.errorMessage; return d
+        .fixedSize().layoutPriority(2)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(isRunning ? "本机 Codex 正在运行" : "本机 Codex 空闲")
+        .help("本机 Codex 运行状态（固定显示，不随右侧账户选择改变）")
+        .onChange(of: activePulse, initial: true) { _, enabled in
+            withAnimation(nil) { pulse = false }
+            if enabled { withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) { pulse = true } }
         }
-        if source.hasPrefix("codex-account:"), let id = UUID(uuidString: String(source.dropFirst(14))),
-           let a = accounts.accounts.first(where: { $0.id == id }) {
-            d.providerID = "codex"; d.provider = "Codex"; d.account = a.label
-            guard accounts.monitoringEnabled && a.enabled else { d.state = "OFF"; d.warning = "账户监测已关闭"; return d }
-            let state = accounts.states[id]
-            d.state = state?.isRefreshing == true ? "…" : state?.error != nil ? "!" : state?.usage == nil ? "—" : "OK"
-            d.warning = state?.error
-            if let s = state?.usage {
-                d.primary = s.quotas.first(where: { $0.id == "primary_window" })?.remainingPercent
-                d.primaryLabel = s.quotas.first(where: { $0.id == "primary_window" })?.label ?? "会话"
-                d.weekly = s.quotas.first(where: { $0.label == "7d" })?.remainingPercent
-                d.resetsAt = s.quotas.compactMap(\.resetsAt).min()
-                d.balance = s.credits // credits 不是美元，不与本地对话估算费用混用。
-                if Date().timeIntervalSince(s.capturedAt) > max(accounts.interval * 2, 600) { d.warning = "数据已过期，等待刷新" }
-            }
-            return d
-        }
-        if source.hasPrefix("remote:"), settings.remoteMonitorEnabled,
-           let a = remote.snapshot.accounts.first(where: { "remote:\($0.id)" == source }) {
-            d.providerID = "gateway"; d.provider = a.provider ?? "网关"; d.account = a.displayName
-            d.state = a.state.label
-            d.primary = a.displayQuotaWindows.first?.remainingPercent.map(Double.init)
-            d.weekly = a.displayQuotaWindows.first(where: { $0.shortLabel == "7d" })?.remainingPercent.map(Double.init)
-            d.warning = a.quotaError
-            return d
-        }
-        for (prefix, vm, enabled) in [("newapi:", newAPI, settings.newAPIMonitorEnabled), ("subapi:", subAPI, settings.subAPIMonitorEnabled)] {
-            if source.hasPrefix(prefix), enabled, let a = vm.snapshot.accounts.first(where: { prefix + $0.id == source }) {
-                d.providerID = prefix; d.provider = a.source.title; d.account = a.displayName
-                d.state = a.state.label; d.balance = a.amountText
-                if a.state == .error { d.warning = "账户数据异常" }
-                return d
-            }
-        }
-        d.account = "未找到所选账户"; d.state = "—"; d.warning = "所选账户不可用；不会偷偷切换到其他账户"
-        return d
     }
 }
 struct HUDMetricStrip: View {
@@ -138,41 +56,75 @@ struct HUDMetricStrip: View {
     let data: HUDEntityData
     var remaining = true
     var menuBar = false
-    var side: Int? = nil
-    private var lines: [[HUDMetric]] {
-        let full = layout.metrics
-        guard let side else { return full }
-        return full.map { line in
-            let split = max(1, (line.count + 1) / 2)
-            return Array(side == 0 ? line.prefix(split) : line.dropFirst(split))
-        }
-    }
+    private var rows: [[String]] { layout.normalized.lines }
+    private var fontSize: CGFloat { menuBar && rows.count == 2 ? min(9, NSStatusBar.system.thickness / 2.5) : 11 }
     var body: some View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
-            VStack(spacing: menuBar && lines.count == 2 ? 0 : 2) {
-                ForEach(Array(lines.enumerated()), id: \.offset) { _, row in
+            VStack(alignment: .leading, spacing: menuBar && rows.count == 2 ? 0 : 2) {
+                ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
                     HStack(spacing: 5) {
-                        ForEach(row) { metric in
-                            if metric == .icon { Image(systemName: "scope").accessibilityLabel(data.provider) }
-                            else if metric == .usageBar {
-                                Gauge(value: data.automatic ?? 0, in: 0...100) { EmptyView() }
-                                    .gaugeStyle(.linearCapacity).frame(width: 26)
-                                    .opacity(data.automatic == nil ? 0.3 : 1)
-                            } else {
-                                Text(data.text(metric, remaining: remaining, now: context.date)).lineLimit(1)
-                            }
+                        ForEach(Array(visible(row, at: context.date).enumerated()), id: \.offset) { _, raw in
+                            cell(raw, now: context.date)
                         }
                     }
                 }
             }
-            .font(.system(size: menuBar && lines.count == 2 ? min(9, NSStatusBar.system.thickness / 2.5) : 11, weight: .medium))
-            .monospacedDigit()
+            .font(.system(size: fontSize, weight: .semibold)).monospacedDigit()
             .fixedSize(horizontal: true, vertical: false)
-            .overlay(alignment: .topTrailing) {
-                if data.warning != nil { Image(systemName: "exclamationmark.circle.fill").font(.system(size: 8)).foregroundStyle(.orange).offset(x: 9) }
-            }
-            .help((data.warning.map { "注意：\($0)\n" } ?? "") + layout.metrics.flatMap { $0 }.map { "\($0.title)：\(data.text($0, remaining: remaining, now: context.date))" }.joined(separator: "\n"))
+            .help(helpText(now: context.date))
         }
+    }
+    private func visible(_ row: [String], at now: Date) -> [String] {
+        row.filter { data.resolvedMetric(raw: $0, layout: layout, now: now) != .hidden }
+    }
+    @ViewBuilder private func cell(_ raw: String, now: Date) -> some View {
+        let metric = data.resolvedMetric(raw: raw, layout: layout, now: now)
+        if metric == .space { Color.clear.frame(width: CGFloat(HUDLayout.spaceWidth(raw)), height: 1).accessibilityHidden(true) }
+        else if metric == .icon { Image(systemName: "scope").foregroundStyle(MonitorTheme.textPrimary).accessibilityLabel(data.provider) }
+        else if metric == .usageBar {
+            ZStack(alignment: .leading) {
+                Capsule().fill(MonitorTheme.progressTrack)
+                Capsule().fill(data.tone(for: data.automatic).color)
+                    .frame(width: 26 * CGFloat((remaining ? data.automatic : data.automatic.map { 100 - $0 }) ?? 0) / 100)
+            }.frame(width: 26, height: 4)
+                .accessibilityLabel("用量 \(data.text(.usageBar, remaining: remaining, now: now))")
+        } else {
+            let value = metric.map { data.display($0, remaining: remaining, now: now) } ?? HUDDisplayValue(value: "—", tone: .tertiary)
+            HStack(spacing: 4) {
+                if !value.label.isEmpty {
+                    Text(value.label).font(.system(size: max(7, fontSize - 1.5), weight: .semibold))
+                        .foregroundStyle(MonitorTheme.textSecondary)
+                }
+                Text(value.value).foregroundStyle(value.tone.color)
+            }.lineLimit(1)
+        }
+    }
+    private func helpText(now: Date) -> String {
+        let entries = rows.flatMap { $0 }.compactMap { raw -> String? in
+            guard let metric = data.resolvedMetric(raw: raw, layout: layout, now: now) else { return "条件：数据不足（—）" }
+            if [.space, .hidden, .separatorDot].contains(metric) { return nil }
+            return metric.title + "：" + data.text(metric, remaining: remaining, now: now)
+        }
+        return (data.warning.map { "注意：\($0)\n" } ?? "") + entries.joined(separator: "\n") + "\n节奏/预计用尽仅按本窗口平均速度估算；缺少可靠窗口数据时显示 —。"
+    }
+    /// 与渲染使用同一字段/条件/空格宽度，避免靠整行缩放挤入菜单栏。
+    @MainActor static func measuredWidth(layout: HUDLayout, data: HUDEntityData, remaining: Bool, menuBar: Bool, now: Date = Date()) -> CGFloat {
+        let rows = layout.normalized.lines
+        let size: CGFloat = menuBar && rows.count == 2 ? min(9, NSStatusBar.system.thickness / 2.5) : 11
+        let font = NSFont.monospacedDigitSystemFont(ofSize: size, weight: .semibold)
+        let labelFont = NSFont.systemFont(ofSize: max(7, size - 1.5), weight: .semibold)
+        return rows.map { row in
+            let visible = row.filter { data.resolvedMetric(raw: $0, layout: layout, now: now) != .hidden }
+            return visible.reduce(CGFloat(0)) { sum, raw in
+                let metric = data.resolvedMetric(raw: raw, layout: layout, now: now)
+                if metric == .space { return sum + CGFloat(HUDLayout.spaceWidth(raw)) }
+                if metric == .icon { return sum + 12 }
+                if metric == .usageBar { return sum + 26 }
+                let v = metric.map { data.display($0, remaining: remaining, now: now) } ?? .init(value: "—")
+                let label = v.label.isEmpty ? 0 : (v.label as NSString).size(withAttributes: [.font: labelFont]).width + 4
+                return sum + label + (v.value as NSString).size(withAttributes: [.font: font]).width
+            } + CGFloat(max(0, visible.count - 1)) * 5
+        }.max() ?? 0
     }
 }
 struct ConfigurableHUDView: View {
@@ -188,25 +140,30 @@ struct ConfigurableHUDView: View {
     var data: HUDEntityData { .resolve(source: preferences.value.sourceID, usage: usage, remote: remote, newAPI: newAPI, subAPI: subAPI, accounts: accounts, settings: settings) }
     var body: some View {
         let layout = preferences.value.layout(for: data.providerID)
+        let rightWidth = notch.map { max($0.shoulderWidth, min(preferences.value.normalized.maximumWidth, HUDMetricStrip.measuredWidth(layout: layout, data: data, remaining: preferences.value.showRemaining, menuBar: false) + 12)) } ?? 0
         Group {
             if let notch {
                 HStack(spacing: 0) {
-                    HUDMetricStrip(layout: layout, data: data, remaining: preferences.value.showRemaining, side: 0)
-                        .frame(width: notch.shoulderWidth).clipped()
+                    HUDRuntimeStatus(isRunning: usage.snapshot.isRunning, enablePulse: settings.enablePulse, compact: true, narrow: notch.shoulderWidth < HUDRuntimeStatus.reservedWidth)
+                        .frame(width: notch.shoulderWidth, alignment: .center)
                     Color.clear.frame(width: notch.notchWidth)
-                    HUDMetricStrip(layout: layout, data: data, remaining: preferences.value.showRemaining, side: 1)
-                        .frame(width: notch.shoulderWidth).clipped()
-                }.frame(width: notch.width, height: notch.collapsedHeight)
+                    HUDMetricStrip(layout: layout, data: data, remaining: preferences.value.showRemaining)
+                        .frame(width: max(1, rightWidth - 8), alignment: .leading).clipped().padding(.leading, 8)
+                }.frame(width: notch.shoulderWidth + notch.notchWidth + rightWidth, height: notch.collapsedHeight)
             } else {
-                HUDMetricStrip(layout: layout, data: data, remaining: preferences.value.showRemaining, menuBar: menuBar)
-                    .padding(.horizontal, 8).padding(.vertical, menuBar ? 0 : 4)
-                    .frame(maxWidth: preferences.value.normalized.maximumWidth)
-                    .clipped()
+                HStack(spacing: 9) {
+                    HUDRuntimeStatus(isRunning: usage.snapshot.isRunning, enablePulse: settings.enablePulse, compact: menuBar)
+                        .frame(width: HUDRuntimeStatus.reservedWidth, alignment: .leading)
+                    HUDMetricStrip(layout: layout, data: data, remaining: preferences.value.showRemaining, menuBar: menuBar)
+                        .frame(maxWidth: .infinity, alignment: .leading).clipped().layoutPriority(0)
+                }
+                .padding(.horizontal, 8).padding(.vertical, menuBar ? 0 : 4)
+                .frame(maxWidth: preferences.value.normalized.maximumWidth)
             }
         }
         .frame(height: menuBar ? min(22, NSStatusBar.system.thickness) : nil)
         .background(HUDGlassBackground(opacity: preferences.value.normalized.hudOpacity))
         .clipShape(RoundedRectangle(cornerRadius: menuBar ? 5 : 14))
-        .preferredColorScheme(.dark).foregroundStyle(.white)
+        .preferredColorScheme(.dark)
     }
 }

@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 APP_NAME="CodexMonitor"
 PACKAGE_NAME="codex-monitor"
-APP_VERSION="0.3.0"
+APP_VERSION="0.3.1"
 BUNDLE_ID="dev.yzin.codexmonitor"
 DIST_DIR="$ROOT_DIR/dist"
 APP_DIR="$DIST_DIR/$APP_NAME.app"

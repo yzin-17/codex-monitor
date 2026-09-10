@@ -618,18 +618,10 @@ final class NotchOverlayController {
         let data = HUDEntityData.resolve(source: settings.hudPreferences.value.sourceID, usage: viewModel,
             remote: remoteViewModel, newAPI: newAPIViewModel, subAPI: subAPIViewModel,
             accounts: settings.codexAccounts, settings: settings)
-        let rows = settings.hudPreferences.value.layout(for: data.providerID).metrics
-        let font = NSFont.monospacedSystemFont(ofSize: rows.count > 1 ? 9 : 11, weight: .medium)
-        let width = rows.map { row in
-            row.reduce(CGFloat(0)) { sum, metric in
-                let size: CGFloat = metric == .icon ? 11 : metric == .usageBar ? 26 :
-                    (data.text(metric, remaining: settings.hudPreferences.value.showRemaining) as NSString)
-                        .size(withAttributes: [.font: font]).width
-                return sum + size
-            } + CGFloat(max(0, row.count - 1)) * 5
-        }.max() ?? 70
+        let width = HUDMetricStrip.measuredWidth(layout: settings.hudPreferences.value.layout(for: data.providerID),
+            data: data, remaining: settings.hudPreferences.value.showRemaining, menuBar: true)
         return FloatingHUDGeometry.frame(screen: screen.frame, menuBarHeight: NSStatusBar.system.thickness,
-            contentSize: .init(width: width + 18 + (data.warning == nil ? 0 : 9), height: 20),
+            contentSize: .init(width: width + 16 + 9 + HUDRuntimeStatus.reservedWidth, height: 20),
             maximumWidth: settings.hudPreferences.value.normalized.maximumWidth,
             position: settings.hudPreferences.value.normalized.horizontalPosition)
     }
@@ -777,27 +769,25 @@ final class NotchOverlayController {
 
     private func islandFrame(for screen: NSScreen) -> NSRect {
         if usesCompactOverlay { return compactHUDFrame(on: screen) }
-        let layout = currentIslandLayout(for: screen)
-        return NSRect(
-            x: screen.frame.midX - layout.width / 2,
-            y: screen.frame.maxY - layout.collapsedHeight,
-            width: layout.width,
-            height: layout.collapsedHeight
-        )
+        return notchHUDFrame(on: screen, layout: currentIslandLayout(for: screen))
     }
 
     private func islandFrame(for screen: NSScreen, displaySize: NotchDisplaySize) -> NSRect {
-        let layout = ScreenNotchGeometry.layout(
-            for: screen,
-            adjustment: CGFloat(settings.notchWidthAdjustment),
-            displaySize: displaySize
-        )
-        return NSRect(
-            x: screen.frame.midX - layout.width / 2,
+        notchHUDFrame(on: screen, layout: ScreenNotchGeometry.layout(for: screen,
+            adjustment: CGFloat(settings.notchWidthAdjustment), displaySize: displaySize))
+    }
+
+    private func notchHUDFrame(on screen: NSScreen, layout: IslandLayout) -> NSRect {
+        let data = HUDEntityData.resolve(source: settings.hudPreferences.value.sourceID, usage: viewModel,
+            remote: remoteViewModel, newAPI: newAPIViewModel, subAPI: subAPIViewModel,
+            accounts: settings.codexAccounts, settings: settings)
+        let needed = HUDMetricStrip.measuredWidth(layout: settings.hudPreferences.value.layout(for: data.providerID),
+            data: data, remaining: settings.hudPreferences.value.showRemaining, menuBar: false) + 12
+        let right = max(layout.shoulderWidth, min(settings.hudPreferences.value.normalized.maximumWidth, needed))
+        // 物理刘海仍严格居中；只向右增加自定义区域，不挤占固定状态或改变遮挡区。
+        return NSRect(x: screen.frame.midX - layout.notchWidth / 2 - layout.shoulderWidth,
             y: screen.frame.maxY - layout.collapsedHeight,
-            width: layout.width,
-            height: layout.collapsedHeight
-        )
+            width: layout.shoulderWidth + layout.notchWidth + right, height: layout.collapsedHeight)
     }
 
     private func currentDetailIslandLayout(for screen: NSScreen? = NSScreen.main ?? NSScreen.screens.first) -> IslandLayout {
