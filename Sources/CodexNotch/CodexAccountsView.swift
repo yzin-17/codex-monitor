@@ -4,6 +4,11 @@ import UniformTypeIdentifiers
 
 struct CodexAccountsSettingsView: View {
     @ObservedObject var store: CodexAccountsStore
+    @Binding var addRequest: UUID?
+    init(store: CodexAccountsStore, addRequest: Binding<UUID?> = .constant(nil)) {
+        self.store = store; self._addRequest = addRequest
+    }
+    @State private var loginProgress = ""
     @State private var draft = CodexAccount()
     @State private var editing = false
     @State private var token = ""
@@ -17,7 +22,7 @@ struct CodexAccountsSettingsView: View {
             Picker("刷新间隔", selection: $store.interval) {
                 Text("1 分钟").tag(60.0); Text("5 分钟").tag(300.0); Text("15 分钟").tag(900.0); Text("30 分钟").tag(1800.0)
             }
-            Text("只监测 Codex，不增加其他提供商。使用已有 Access Token 或显式导入 auth.json，向 ChatGPT 官方额度接口实际验证后才保存。新凭据只存本应用钥匙串，不切换 Codex 当前登录，不保留 Refresh Token。")
+            Text("点击添加后使用系统浏览器登录 Codex，授权完成后自动验证额度并保存。使用独立临时登录目录，不切换桌面端当前账号；长期凭据仅存本应用钥匙串。高级导入仍保留。")
                 .font(.caption).foregroundStyle(.secondary)
             ForEach(store.accounts) { account in
                 HStack {
@@ -29,18 +34,33 @@ struct CodexAccountsSettingsView: View {
                     Button("删除", role: .destructive) { deleting = account }
                 }
             }
-            Button("添加 Codex 账号") { draft = .init(); token = ""; error = nil; editing = true }
+            Button("添加 Codex 账号 · 网页授权", action: beginAdding)
             if let error = store.lastError { Text(error).font(.caption).foregroundStyle(.red) }
         }
+        .onChange(of: addRequest, initial: true) { _, request in
+            if request != nil { beginAdding(); addRequest = nil }
+        }
+        .onDisappear(perform: cancelOperation)
         .sheet(isPresented: $editing, onDismiss: cancelOperation) {
             VStack(alignment: .leading, spacing: 14) {
                 Text("验证 Codex 账号").font(.headline)
                 TextField("账户标签（例如工作 / 个人）", text: $draft.label).disabled(busy)
-                SecureField("OAuth Access Token（编辑时留空保留）", text: $token).disabled(busy)
-                Button("选择 auth.json 导入…", action: importAuth).disabled(busy)
-                TextField("工作区 Account ID（可选，导入时自动填写）", text: $draft.workspaceID).disabled(busy)
-                Text("验证请求只发往 chatgpt.com/backend-api/wham/usage。不读取密码/Cookie，不自动扫描登录文件；401/403 不会冒充成功。换工作区需重新提供凭据。Access Token 到期后，在 Codex 重新登录再导入。")
+                Button(action: browserLogin) {
+                    Label("打开浏览器登录 Codex", systemImage: "safari")
+                        .frame(maxWidth: .infinity).padding(.vertical, 5)
+                }.buttonStyle(.borderedProminent).disabled(busy)
+                if busy && !loginProgress.isEmpty { Text(loginProgress).font(.caption).foregroundStyle(.secondary) }
+                Text("浏览器中完成 ChatGPT 授权后将自动返回验证。不会读取浏览器 Cookie，也不会修改 ~/.codex 的登录状态。临时目录内的 CLI 登录材料结束后删除，只保留已验证的 Access Token；到期后可再次网页登录。")
                     .font(.caption).foregroundStyle(.secondary)
+                DisclosureGroup("高级：导入已有凭据") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        SecureField("OAuth Access Token（编辑时留空保留）", text: $token)
+                        Button("选择 auth.json 导入…", action: importAuth)
+                        TextField("工作区 Account ID（可选，导入时自动填写）", text: $draft.workspaceID)
+                        Text("高级导入完成后点击右下角验证并保存。只读请求发送至 ChatGPT 官方额度接口，验证失败不保存新凭据。")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }.padding(.top, 8)
+                }.disabled(busy)
                 Toggle("启用此账户", isOn: $draft.enabled).disabled(busy)
                 if let error { Text(error).font(.caption).foregroundStyle(.red) }
                 HStack {
@@ -48,7 +68,7 @@ struct CodexAccountsSettingsView: View {
                     Spacer()
                     if busy { ProgressView().controlSize(.small) }
                     Button("验证并保存") { verify() }.keyboardShortcut(.defaultAction)
-                        .disabled(busy || draft.label.trimmingCharacters(in: .whitespaces).isEmpty)
+                        .disabled(busy || draft.label.trimmingCharacters(in: .whitespaces).isEmpty || (token.isEmpty && draft.verifiedAt == nil))
                 }
             }.padding(24).frame(width: 500).interactiveDismissDisabled(busy)
         }
@@ -57,6 +77,36 @@ struct CodexAccountsSettingsView: View {
             Button("删除", role: .destructive) {
                 if let deleting { do { try store.remove(deleting) } catch { store.lastError = "钥匙串删除失败；账户保留，可重试。" } }
                 deleting = nil
+            }
+        }
+    }
+    private func beginAdding() {
+        cancelOperation()
+        draft = .init(label: "Codex 账号 \(store.accounts.count + 1)")
+        token = ""; error = nil; loginProgress = ""; editing = true
+    }
+    private func browserLogin() {
+        busy = true; error = nil; loginProgress = "正在准备独立登录环境…"
+        let account = draft
+        operation = Task { @MainActor in
+            do {
+                let credential = try await CodexBrowserLoginClient().login { url in
+                    loginProgress = "已打开浏览器，等待完成授权（最长 5 分钟）…"
+                    return NSWorkspace.shared.open(url)
+                }
+                try Task.checkCancellation()
+                loginProgress = "网页授权完成，正在验证 Codex 额度…"
+                var next = account
+                next.workspaceID = credential.workspaceID
+                if next.label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { next.label = "Codex 账号" }
+                try await store.verifyAndSave(next, token: credential.accessToken)
+                try Task.checkCancellation()
+                busy = false; editing = false; token = ""; loginProgress = ""
+            } catch is CancellationError { }
+            catch {
+                self.error = (error as? CodexBrowserLoginError)?.errorDescription
+                    ?? (error as? CodexAccountError)?.errorDescription ?? "网页登录失败，未保存账号；可重试或使用高级导入。"
+                busy = false; loginProgress = ""
             }
         }
     }
@@ -75,7 +125,7 @@ struct CodexAccountsSettingsView: View {
     private func cancelOperation() {
         operation?.cancel(); operation = nil
         store.cancelVerification(id: draft.id)
-        token = ""; busy = false
+        token = ""; busy = false; loginProgress = ""
     }
     private func importAuth() {
         let panel = NSOpenPanel()
@@ -128,8 +178,8 @@ struct CodexAccountsPanel: View {
                 card(account)
             }
             Text("订阅额度与 credits 不是美元余额；不会与本地对话估算费用混合或跨账号合计。")
-                .font(.system(size: 10)).foregroundStyle(.secondary)
-        }
+                .font(.system(size: 10)).foregroundStyle(MonitorTheme.textSecondary)
+        }.foregroundStyle(MonitorTheme.textPrimary).environment(\.colorScheme, .dark)
     }
     @ViewBuilder private func card(_ account: CodexAccount) -> some View {
         let state = store.states[account.id]

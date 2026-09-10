@@ -39,10 +39,10 @@ struct HUDLayoutEditorView: View {
                 ForEach(MonitorDisplayMode.allCases) { Text($0.title).tag($0) }
             }
             if compactOverlay {
-                Text("覆盖菜单栏的浮窗，无刘海占位；高度不超过菜单栏。左侧运行状态固定保留，右侧空间不足时仅裁剪自定义内容。")
+                Text("覆盖菜单栏的浮窗，无刘海占位；高度填满当前屏幕菜单栏。左侧运行状态固定保留，右侧空间不足时仅裁剪自定义内容。")
                     .font(.caption).foregroundStyle(.secondary)
                 Stepper("浮窗最大宽度：\(Int(preferences.value.maximumWidth)) pt", value: $preferences.value.maximumWidth, in: 90...360, step: 10)
-                HStack { Text("浮窗横向位置"); Slider(value: $preferences.value.horizontalPosition, in: 0...1) }
+                appearanceSlider("浮窗横向位置", value: $preferences.value.horizontalPosition, range: 0...1)
             } else {
                 Picker("刘海两侧布局", selection: notchDisplaySize) {
                     ForEach(NotchDisplaySize.allCases) { Text($0.label).tag($0) }
@@ -52,15 +52,23 @@ struct HUDLayoutEditorView: View {
                 Text("物理遮挡区自动识别；仅在识别偏差时微调。左侧保留状态，右侧按自定义内容分配空间。")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            HStack { Text("HUD 背景浓度"); Slider(value: $preferences.value.hudOpacity, in: 0...1); Text("\(Int(preferences.value.hudOpacity * 100))%") }
-            HStack { Text("下拉面板背景浓度"); Slider(value: $preferences.value.panelOpacity, in: 0.35...1); Text("\(Int(preferences.value.panelOpacity * 100))%") }
+            appearanceSlider("HUD 背景透明度", value: $preferences.value.hudTransparency, range: 0...1)
+            appearanceSlider("下拉面板背景透明度", value: $preferences.value.panelTransparency, range: 0...0.65)
             Button("恢复原版黑色背景") { preferences.value.hudOpacity = 0.985; preferences.value.panelOpacity = 0.985 }
             Picker("面板动画", selection: Binding(get: { preferences.value.animation }, set: { preferences.value.animation = $0 })) {
                 ForEach(MonitorPanelAnimation.allCases) { Text($0.title).tag($0) }
             }
-            Text("以上设置即时生效。面板维持 680 × 720 目标尺寸，原字号不缩放；背景不使用壁纸染色材质，降低浓度时仍会透出背后的实际内容。")
+            Text("以上设置即时生效。面板维持 680 × 720 目标尺寸，原字号不缩放；背景不使用壁纸染色材质，透明度越高越透，0% 为不透明。面板上限 65% 以保证文字可读；文字本身不会变透明。")
                 .font(.caption).foregroundStyle(.secondary)
         } header: { Text("显示模式与刘海几何") }
+    }
+    private func appearanceSlider(_ title: String, value: Binding<Double>, range: ClosedRange<Double>) -> some View {
+        HStack(spacing: 12) {
+            Text(title).frame(width: 150, alignment: .leading)
+            Slider(value: value, in: range).accessibilityLabel(title)
+            Text("\(Int((value.wrappedValue * 100).rounded()))%")
+                .monospacedDigit().frame(width: 44, alignment: .trailing)
+        }
     }
     private var sourceSection: some View {
         Section {

@@ -57,12 +57,12 @@ struct HUDMetricStrip: View {
     var remaining = true
     var menuBar = false
     private var rows: [[String]] { layout.normalized.lines }
-    private var fontSize: CGFloat { menuBar && rows.count == 2 ? min(9, NSStatusBar.system.thickness / 2.5) : 11 }
+    private var fontSize: CGFloat { menuBar && rows.count == 2 ? min(9, MenuBarMetrics.height() / 2.5) : 11 }
     var body: some View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
             VStack(alignment: .leading, spacing: menuBar && rows.count == 2 ? 0 : 2) {
                 ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
-                    HStack(spacing: 5) {
+                    HStack(alignment: .firstTextBaseline, spacing: 5) {
                         ForEach(Array(visible(row, at: context.date).enumerated()), id: \.offset) { _, raw in
                             cell(raw, now: context.date)
                         }
@@ -90,7 +90,7 @@ struct HUDMetricStrip: View {
                 .accessibilityLabel("用量 \(data.text(.usageBar, remaining: remaining, now: now))")
         } else {
             let value = metric.map { data.display($0, remaining: remaining, now: now) } ?? HUDDisplayValue(value: "—", tone: .tertiary)
-            HStack(spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
                 if !value.label.isEmpty {
                     Text(value.label).font(.system(size: max(7, fontSize - 1.5), weight: .semibold))
                         .foregroundStyle(MonitorTheme.textSecondary)
@@ -110,7 +110,7 @@ struct HUDMetricStrip: View {
     /// 与渲染使用同一字段/条件/空格宽度，避免靠整行缩放挤入菜单栏。
     @MainActor static func measuredWidth(layout: HUDLayout, data: HUDEntityData, remaining: Bool, menuBar: Bool, now: Date = Date()) -> CGFloat {
         let rows = layout.normalized.lines
-        let size: CGFloat = menuBar && rows.count == 2 ? min(9, NSStatusBar.system.thickness / 2.5) : 11
+        let size: CGFloat = menuBar && rows.count == 2 ? min(9, MenuBarMetrics.height() / 2.5) : 11
         let font = NSFont.monospacedDigitSystemFont(ofSize: size, weight: .semibold)
         let labelFont = NSFont.systemFont(ofSize: max(7, size - 1.5), weight: .semibold)
         return rows.map { row in
@@ -161,7 +161,7 @@ struct ConfigurableHUDView: View {
                 .frame(maxWidth: preferences.value.normalized.maximumWidth)
             }
         }
-        .frame(height: menuBar ? min(22, NSStatusBar.system.thickness) : nil)
+        .frame(height: menuBar ? MenuBarMetrics.height() : nil)
         .background(HUDGlassBackground(opacity: preferences.value.normalized.hudOpacity))
         .clipShape(RoundedRectangle(cornerRadius: menuBar ? 5 : 14))
         .preferredColorScheme(.dark)

@@ -232,6 +232,8 @@ struct SettingsView: View {
     @State private var draft = SettingsDraft()
     @State private var selectedPreset: RefreshPreset = .balanced
     @State private var selectedTab: SettingsTab = .codex
+    @State private var remoteCategory: RemoteSourceCategory = .codex
+    @State private var codexAddRequest: UUID?
     @State private var accountEditorContext: AccountEditorContext?
     @State private var accountEditorDraft = BalanceAccountConfiguration(source: .newAPI)
     @State private var deleteCandidate: AccountDeleteCandidate?
@@ -375,7 +377,7 @@ struct SettingsView: View {
                 .padding(.horizontal, 8)
                 .padding(.bottom, 4)
 
-            ForEach(SettingsTab.allCases) { tab in
+            ForEach(SettingsTab.allCases.filter { $0 != .newAPI && $0 != .subAPI }) { tab in
                 Button {
                     selectedTab = tab
                 } label: {
@@ -601,10 +603,50 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var remoteCodexSettingsContent: some View {
-        CodexAccountsSettingsView(store: settings.codexAccounts)
-        Section("远程账号监测") {
+        Section("远程账户 · 数据源") {
+            HStack {
+                Picker("查看来源类型", selection: $remoteCategory) {
+                    ForEach(RemoteSourceCategory.allCases) { Text($0.title).tag($0) }
+                }
+                Menu("添加数据源") {
+                    Button("Codex 官方账号 · 浏览器授权") { remoteCategory = .codex; codexAddRequest = UUID() }
+                    Divider()
+                    ForEach(RemoteCodexDataSource.allCases) { source in
+                        Button("\(source.label) · 管理端账号池") {
+                            remoteCategory = .gateway
+                            startAddingRemoteSource(source: source)
+                        }
+                    }
+                    Divider()
+                    Button("NewAPI · 用户余额（PAT）") { remoteCategory = .newAPI; startAddingAccount(source: .newAPI) }
+                    Button("Sub2API · 用户余额") { remoteCategory = .subAPI; startAddingAccount(source: .subAPI) }
+                }
+            }
+            Text(remoteCategory.detail).font(.caption).foregroundStyle(.secondary)
+            Text("统一入口不合并凭据和数值：各来源独立启停、认证、刷新。已有配置原位保留，无需重新输入密钥。新增网关/余额来源先保存配置，再按需启用监测。")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        switch remoteCategory {
+        case .codex:
+            CodexAccountsSettingsView(store: settings.codexAccounts, addRequest: $codexAddRequest)
+        case .gateway:
+            gatewaySettingsContent
+        case .newAPI:
+            balanceMonitorSection(title: "NewAPI", source: .newAPI, enabled: $draft.newAPIMonitorEnabled,
+                accounts: $draft.newAPIAccounts, defaultThresholds: $draft.newAPIThresholds,
+                refreshInterval: $draft.newAPIRefreshInterval, viewModel: newAPIViewModel, keychainError: settings.newAPIKeychainError)
+        case .subAPI:
+            balanceMonitorSection(title: "Sub2API", source: .subAPI, enabled: $draft.subAPIMonitorEnabled,
+                accounts: $draft.subAPIAccounts, defaultThresholds: $draft.subAPIThresholds,
+                refreshInterval: $draft.subAPIRefreshInterval, viewModel: subAPIViewModel, keychainError: settings.subAPIKeychainError)
+        }
+    }
+
+    @ViewBuilder
+    private var gatewaySettingsContent: some View {
+        Section("网关上游账号监测") {
             Toggle(isOn: $draft.remoteMonitorEnabled) {
-                HelpLabel(title: "启用远程账号监测", help: "启用后详情页会出现“远程账号”tab，用于查看 CLIProxyAPI、CPA Manager Plus 或 Sub2API 中的 Codex 账号状态与额度。")
+                HelpLabel(title: "启用网关上游账号监测", help: "启用此类数据源后，在“远程账户 → 网关上游账号”查看 CLIProxyAPI、CPA Manager Plus 或 Sub2API 管理端的上游 Codex 账号状态与额度。不影响 Codex 官方账号或用户余额来源。")
             }
 
             Text("地址、认证信息和刷新配置仅在点击保存后生效。")
@@ -1315,8 +1357,7 @@ struct SettingsView: View {
         return copy
     }
 
-    private func startAddingRemoteSource() {
-        let source: RemoteCodexDataSource = .cpaManagerPlus
+    private func startAddingRemoteSource(source: RemoteCodexDataSource = .cpaManagerPlus) {
         remoteSourceEditorContext = RemoteSourceEditorContext(
             sourceID: nil,
             source: RemoteAccountSourceConfiguration(
@@ -1489,7 +1530,7 @@ struct SettingsView: View {
         case .newAPI:
             "使用个人访问令牌（PAT）读取 NewAPI 余额，不创建或刷新网页登录会话。"
         case .subAPI:
-            "启用后详情页会出现 \(title) tab，通过登录接口读取 Sub2API 当前用户余额。"
+            "启用后在“远程账户 → Sub2API 余额”查看当前用户余额，通过该站点登录接口认证；不是管理端账号池。"
         }
     }
 
