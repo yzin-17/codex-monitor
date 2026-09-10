@@ -1,32 +1,39 @@
-name: 原版基线与 macOS 构建
+name: macOS 构建与交互回归
 on:
   push:
     branches: [main]
   pull_request:
 permissions:
   contents: read
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   macos:
     runs-on: macos-15
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
-      - name: 原版回归、扩展测试、四页原生截图与双架构构建
+      - name: 回归、原生界面与双架构构建
         env:
           CODEX_MONITOR_SNAPSHOT_DIR: ${{ github.workspace }}/.baseline-output/ui
         run: |
           set -euo pipefail
           mkdir -p .baseline-output/ui
           swift --version
-          ./scripts/build.sh 2>&1 | tee .baseline-output/build.log
+          ./scripts/build.sh > .baseline-output/build.log 2>&1 || { tail -180 .baseline-output/build.log; exit 1; }
+          grep -E 'Test run with|All regression|Built |error:' .baseline-output/build.log || true
           codesign --verify --deep --strict dist/CodexMonitor.app
-          for page in codex performance skills codexRadar conversation-costs; do test -s ".baseline-output/ui/$page.png"; done
-          test -s dist/codex-monitor-0.2.1-arm64.dmg
-          test -s dist/codex-monitor-0.2.1-amd64.dmg
+          for page in codex performance skills codexRadar conversation-costs hud-menu-bar hud-layout codex-accounts; do
+            test -s ".baseline-output/ui/$page.png"
+          done
+          VERSION="$(tr -d '\r\n' < VERSION)"
+          test -s "dist/codex-monitor-$VERSION-arm64.dmg"
+          test -s "dist/codex-monitor-$VERSION-amd64.dmg"
           ls -lh dist
-      - name: 保存原生截图、日志与测试安装包
+      - name: 保存原生截图、日志与安装包
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:

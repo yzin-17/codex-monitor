@@ -1,0 +1,92 @@
+name: 菜单栏浮窗高度回归
+on:
+  push:
+    branches: [feat/hud-layout-providers-20260910]
+permissions:
+  contents: read
+jobs:
+  validate:
+    if: contains(github.event.head_commit.message, '[refine-size]')
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: 固定实际 HUD 高度并补充原生断言
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('Sources/CodexNotch/FloatingHUDGeometry.swift')
+          s=p.read_text().replace('min(22, barHeight - min(4, barHeight / 4))','min(22, barHeight)')
+          p.write_text(s)
+          p=Path('Sources/CodexNotch/HUDContentView.swift')
+          s=p.read_text().replace('menuBar && lines.count == 2 ? 9 : 11','menuBar && lines.count == 2 ? min(9, NSStatusBar.system.thickness / 2.5) : 11')
+          s=s.replace('.padding(.horizontal, 8).padding(.vertical, menuBar ? 1 : 4)', '.padding(.horizontal, 8).padding(.vertical, menuBar ? 0 : 4)')
+          s=s.replace('        .background(HUDGlassBackground(opacity:', '        .frame(height: menuBar ? min(22, NSStatusBar.system.thickness) : nil)\n        .background(HUDGlassBackground(opacity:',1)
+          p.write_text(s)
+          p=Path('Sources/CodexNotch/AppDelegate.swift')
+          s=p.read_text().replace('        let hostingView = NSHostingView(rootView: view)\n        hostingView.frame = NSRect(x: 0, y: 0, width: IslandMetrics.width','        let hostingView = NSHostingView(rootView: view)\n        hostingView.sizingOptions = [] // 窗口几何由 HUD 决定，内容不得反向撑大菜单栏浮窗。\n        hostingView.frame = NSRect(x: 0, y: 0, width: IslandMetrics.width',1)
+          s=s.replace('        let detailHostingView = NSHostingView(rootView: detailView)','        let detailHostingView = NSHostingView(rootView: detailView)\n        detailHostingView.sizingOptions = []',1)
+          p.write_text(s)
+          p=Path('Tests/CodexNotchTests/ReferenceExtensionTests.swift')
+          s=p.read_text().replace('    host.layoutSubtreeIfNeeded(); host.displayIfNeeded()\n    let bitmap', '    host.layoutSubtreeIfNeeded(); host.displayIfNeeded()\n    if name == "hud-menu-bar" {\n        #expect(host.bounds.height <= min(22, NSStatusBar.system.thickness))\n        #expect(window.contentView?.bounds.height == host.bounds.height)\n    }\n    let bitmap',1)
+          p.write_text(s)
+          PY
+          git add -A
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          TREE="$(git write-tree)"
+          CANDIDATE="$(printf '%s\n' 'fix: prevent two-line HUD from expanding its native window beyond menu bar' | git commit-tree "$TREE" -p "$GITHUB_SHA")"
+          git update-ref refs/heads/validated-hud-size "$CANDIDATE"
+          mkdir -p "$RUNNER_TEMP/validated" .baseline-output/ui
+          printf '%s\n' "$CANDIDATE" > "$RUNNER_TEMP/validated/candidate.txt"
+      - name: 完整构建和实际窗口高度回归
+        env:
+          CODEX_MONITOR_SNAPSHOT_DIR: ${{ github.workspace }}/.baseline-output/ui
+        run: |
+          set -euo pipefail
+          ./scripts/build.sh > .baseline-output/build.log 2>&1 || { tail -160 .baseline-output/build.log; exit 1; }
+          grep -E 'Test run with|All regression|Built |error:' .baseline-output/build.log || true
+          codesign --verify --deep --strict dist/CodexMonitor.app
+          for page in codex performance skills codexRadar conversation-costs hud-menu-bar hud-layout codex-accounts; do test -s ".baseline-output/ui/$page.png"; done
+          git bundle create "$RUNNER_TEMP/validated/candidate.bundle" refs/heads/validated-hud-size
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: hud-size-native
+          path: |
+            .baseline-output/ui/*.png
+            .baseline-output/build.log
+            dist/*.dmg
+          include-hidden-files: true
+          retention-days: 14
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: validated-hud-size
+          path: ${{ runner.temp }}/validated/
+          retention-days: 2
+  publish:
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: validated-hud-size
+          path: ${{ runner.temp }}/validated
+      - name: 快进已验证的功能分支
+        run: |
+          set -euo pipefail
+          CANDIDATE="$(cat "$RUNNER_TEMP/validated/candidate.txt")"
+          git fetch "$RUNNER_TEMP/validated/candidate.bundle" refs/heads/validated-hud-size:refs/remotes/validated/hud-size
+          test "$(git ls-remote origin refs/heads/feat/hud-layout-providers-20260910 | cut -f1)" = "$GITHUB_SHA"
+          git push origin "$CANDIDATE:refs/heads/feat/hud-layout-providers-20260910"
