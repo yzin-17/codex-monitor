@@ -6,7 +6,7 @@ enum FloatingHUDGeometry {
     static func frame(screen: CGRect, menuBarHeight: CGFloat, contentSize: CGSize,
                       maximumWidth: CGFloat, position: Double) -> CGRect {
         let barHeight = menuBarHeight.isFinite && menuBarHeight > 0 ? menuBarHeight : 24
-        let height = max(1, min(22, barHeight - min(4, barHeight / 4)))
+        let height = max(1, min(22, barHeight))
         let maxWidth = maximumWidth.isFinite ? min(360, max(70, maximumWidth)) : 220
         let width = min(max(1, screen.width - 24), min(maxWidth, max(70, contentSize.width)))
         let available = max(0, screen.width - width - 24)

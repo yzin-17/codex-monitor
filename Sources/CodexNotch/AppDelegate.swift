@@ -313,6 +313,7 @@ final class NotchOverlayController {
             codexAccounts: settings.codexAccounts
         )
         let hostingView = NSHostingView(rootView: view)
+        hostingView.sizingOptions = [] // 窗口几何由 HUD 决定，内容不得反向撑大菜单栏浮窗。
         hostingView.frame = NSRect(x: 0, y: 0, width: IslandMetrics.width, height: IslandMetrics.collapsedHeight)
         hostingView.wantsLayer = true
         hostingView.layer?.backgroundColor = NSColor.clear.cgColor
@@ -348,6 +349,7 @@ final class NotchOverlayController {
             }
         )
         let detailHostingView = NSHostingView(rootView: detailView)
+        detailHostingView.sizingOptions = []
         let detailContentSize = expandedPanelLayout().frame.size
         detailHostingView.frame = NSRect(origin: .zero, size: detailContentSize)
         detailHostingView.wantsLayer = true
