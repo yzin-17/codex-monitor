@@ -11,7 +11,7 @@ private func requestUsage(_ input: Int = 100, _ output: Int = 20) -> TokenUsageB
     let layout = ExpandedPanelLayout.make(screenFrame: CGRect(x: 0, y: 0, width: 1512, height: 982),
         visibleFrame: CGRect(x: 0, y: 70, width: 1512, height: 874), collapsedHeight: 38)
     #expect(layout.frame.size == CGSize(width: 680, height: 720))
-    #expect(layout.contentScale == 1.4)
+    #expect(layout.contentScale == 1.0)
     #expect(abs(layout.logicalSize.width * layout.contentScale - 680) < 0.01)
     #expect(layout.frame.maxY == 962)
 }

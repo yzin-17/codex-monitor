@@ -78,6 +78,8 @@ final class CodexNotchSettings: ObservableObject {
     }
 
     private let defaults: UserDefaults
+    lazy var hudPreferences = HUDPreferences(defaults: defaults)
+    lazy var codexAccounts = CodexAccountsStore(defaults: defaults)
     private let launchAtLoginManager: LaunchAtLoginManaging
     private let secretStores: SecretStoreFactory
     private var secretVault: SecretVault

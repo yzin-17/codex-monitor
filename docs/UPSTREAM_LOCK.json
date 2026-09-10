@@ -5,730 +5,458 @@
     {
       "path": ".gitignore",
       "source": "ALight",
-      "source_path": ".gitignore",
-      "source_sha256": "e19f21827d576eb887dce068eb1048ce51fc92d94834cb49bfa0418c50335553",
-      "sha256": "4293b9216ecb88458d10f7807562816d200b44b20e63d56a4a13caf82192e905",
-      "modified": true
+      "source_path": ".gitignore"
     },
     {
       "path": "Package.swift",
       "source": "ALight",
-      "source_path": "Package.swift",
-      "source_sha256": "e26a1a5deb0de573aee47ac721715958ad4cc1d5715aa0973a2f1fe873ae1cdc",
-      "sha256": "e26a1a5deb0de573aee47ac721715958ad4cc1d5715aa0973a2f1fe873ae1cdc",
-      "modified": false
+      "source_path": "Package.swift"
     },
     {
       "path": "docs/upstream/ALight-README.md",
       "source": "ALight",
-      "source_path": "README.md",
-      "source_sha256": "110510b8283dcdbfacc57368f091d32db7c07a58d8404d6353e722c44ac300ec",
-      "sha256": "110510b8283dcdbfacc57368f091d32db7c07a58d8404d6353e722c44ac300ec",
-      "modified": false
+      "source_path": "README.md"
     },
     {
       "path": "Resources/AppIcon.icns",
       "source": "ALight",
-      "source_path": "Resources/AppIcon.icns",
-      "source_sha256": "c0f14b4f7d8561540aecfdb132bd2d9a1dca2bfb91e4036425e93023d9146e07",
-      "sha256": "c0f14b4f7d8561540aecfdb132bd2d9a1dca2bfb91e4036425e93023d9146e07",
-      "modified": false
+      "source_path": "Resources/AppIcon.icns"
     },
     {
       "path": "Sources/CodexNotch/AppDelegate.swift",
       "source": "ALight",
-      "source_path": "Sources/CodexNotch/AppDelegate.swift",
-      "source_sha256": "b5c0fb7bdb9a0074b590026cbab51eb6288f0550b9e21a95907dcbdfffb61268",
-      "sha256": "f20b617163be10b5346bdfc442a25bd1f8473e51e1eb6644a187fd025cfb6af5",
-      "modified": true
+      "source_path": "Sources/CodexNotch/AppDelegate.swift"
     },
     {
       "path": "Sources/CodexNotch/AppInfo.swift",
       "source": "ALight",
-      "source_path": "Sources/CodexNotch/AppInfo.swift",
-      "source_sha256": "7c9d5a288cb5785c1f7057d2abd516d402d7aa7b6f775ed3a12267bcde390470",
-      "sha256": "249e3a7d3e79f5358104b5fa28a7e328146bd0ba6144ad4e3a578b0c98d37050",
-      "modified": true
+      "source_path": "Sources/CodexNotch/AppInfo.swift"
     },
     {
       "path": "Sources/CodexNotch/BalanceAPIClient.swift",
       "source": "ALight",
-      "source_path": "Sources/CodexNotch/BalanceAPIClient.swift",
-      "source_sha256": "6126690a5d6430e3f7893a2bc7d16b2a20f4f12c4ce0e110873f2f591407ec3e",
-      "sha256": "6126690a5d6430e3f7893a2bc7d16b2a20f4f12c4ce0e110873f2f591407ec3e",
-      "modified": false
+      "source_path": "Sources/CodexNotch/BalanceAPIClient.swift"
     },
     {
       "path": "Sources/CodexNotch/BalanceMonitorModels.swift",
       "source": "ALight",
-      "source_path": "Sources/CodexNotch/BalanceMonitorModels.swift",
-      "source_sha256": "1190b8371449c7d4fe6f4e17e019ed86f5a19aff0467095ce9f82747832dc245",
-      "sha256": "1190b8371449c7d4fe6f4e17e019ed86f5a19aff0467095ce9f82747832dc245",
-      "modified": false
+      "source_path": "Sources/CodexNotch/BalanceMonitorModels.swift"
     },
     {
       "path": "Sources/CodexNotch/BalanceMonitorViewModel.swift",
       "source": "ALight",
-      "source_path": "Sources/CodexNotch/BalanceMonitorViewModel.swift",
-      "source_sha256": "78496759badb8bd2d43d5049a563506c49f15854f8be44203b4861a285a93ea9",
-      "sha256": "78496759badb8bd2d43d5049a563506c49f15854f8be44203b4861a285a93ea9",
-      "modified": false
+      "source_path": "Sources/CodexNotch/BalanceMonitorViewModel.swift"
     },
     {
       "path": "Sources/CodexNotch/BottomRoundedRectangle.swift",
       "source": "ALight",
-      "source_path": "Sources/CodexNotch/BottomRoundedRectangle.swift",
-      "source_sha256": "762ddd9efdd576d49bfc7d023ca9c0fee79d6cb697b480e9b6579f5f33386ba4",
-      "sha256": "762ddd9efdd576d49bfc7d023ca9c0fee79d6cb697b480e9b6579f5f33386ba4",
-      "modified": false
+      "source_path": "Sources/CodexNotch/BottomRoundedRectangle.swift"
     },
     {
       "path": "Sources/CodexNotch/CLIProxyAPIClient.swift",
       "source": "ALight",
-      "source_path": "Sources/CodexNotch/CLIProxyAPIClient.swift",
-      "source_sha256": "1e2d14a6dfc069d379270244eaf215e4535fa5f0afd84bbdca2634542db3960c",
-      "sha256": "1e2d14a6dfc069d379270244eaf215e4535fa5f0afd84bbdca2634542db3960c",
-      "modified": false
+      "source_path": "Sources/CodexNotch/CLIProxyAPIClient.swift"
     },
     {
       "path": "Sources/CodexNotch/CodexFileWatcher.swift",
       "source": "ALight",
-      "source_path": "Sources/CodexNotch/CodexFileWatcher.swift",
-      "source_sha256": "e0e8a708c54bb4887ac6d4b61958dc7a19f01c550af7f9d9730612296466720c",
-      "sha256": "e0e8a708c54bb4887ac6d4b61958dc7a19f01c550af7f9d9730612296466720c",
-      "modified": false
+      "source_path": "Sources/CodexNotch/CodexFileWatcher.swift"
     },
     {
       "path": "Sources/CodexNotch/CodexNotchSettings.swift",
       "source": "ALight",
-      "source_path": "Sources/CodexNotch/CodexNotchSettings.swift",
-      "source_sha256": "93d2716e261de823c8431e4e26e92f417ebc89e032cdd72ea7ae3dc57f967c93",
-      "sha256": "83ac65c49a46f2126ecef0e9f57635507a2c7178b0cacea5ccd48ea1b053ff29",
-      "modified": true
+      "source_path": "Sources/CodexNotch/CodexNotchSettings.swift"
     },
     {
       "path": "Sources/CodexNotch/CodexRadarClient.swift",
       "source": "ALight",
-      "source_path": "Sources/CodexNotch/CodexRadarClient.swift",
-      "source_sha256": "eb9dcc4c4ddab5793460dad7aec5e4c9ddcaae02e6d2b8954c39005a1fce51cc",
-      "sha256": "eb9dcc4c4ddab5793460dad7aec5e4c9ddcaae02e6d2b8954c39005a1fce51cc",
-      "modified": false
+      "source_path": "Sources/CodexNotch/CodexRadarClient.swift"
     },
     {
       "path": "Sources/CodexNotch/CodexRadarModels.swift",
       "source": "ALight",
-      "source_path": "Sources/CodexNotch/CodexRadarModels.swift",
-      "source_sha256": "6ccb66d739f244d9505f61fd5fd9b258c3134a958336f7fe70e287e6707a3986",
-      "sha256": "6ccb66d739f244d9505f61fd5fd9b258c3134a958336f7fe70e287e6707a3986",
-      "modified": false
+      "source_path": "Sources/CodexNotch/CodexRadarModels.swift"
     },
     {
       "path": "Sources/CodexNotch/CodexRadarNews.swift",
       "source": "ALight",
-      "source_path": "Sources/CodexNotch/CodexRadarNews.swift",
-      "source_sha256": "c363d457ca866d1059e35f254eca3bc9cc5387cf7db138bddfd581e55fa15faf",
-      "sha256": "c363d457ca866d1059e35f254eca3bc9cc5387cf7db138bddfd581e55fa15faf",
-      "modified": false
+      "source_path": "Sources/CodexNotch/CodexRadarNews.swift"
     },
     {
       "path": "Sources/CodexNotch/CodexRadarViewModel.swift",
       "source": "ALight",
-      "source_path": "Sources/CodexNotch/CodexRadarViewModel.swift",
-      "source_sha256": "1fbd8b9685486a97dd20b5b22aeeac743d21b44dd4c0fed8ef5b761a6b39fc1c",
-      "sha256": "661c4b38a467385f58ee687c0101b7dec2933fd96317f5af955b88a71b7ee1dd",
-      "modified": true
+      "source_path": "Sources/CodexNotch/CodexRadarViewModel.swift"
     },
     {
       "path": "Sources/CodexNotch/CodexSessionEventDecoder.swift",
       "source": "ALight",
-      "source_path": "Sources/CodexNotch/CodexSessionEventDecoder.swift",
-      "source_sha256": "46dbf7d47ce6896b68d5283eb2460196ae154ccfa3044020d94c017033ed5324",
-      "sha256": "46dbf7d47ce6896b68d5283eb2460196ae154ccfa3044020d94c017033ed5324",
-      "modified": false
+      "source_path": "Sources/CodexNotch/CodexSessionEventDecoder.swift"
     },
     {
       "path": "Sources/CodexNotch/CodexUsageStore.swift",
       "source": "ALight",
-      "source_path": "Sources/CodexNotch/CodexUsageStore.swift",
-      "source_sha256": "7bd5f39236f6b80284c4743d3f991d11a672a800973b6aaf434be08a8225dc55",
-      "sha256": "1f1e9d7bc7e19a78f033544d7219bd022d7719fd44eba9dd50c78e9499cbd534",
-      "modified": true
+      "source_path": "Sources/CodexNotch/CodexUsageStore.swift"
     },
     {
       "path": "Sources/CodexNotch/DetailPresentation.swift",
       "source": "ALight",
-      "source_path": "Sources/CodexNotch/DetailPresentation.swift",
-      "source_sha256": "d66420778af4a7c05cb653d81b043a521099e1b42b1f11d5348bcebb9a50ad24",
-      "sha256": "d66420778af4a7c05cb653d81b043a521099e1b42b1f11d5348bcebb9a50ad24",
-      "modified": false
+      "source_path": "Sources/CodexNotch/DetailPresentation.swift"
     },
     {
       "path": "Sources/CodexNotch/DisplayRedactor.swift",
       "source": "ALight",
-      "source_path": "Sources/CodexNotch/DisplayRedactor.swift",
-      "source_sha256": "e609d796c65d991fd4e5e1931c82182a362784afd66c9f5f695eac427b0e90b6",
-      "sha256": "e609d796c65d991fd4e5e1931c82182a362784afd66c9f5f695eac427b0e90b6",
-      "modified": false
+      "source_path": "Sources/CodexNotch/DisplayRedactor.swift"
     },
     {
       "path": "Sources/CodexNotch/ExpandableWarningMessage.swift",
       "source": "ALight",
-      "source_path": "Sources/CodexNotch/ExpandableWarningMessage.swift",
-      "source_sha256": "d936aeb082a1c45c48086d6aa03212b17a6f9c0fddb029baf3d9312a57d8aca8",
-      "sha256": "d936aeb082a1c45c48086d6aa03212b17a6f9c0fddb029baf3d9312a57d8aca8",
-      "modified": false
+      "source_path": "Sources/CodexNotch/ExpandableWarningMessage.swift"
     },
     {
       "path": "Sources/CodexNotch/Formatters.swift",
       "source": "ALight",
-      "source_path": "Sources/CodexNotch/Formatters.swift",
-      "source_sha256": "cf48853503e34832aee7c6b82bf0f7aba869e2fb0404573d13ed0f91f366af3e",
-      "sha256": "cf48853503e34832aee7c6b82bf0f7aba869e2fb0404573d13ed0f91f366af3e",
-      "modified": false
+      "source_path": "Sources/CodexNotch/Formatters.swift"
     },
     {
       "path": "Sources/CodexNotch/IslandMetrics.swift",
       "source": "ALight",
-      "source_path": "Sources/CodexNotch/IslandMetrics.swift",
-      "source_sha256": "65077677941520b0d59ab830629dc971830d9cd582ed8489e34274c35bdb08f3",
-      "sha256": "65077677941520b0d59ab830629dc971830d9cd582ed8489e34274c35bdb08f3",
-      "modified": false
+      "source_path": "Sources/CodexNotch/IslandMetrics.swift"
     },
     {
       "path": "Sources/CodexNotch/KeychainStore.swift",
       "source": "ALight",
-      "source_path": "Sources/CodexNotch/KeychainStore.swift",
-      "source_sha256": "a4e20578361ade29a3d1d64dd235ff48302a9ec1a5d8e28c926795c2fa368f2d",
-      "sha256": "a4e20578361ade29a3d1d64dd235ff48302a9ec1a5d8e28c926795c2fa368f2d",
-      "modified": false
+      "source_path": "Sources/CodexNotch/KeychainStore.swift"
     },
     {
       "path": "Sources/CodexNotch/Models.swift",
       "source": "ALight",
-      "source_path": "Sources/CodexNotch/Models.swift",
-      "source_sha256": "b45cf77574c78dd4313fdc4d88b54f79fdda57b6ade65b6ec09ae9c27651cf92",
-      "sha256": "b45cf77574c78dd4313fdc4d88b54f79fdda57b6ade65b6ec09ae9c27651cf92",
-      "modified": false
+      "source_path": "Sources/CodexNotch/Models.swift"
     },
     {
       "path": "Sources/CodexNotch/NotchIslandView.swift",
       "source": "ALight",
-      "source_path": "Sources/CodexNotch/NotchIslandView.swift",
-      "source_sha256": "91a5306792dae38db297ae62ac091e94784164584ec709aeae7a268b4b29d185",
-      "sha256": "c9e629b79611a75af0b807499563e94b9e3eefd0699c246b5bca2ab474a22443",
-      "modified": true
+      "source_path": "Sources/CodexNotch/NotchIslandView.swift"
     },
     {
       "path": "Sources/CodexNotch/RateLimitResetCredits.swift",
       "source": "ALight",
-      "source_path": "Sources/CodexNotch/RateLimitResetCredits.swift",
-      "source_sha256": "56ebc0b07e4a8da27f3bbdc980e9dff009c13c23ebc6526e7ec61fbe4cd4a9e5",
-      "sha256": "56ebc0b07e4a8da27f3bbdc980e9dff009c13c23ebc6526e7ec61fbe4cd4a9e5",
-      "modified": false
+      "source_path": "Sources/CodexNotch/RateLimitResetCredits.swift"
     },
     {
       "path": "Sources/CodexNotch/RemoteMonitorModels.swift",
       "source": "ALight",
-      "source_path": "Sources/CodexNotch/RemoteMonitorModels.swift",
-      "source_sha256": "827f91c2a3e8356ffd873ab8de66d97a3254a38e15f9f82f8b8322b0b65804b7",
-      "sha256": "827f91c2a3e8356ffd873ab8de66d97a3254a38e15f9f82f8b8322b0b65804b7",
-      "modified": false
+      "source_path": "Sources/CodexNotch/RemoteMonitorModels.swift"
     },
     {
       "path": "Sources/CodexNotch/RemoteMonitorViewModel.swift",
       "source": "ALight",
-      "source_path": "Sources/CodexNotch/RemoteMonitorViewModel.swift",
-      "source_sha256": "2ca374c24077882be2d4acb06ea4b1329fe86bffa3d5dc1c49bfcc9d4d026db5",
-      "sha256": "2ca374c24077882be2d4acb06ea4b1329fe86bffa3d5dc1c49bfcc9d4d026db5",
-      "modified": false
+      "source_path": "Sources/CodexNotch/RemoteMonitorViewModel.swift"
     },
     {
       "path": "Sources/CodexNotch/RemoteResetCreditsLoader.swift",
       "source": "ALight",
-      "source_path": "Sources/CodexNotch/RemoteResetCreditsLoader.swift",
-      "source_sha256": "e58edfd80038703f92bb69d5327a4c7f05f2bd875f8d1a2b8560b7bb375d2f5a",
-      "sha256": "e58edfd80038703f92bb69d5327a4c7f05f2bd875f8d1a2b8560b7bb375d2f5a",
-      "modified": false
+      "source_path": "Sources/CodexNotch/RemoteResetCreditsLoader.swift"
     },
     {
       "path": "Sources/CodexNotch/ResetCreditsIndicator.swift",
       "source": "ALight",
-      "source_path": "Sources/CodexNotch/ResetCreditsIndicator.swift",
-      "source_sha256": "ebb915fca2db36b153d07bba120121e66cdaa78f28e98ec653a2fd4227356e0c",
-      "sha256": "ebb915fca2db36b153d07bba120121e66cdaa78f28e98ec653a2fd4227356e0c",
-      "modified": false
+      "source_path": "Sources/CodexNotch/ResetCreditsIndicator.swift"
     },
     {
       "path": "Sources/CodexNotch/ScreenNotchGeometry.swift",
       "source": "ALight",
-      "source_path": "Sources/CodexNotch/ScreenNotchGeometry.swift",
-      "source_sha256": "e2fef4179abafc84e39a2c71ae916c0c5c4424e210effc95b629b88bea1a0c74",
-      "sha256": "e2fef4179abafc84e39a2c71ae916c0c5c4424e210effc95b629b88bea1a0c74",
-      "modified": false
+      "source_path": "Sources/CodexNotch/ScreenNotchGeometry.swift"
     },
     {
       "path": "Sources/CodexNotch/SecretStore.swift",
       "source": "ALight",
-      "source_path": "Sources/CodexNotch/SecretStore.swift",
-      "source_sha256": "13faee2d8f833dbbf861585d0e0bfdf293053e56c50e1c520914e8723470c78b",
-      "sha256": "c55fde0fc184508f59f91bfc33e721ec25391caabdb0ee23500aa6df0b973dc0",
-      "modified": true
+      "source_path": "Sources/CodexNotch/SecretStore.swift"
     },
     {
       "path": "Sources/CodexNotch/SettingsView.swift",
       "source": "ALight",
-      "source_path": "Sources/CodexNotch/SettingsView.swift",
-      "source_sha256": "d8d591ce14773c6b9582e29574b06513d6f7982cef1b81136157ec4d0fcd2e60",
-      "sha256": "e9f0a85749c808dbaa0365cba90bb1093d77eb4f04296e7cda50178b929f60e6",
-      "modified": true
+      "source_path": "Sources/CodexNotch/SettingsView.swift"
     },
     {
       "path": "Sources/CodexNotch/Shell.swift",
       "source": "ALight",
-      "source_path": "Sources/CodexNotch/Shell.swift",
-      "source_sha256": "235db7d837b8217c88dd824cfeacf993006eeea01c8ea8ea0147a22dc8a6960b",
-      "sha256": "235db7d837b8217c88dd824cfeacf993006eeea01c8ea8ea0147a22dc8a6960b",
-      "modified": false
+      "source_path": "Sources/CodexNotch/Shell.swift"
     },
     {
       "path": "Sources/CodexNotch/SnapshotOutputFormatter.swift",
       "source": "ALight",
-      "source_path": "Sources/CodexNotch/SnapshotOutputFormatter.swift",
-      "source_sha256": "cefd47bc368d28e3ba49519953ae979eefc28c7e4682126fe1e58d8e941fe5f8",
-      "sha256": "cefd47bc368d28e3ba49519953ae979eefc28c7e4682126fe1e58d8e941fe5f8",
-      "modified": false
+      "source_path": "Sources/CodexNotch/SnapshotOutputFormatter.swift"
     },
     {
       "path": "Sources/CodexNotch/Sub2APIRemoteClient.swift",
       "source": "ALight",
-      "source_path": "Sources/CodexNotch/Sub2APIRemoteClient.swift",
-      "source_sha256": "5fd24c21ce131849206732d0ebec6ef61f18354115bca096949b700dd4161e9c",
-      "sha256": "5fd24c21ce131849206732d0ebec6ef61f18354115bca096949b700dd4161e9c",
-      "modified": false
+      "source_path": "Sources/CodexNotch/Sub2APIRemoteClient.swift"
     },
     {
       "path": "Sources/CodexNotch/TokenCostEstimator.swift",
       "source": "ALight",
-      "source_path": "Sources/CodexNotch/TokenCostEstimator.swift",
-      "source_sha256": "48ace4ca4d865aa38cf34a508f0a171ef86a3090eac3b5d2ae2a49f45c9febaa",
-      "sha256": "48ace4ca4d865aa38cf34a508f0a171ef86a3090eac3b5d2ae2a49f45c9febaa",
-      "modified": false
+      "source_path": "Sources/CodexNotch/TokenCostEstimator.swift"
     },
     {
       "path": "Sources/CodexNotch/TokenPricingUpdater.swift",
       "source": "ALight",
-      "source_path": "Sources/CodexNotch/TokenPricingUpdater.swift",
-      "source_sha256": "811b6c82627d4a3302b3f815b37be53fd31ed9af6831d0ba626b1ddc48fc11a6",
-      "sha256": "5155e0ca6e538e573dea0667e5781211afe7e5b7e69495cce74220bfb7adfa3d",
-      "modified": true
+      "source_path": "Sources/CodexNotch/TokenPricingUpdater.swift"
     },
     {
       "path": "Sources/CodexNotch/UsageRefreshState.swift",
       "source": "ALight",
-      "source_path": "Sources/CodexNotch/UsageRefreshState.swift",
-      "source_sha256": "059daafbbe979108efbe3721a999989ba5ca9debbb3445db908d3fdd4da9226d",
-      "sha256": "059daafbbe979108efbe3721a999989ba5ca9debbb3445db908d3fdd4da9226d",
-      "modified": false
+      "source_path": "Sources/CodexNotch/UsageRefreshState.swift"
     },
     {
       "path": "Sources/CodexNotch/UsageViewModel.swift",
       "source": "ALight",
-      "source_path": "Sources/CodexNotch/UsageViewModel.swift",
-      "source_sha256": "7c9eca99726d1de59ecf770a6693b1d728ce2593ad92d7ae211e1f2db2657cb0",
-      "sha256": "e403dfbf91bd03937b15107f04ad405177d61e9847250166942061ab13153fab",
-      "modified": true
+      "source_path": "Sources/CodexNotch/UsageViewModel.swift"
     },
     {
       "path": "Tests/CodexNotchRegressionTests/main.swift",
       "source": "ALight",
-      "source_path": "Tests/CodexNotchRegressionTests/main.swift",
-      "source_sha256": "26f5b9745537bd65d1615c4cfe0ec93a89ec1e456d2a9bd6b1b463bde2bc442a",
-      "sha256": "af067953acb4311ed13b22a9d1876662287dd8a9f2f989c070df11ebf61f1566",
-      "modified": true
+      "source_path": "Tests/CodexNotchRegressionTests/main.swift"
     },
     {
       "path": "Tests/CodexNotchTests/BalanceHTTPResponseTests.swift",
       "source": "ALight",
-      "source_path": "Tests/CodexNotchTests/BalanceHTTPResponseTests.swift",
-      "source_sha256": "56316341e2160fcfe04f4aed94ee9497dfc6525662caa233af824d577b72a0b8",
-      "sha256": "56316341e2160fcfe04f4aed94ee9497dfc6525662caa233af824d577b72a0b8",
-      "modified": false
+      "source_path": "Tests/CodexNotchTests/BalanceHTTPResponseTests.swift"
     },
     {
       "path": "Tests/CodexNotchTests/CodexRadarDimensionsTests.swift",
       "source": "ALight",
-      "source_path": "Tests/CodexNotchTests/CodexRadarDimensionsTests.swift",
-      "source_sha256": "e07fa20e6d7a7f7168722ea70c3ff4dbb73fcefcedf75441e23efce773533d7a",
-      "sha256": "e07fa20e6d7a7f7168722ea70c3ff4dbb73fcefcedf75441e23efce773533d7a",
-      "modified": false
+      "source_path": "Tests/CodexNotchTests/CodexRadarDimensionsTests.swift"
     },
     {
       "path": "Tests/CodexNotchTests/CodexRadarRefreshTests.swift",
       "source": "ALight",
-      "source_path": "Tests/CodexNotchTests/CodexRadarRefreshTests.swift",
-      "source_sha256": "748468cb1031d92d8d4fc1b8efb9ae59f4064538c138ec4733d10de8c99becfd",
-      "sha256": "748468cb1031d92d8d4fc1b8efb9ae59f4064538c138ec4733d10de8c99becfd",
-      "modified": false
+      "source_path": "Tests/CodexNotchTests/CodexRadarRefreshTests.swift"
     },
     {
       "path": "Tests/CodexNotchTests/CodexRadarTests.swift",
       "source": "ALight",
-      "source_path": "Tests/CodexNotchTests/CodexRadarTests.swift",
-      "source_sha256": "1e20125d22587bfdfc8eea9e420f750ba0cfd24ec987246d15d12494e095a624",
-      "sha256": "1e20125d22587bfdfc8eea9e420f750ba0cfd24ec987246d15d12494e095a624",
-      "modified": false
+      "source_path": "Tests/CodexNotchTests/CodexRadarTests.swift"
     },
     {
       "path": "Tests/CodexNotchTests/NewAPIAuthenticationTests.swift",
       "source": "ALight",
-      "source_path": "Tests/CodexNotchTests/NewAPIAuthenticationTests.swift",
-      "source_sha256": "9b77f5257a36d0aea219c6768e16410d86edfe991293a38e947f2b99565ea6b1",
-      "sha256": "9b77f5257a36d0aea219c6768e16410d86edfe991293a38e947f2b99565ea6b1",
-      "modified": false
+      "source_path": "Tests/CodexNotchTests/NewAPIAuthenticationTests.swift"
     },
     {
       "path": "Tests/CodexNotchTests/RateLimitSourceTests.swift",
       "source": "ALight",
-      "source_path": "Tests/CodexNotchTests/RateLimitSourceTests.swift",
-      "source_sha256": "6e2c0b9bf9d220b6efc5b8abb4d48a4ecfe15f063f2059c69aa04d589df55642",
-      "sha256": "6e2c0b9bf9d220b6efc5b8abb4d48a4ecfe15f063f2059c69aa04d589df55642",
-      "modified": false
+      "source_path": "Tests/CodexNotchTests/RateLimitSourceTests.swift"
     },
     {
       "path": "Tests/CodexNotchTests/SecretSettingsTests.swift",
       "source": "ALight",
-      "source_path": "Tests/CodexNotchTests/SecretSettingsTests.swift",
-      "source_sha256": "027d6ac3d83a713c86a9ef82c80337166dd5d7fb5327e30fbf86df595791a24b",
-      "sha256": "027d6ac3d83a713c86a9ef82c80337166dd5d7fb5327e30fbf86df595791a24b",
-      "modified": false
+      "source_path": "Tests/CodexNotchTests/SecretSettingsTests.swift"
     },
     {
       "path": "Tests/CodexNotchTests/Sub2APIRemoteClientTests.swift",
       "source": "ALight",
-      "source_path": "Tests/CodexNotchTests/Sub2APIRemoteClientTests.swift",
-      "source_sha256": "685eb9e1a32b476e3a193247c0923efe95fd48668623751902aafbf70e24f994",
-      "sha256": "685eb9e1a32b476e3a193247c0923efe95fd48668623751902aafbf70e24f994",
-      "modified": false
+      "source_path": "Tests/CodexNotchTests/Sub2APIRemoteClientTests.swift"
     },
     {
       "path": "Tests/CodexNotchTests/TokenCostEstimatorTests.swift",
       "source": "ALight",
-      "source_path": "Tests/CodexNotchTests/TokenCostEstimatorTests.swift",
-      "source_sha256": "6139bda869620559043afbb728b11da73f15aec8c968c62cb5cecb87afdb3113",
-      "sha256": "6139bda869620559043afbb728b11da73f15aec8c968c62cb5cecb87afdb3113",
-      "modified": false
+      "source_path": "Tests/CodexNotchTests/TokenCostEstimatorTests.swift"
     },
     {
       "path": "Tests/CodexNotchTests/TokenPricingUpdaterTests.swift",
       "source": "ALight",
-      "source_path": "Tests/CodexNotchTests/TokenPricingUpdaterTests.swift",
-      "source_sha256": "559c5fb2b8921e3eea32c99ef94c798c060555d344f5c7c8ec0ee2bc9c664cfb",
-      "sha256": "559c5fb2b8921e3eea32c99ef94c798c060555d344f5c7c8ec0ee2bc9c664cfb",
-      "modified": false
+      "source_path": "Tests/CodexNotchTests/TokenPricingUpdaterTests.swift"
     },
     {
       "path": "Tests/CodexNotchTests/UsageEventLineScannerTests.swift",
       "source": "ALight",
-      "source_path": "Tests/CodexNotchTests/UsageEventLineScannerTests.swift",
-      "source_sha256": "aad8b9be43a248d67493f313bdd5b43a60ffd7fe2c1feb5cb9fea7bb1230af3a",
-      "sha256": "aad8b9be43a248d67493f313bdd5b43a60ffd7fe2c1feb5cb9fea7bb1230af3a",
-      "modified": false
+      "source_path": "Tests/CodexNotchTests/UsageEventLineScannerTests.swift"
     },
     {
       "path": "Tests/CodexNotchTests/UsageRefreshStateTests.swift",
       "source": "ALight",
-      "source_path": "Tests/CodexNotchTests/UsageRefreshStateTests.swift",
-      "source_sha256": "07e6241787f5c9e233bd8e9c837a09943cd350e5a4c73a2b80bfce75c27a8f53",
-      "sha256": "07e6241787f5c9e233bd8e9c837a09943cd350e5a4c73a2b80bfce75c27a8f53",
-      "modified": false
+      "source_path": "Tests/CodexNotchTests/UsageRefreshStateTests.swift"
     },
     {
       "path": "Tests/CodexNotchTests/UsageTodayTests.swift",
       "source": "ALight",
-      "source_path": "Tests/CodexNotchTests/UsageTodayTests.swift",
-      "source_sha256": "8c6f4ea7698242d231effd5941befb3eb122156aa61fc0d0e808a7ec72a2aa07",
-      "sha256": "8c6f4ea7698242d231effd5941befb3eb122156aa61fc0d0e808a7ec72a2aa07",
-      "modified": false
+      "source_path": "Tests/CodexNotchTests/UsageTodayTests.swift"
     },
     {
       "path": "design-qa.md",
       "source": "ALight",
-      "source_path": "design-qa.md",
-      "source_sha256": "157924f85752c3069d19c77bf6c29616c2de42c20e31bedc7bb2cc45cd24cd47",
-      "sha256": "157924f85752c3069d19c77bf6c29616c2de42c20e31bedc7bb2cc45cd24cd47",
-      "modified": false
+      "source_path": "design-qa.md"
     },
     {
       "path": "docs/superpowers/plans/2026-07-20-notch-detail-animation.md",
       "source": "ALight",
-      "source_path": "docs/superpowers/plans/2026-07-20-notch-detail-animation.md",
-      "source_sha256": "fc9cefb4420b61ecf075616c8b1994eb376f9ac02d0a5279ba38b92ff67a08e8",
-      "sha256": "fc9cefb4420b61ecf075616c8b1994eb376f9ac02d0a5279ba38b92ff67a08e8",
-      "modified": false
+      "source_path": "docs/superpowers/plans/2026-07-20-notch-detail-animation.md"
     },
     {
       "path": "docs/superpowers/plans/2026-07-20-reset-credits-display.md",
       "source": "ALight",
-      "source_path": "docs/superpowers/plans/2026-07-20-reset-credits-display.md",
-      "source_sha256": "defd1df3b4fe0edd7da8372b4bf56b48628e9500870a7f31fb5f0070e78faf91",
-      "sha256": "defd1df3b4fe0edd7da8372b4bf56b48628e9500870a7f31fb5f0070e78faf91",
-      "modified": false
+      "source_path": "docs/superpowers/plans/2026-07-20-reset-credits-display.md"
     },
     {
       "path": "docs/superpowers/specs/2026-07-20-notch-detail-animation-design.md",
       "source": "ALight",
-      "source_path": "docs/superpowers/specs/2026-07-20-notch-detail-animation-design.md",
-      "source_sha256": "f04c9dbf63fecbb4679d3df9735317f10ffc00a1f75d9a44e78c76952a75a56e",
-      "sha256": "f04c9dbf63fecbb4679d3df9735317f10ffc00a1f75d9a44e78c76952a75a56e",
-      "modified": false
+      "source_path": "docs/superpowers/specs/2026-07-20-notch-detail-animation-design.md"
     },
     {
       "path": "docs/superpowers/specs/2026-07-20-reset-credits-display-design.md",
       "source": "ALight",
-      "source_path": "docs/superpowers/specs/2026-07-20-reset-credits-display-design.md",
-      "source_sha256": "d9956bfae2947800d6ad4ed803f55a343ffa42dab650087130d2457c80fe41b2",
-      "sha256": "d9956bfae2947800d6ad4ed803f55a343ffa42dab650087130d2457c80fe41b2",
-      "modified": false
+      "source_path": "docs/superpowers/specs/2026-07-20-reset-credits-display-design.md"
     },
     {
       "path": "qa/newapi-response/README.md",
       "source": "ALight",
-      "source_path": "qa/newapi-response/README.md",
-      "source_sha256": "30d8b7080a29a5150290d7f5cebf325e2ec552a54b1fe1f094683edbecfdde7d",
-      "sha256": "30d8b7080a29a5150290d7f5cebf325e2ec552a54b1fe1f094683edbecfdde7d",
-      "modified": false
+      "source_path": "qa/newapi-response/README.md"
     },
     {
       "path": "qa/pricing-auth/README.md",
       "source": "ALight",
-      "source_path": "qa/pricing-auth/README.md",
-      "source_sha256": "8f2013902804a399c38cec70c20f0f091ae0678d36acaf5e7d7bc3372b766a73",
-      "sha256": "8f2013902804a399c38cec70c20f0f091ae0678d36acaf5e7d7bc3372b766a73",
-      "modified": false
+      "source_path": "qa/pricing-auth/README.md"
     },
     {
       "path": "qa/quota-refresh/README.md",
       "source": "ALight",
-      "source_path": "qa/quota-refresh/README.md",
-      "source_sha256": "41a2469a7d4e15794051324902428188d546549a836c095767a33672df89a85e",
-      "sha256": "41a2469a7d4e15794051324902428188d546549a836c095767a33672df89a85e",
-      "modified": false
+      "source_path": "qa/quota-refresh/README.md"
     },
     {
       "path": "qa/radar-dimensions/README.md",
       "source": "ALight",
-      "source_path": "qa/radar-dimensions/README.md",
-      "source_sha256": "224e3d0d502b1eb9da302e904795b478367372ed16f24831f7369720e231c7ea",
-      "sha256": "224e3d0d502b1eb9da302e904795b478367372ed16f24831f7369720e231c7ea",
-      "modified": false
+      "source_path": "qa/radar-dimensions/README.md"
     },
     {
       "path": "qa/radar-refresh/README.md",
       "source": "ALight",
-      "source_path": "qa/radar-refresh/README.md",
-      "source_sha256": "c9f03a9a84a7d10dc66035ff4bd8534cee638ae12ba5e3c7e0062b6e570b77a2",
-      "sha256": "c9f03a9a84a7d10dc66035ff4bd8534cee638ae12ba5e3c7e0062b6e570b77a2",
-      "modified": false
+      "source_path": "qa/radar-refresh/README.md"
     },
     {
       "path": "qa/token-cost-compact-final.jpeg",
       "source": "ALight",
-      "source_path": "qa/token-cost-compact-final.jpeg",
-      "source_sha256": "0c2ea80af00d9cceb196d4e142ae4ac001ece70ef2af8914d88d6fdf3affd989",
-      "sha256": "0c2ea80af00d9cceb196d4e142ae4ac001ece70ef2af8914d88d6fdf3affd989",
-      "modified": false
+      "source_path": "qa/token-cost-compact-final.jpeg"
     },
     {
       "path": "qa/token-cost-comparison.png",
       "source": "ALight",
-      "source_path": "qa/token-cost-comparison.png",
-      "source_sha256": "6666cce287893b87296df0dadb14809b1b355862842f96c1c640d6b15c1ec7dd",
-      "sha256": "6666cce287893b87296df0dadb14809b1b355862842f96c1c640d6b15c1ec7dd",
-      "modified": false
+      "source_path": "qa/token-cost-comparison.png"
     },
     {
       "path": "qa/token-cost-popover-final.png",
       "source": "ALight",
-      "source_path": "qa/token-cost-popover-final.png",
-      "source_sha256": "8168baa23812de025af6da9e1d607ad479940e2aad3adf00f3bfea71d7fedc93",
-      "sha256": "8168baa23812de025af6da9e1d607ad479940e2aad3adf00f3bfea71d7fedc93",
-      "modified": false
+      "source_path": "qa/token-cost-popover-final.png"
     },
     {
       "path": "scripts/build-app.sh",
       "source": "ALight",
-      "source_path": "scripts/build-app.sh",
-      "source_sha256": "7e46a226628a043a4de048870804997263b9ae552d3195bf667cb963ed631b1c",
-      "sha256": "cff055cb55c76c89d94a4d04d35c50cbf41d760027b6fe530feb4aab3ae66ed6",
-      "modified": true
+      "source_path": "scripts/build-app.sh"
     },
     {
       "path": "scripts/generate-app-icon.swift",
       "source": "ALight",
-      "source_path": "scripts/generate-app-icon.swift",
-      "source_sha256": "da736177f0958f5a798bcfdf61a9980caf90b7579a00542edd4982f3aa0062cd",
-      "sha256": "da736177f0958f5a798bcfdf61a9980caf90b7579a00542edd4982f3aa0062cd",
-      "modified": false
+      "source_path": "scripts/generate-app-icon.swift"
     },
     {
       "path": "scripts/install-user-app.sh",
       "source": "ALight",
-      "source_path": "scripts/install-user-app.sh",
-      "source_sha256": "cb64b484a7b43b63fcefe5288443bc44ba3f8f1dfce8a48aeca93fb637cb1d1e",
-      "sha256": "b3bc7d4e5f609c84d88abc3629eb60fd67853f704d1930c85c5fea5b94ddfd8e",
-      "modified": true
+      "source_path": "scripts/install-user-app.sh"
     },
     {
       "path": "scripts/run-regression-tests.sh",
       "source": "ALight",
-      "source_path": "scripts/run-regression-tests.sh",
-      "source_sha256": "ac86b8f741042d0d0d7215bb92f172bcd5c6d2d572b04cae33728ba0a7a1c703",
-      "sha256": "ac86b8f741042d0d0d7215bb92f172bcd5c6d2d572b04cae33728ba0a7a1c703",
-      "modified": false
+      "source_path": "scripts/run-regression-tests.sh"
     },
     {
       "path": "Sources/CodexNotch/SkillCatalogLoader.swift",
       "source": "Jackie",
-      "source_path": "Sources/CodexNotch/SkillCatalogLoader.swift",
-      "source_sha256": "b5944a904e685b1b8ac628fbd669f030126d93e53788a6d7bed449bc963388d3",
-      "sha256": "b5944a904e685b1b8ac628fbd669f030126d93e53788a6d7bed449bc963388d3",
-      "modified": false
+      "source_path": "Sources/CodexNotch/SkillCatalogLoader.swift"
     },
     {
       "path": "Sources/CodexNotch/SkillInsightsModels.swift",
       "source": "Jackie",
-      "source_path": "Sources/CodexNotch/SkillInsightsModels.swift",
-      "source_sha256": "603a3926411c73f4a3b671cb81aa229f9628bc00e012eaaf2980d82660702208",
-      "sha256": "603a3926411c73f4a3b671cb81aa229f9628bc00e012eaaf2980d82660702208",
-      "modified": false
+      "source_path": "Sources/CodexNotch/SkillInsightsModels.swift"
     },
     {
       "path": "Sources/CodexNotch/SkillInsightsPanelView.swift",
       "source": "Jackie",
-      "source_path": "Sources/CodexNotch/SkillInsightsPanelView.swift",
-      "source_sha256": "3b881d955693d377f2c70295e469c1fb5d759869966158dcc3f731df1028ce51",
-      "sha256": "312e97e366cb7e4ce11dab1d78ae43fd7c389f956e82867126a610c79f18393f",
-      "modified": true
+      "source_path": "Sources/CodexNotch/SkillInsightsPanelView.swift"
     },
     {
       "path": "Sources/CodexNotch/SkillInsightsService.swift",
       "source": "Jackie",
-      "source_path": "Sources/CodexNotch/SkillInsightsService.swift",
-      "source_sha256": "17597986bb386c38e57b8570d58fa179b6e62321110145101cc24554da218b2f",
-      "sha256": "17597986bb386c38e57b8570d58fa179b6e62321110145101cc24554da218b2f",
-      "modified": false
+      "source_path": "Sources/CodexNotch/SkillInsightsService.swift"
     },
     {
       "path": "Sources/CodexNotch/SkillInsightsViewModel.swift",
       "source": "Jackie",
-      "source_path": "Sources/CodexNotch/SkillInsightsViewModel.swift",
-      "source_sha256": "f55767e5cd9237f9adccec33c383f2812bc9c0d71b97720d2aa3b786b9fdc282",
-      "sha256": "5a48f1ce2cfa5453ab30028f0fafb6cd98800debbaf0e79fbe62b6c8265583db",
-      "modified": true
+      "source_path": "Sources/CodexNotch/SkillInsightsViewModel.swift"
     },
     {
       "path": "Sources/CodexNotch/SkillJSONLReader.swift",
       "source": "Jackie",
-      "source_path": "Sources/CodexNotch/SkillJSONLReader.swift",
-      "source_sha256": "dcb1982ec7addeebd9fcb24e8dbd3bf9740f3972304f26809d5c73e5153ec385",
-      "sha256": "dcb1982ec7addeebd9fcb24e8dbd3bf9740f3972304f26809d5c73e5153ec385",
-      "modified": false
+      "source_path": "Sources/CodexNotch/SkillJSONLReader.swift"
     },
     {
       "path": "Sources/CodexNotch/SkillObservationStore.swift",
       "source": "Jackie",
-      "source_path": "Sources/CodexNotch/SkillObservationStore.swift",
-      "source_sha256": "f727c270e687c7ef2aab9403c84b797590ef3a2f84a70a315025eb7a26334f2c",
-      "sha256": "38e734f0398913758f36d7d1791c275105fa51d3e488500a7e304bdabf4615b5",
-      "modified": true
+      "source_path": "Sources/CodexNotch/SkillObservationStore.swift"
     },
     {
       "path": "Sources/CodexNotch/SkillProcessMetrics.swift",
       "source": "Jackie",
-      "source_path": "Sources/CodexNotch/SkillProcessMetrics.swift",
-      "source_sha256": "50d273dfbc8d7e6d5611b74175ff4328612643d657f0e788e8a6d0ec00643636",
-      "sha256": "50d273dfbc8d7e6d5611b74175ff4328612643d657f0e788e8a6d0ec00643636",
-      "modified": false
+      "source_path": "Sources/CodexNotch/SkillProcessMetrics.swift"
     },
     {
       "path": "Sources/CodexNotch/SkillSessionAnalyzer.swift",
       "source": "Jackie",
-      "source_path": "Sources/CodexNotch/SkillSessionAnalyzer.swift",
-      "source_sha256": "52228408c80b20020ee11f0947db8bac298227321772fc613a4e03616e77fe43",
-      "sha256": "33c22ad5d137d82e6bc9256e458277f584f2da92dff7bfbc1da4d75c1f24481e",
-      "modified": true
+      "source_path": "Sources/CodexNotch/SkillSessionAnalyzer.swift"
     },
     {
       "path": "Sources/CodexNotch/CodexSessionFileLocator.swift",
       "source": "Jackie",
-      "source_path": "Sources/CodexNotch/CodexSessionFileLocator.swift",
-      "source_sha256": "5b5a96594373607063e8fa5849d609fd0eacc02e75acf47fa56dc73730e75760",
-      "sha256": "5b5a96594373607063e8fa5849d609fd0eacc02e75acf47fa56dc73730e75760",
-      "modified": false
+      "source_path": "Sources/CodexNotch/CodexSessionFileLocator.swift"
     },
     {
       "path": "Sources/CodexNotch/CodexSkillsAppServerClient.swift",
       "source": "Jackie",
-      "source_path": "Sources/CodexNotch/CodexSkillsAppServerClient.swift",
-      "source_sha256": "fea11ecb130b26251a1a01acaeb17bb300f6532812e3934496d3b55c9f72543f",
-      "sha256": "fea11ecb130b26251a1a01acaeb17bb300f6532812e3934496d3b55c9f72543f",
-      "modified": false
+      "source_path": "Sources/CodexNotch/CodexSkillsAppServerClient.swift"
     },
     {
       "path": "Sources/CodexNotch/CodexRuntimeLocator.swift",
       "source": "Jackie",
-      "source_path": "Sources/CodexNotch/CodexRuntimeLocator.swift",
-      "source_sha256": "7d3b09bd7b3403df7bbe26de234bbe1d2d18e9c7111cd801884824a3e08d266a",
-      "sha256": "7d3b09bd7b3403df7bbe26de234bbe1d2d18e9c7111cd801884824a3e08d266a",
-      "modified": false
+      "source_path": "Sources/CodexNotch/CodexRuntimeLocator.swift"
     },
     {
       "path": "Sources/CodexNotch/PerformanceHistoryStore.swift",
       "source": "Jackie",
-      "source_path": "Sources/CodexNotch/PerformanceHistoryStore.swift",
-      "source_sha256": "2ae674839d958539d7746de6e1a5d010a3301fb9a74a998a01466f973f2819e4",
-      "sha256": "2ae674839d958539d7746de6e1a5d010a3301fb9a74a998a01466f973f2819e4",
-      "modified": false
+      "source_path": "Sources/CodexNotch/PerformanceHistoryStore.swift"
     },
     {
       "path": "Sources/CodexNotch/PerformanceModels.swift",
       "source": "Jackie",
-      "source_path": "Sources/CodexNotch/PerformanceModels.swift",
-      "source_sha256": "d936a7ceec4eabbb1500a4c60b4df3930d45a7e041dbe3ecf1da92ec03023f79",
-      "sha256": "d936a7ceec4eabbb1500a4c60b4df3930d45a7e041dbe3ecf1da92ec03023f79",
-      "modified": false
+      "source_path": "Sources/CodexNotch/PerformanceModels.swift"
     },
     {
       "path": "Sources/CodexNotch/PerformanceMonitorViewModel.swift",
       "source": "Jackie",
-      "source_path": "Sources/CodexNotch/PerformanceMonitorViewModel.swift",
-      "source_sha256": "039dad77f97527a93308122f1e48ac7358c2a94de17f935a46b10d1607c464a4",
-      "sha256": "6a7efb05c8174124f90907cbd13b3a16cffbb7a33ab0b83ea29d8c3aa42ce9eb",
-      "modified": true
+      "source_path": "Sources/CodexNotch/PerformanceMonitorViewModel.swift"
     },
     {
       "path": "Sources/CodexNotch/PerformancePanelView.swift",
       "source": "Jackie",
-      "source_path": "Sources/CodexNotch/PerformancePanelView.swift",
-      "source_sha256": "b06b8b3a7654c98002b08768e07892b9a7441635b40bfde937846cf61bc38e25",
-      "sha256": "e91a3eb74fff938db89a496a1de0e98d0f07665c5529f9ed49f2e5a2af64c9bc",
-      "modified": true
+      "source_path": "Sources/CodexNotch/PerformancePanelView.swift"
     },
     {
       "path": "Sources/CodexNotch/PerformanceSampler.swift",
       "source": "Jackie",
-      "source_path": "Sources/CodexNotch/PerformanceSampler.swift",
-      "source_sha256": "f75f513fe90dd52ee9546d203694a5eff10f49b53f14bd371d56f97a9aa27e90",
-      "sha256": "f75f513fe90dd52ee9546d203694a5eff10f49b53f14bd371d56f97a9aa27e90",
-      "modified": false
+      "source_path": "Sources/CodexNotch/PerformanceSampler.swift"
     },
     {
       "path": "Sources/CodexNotch/MonitorTheme.swift",
       "source": "Jackie",
-      "source_path": "Sources/CodexNotch/MonitorTheme.swift",
-      "source_sha256": "3d71275ee3b926c64e620229964e52294e3b0ad6b96378d053a34832ab088e1d",
-      "sha256": "3d71275ee3b926c64e620229964e52294e3b0ad6b96378d053a34832ab088e1d",
-      "modified": false
+      "source_path": "Sources/CodexNotch/MonitorTheme.swift"
     }
-  ]
+  ],
+  "note": "仅记录来源版本和路径，不执行文件哈希检查。"
 }
