@@ -9,3 +9,13 @@
 凭据使用独立 Keychain 命名空间。保留上游数据库保存选项，但它不是加密保险库，建议保持 Keychain；不要随意跳过 TLS 校验。未导入 Jackie 的 ChatGPT WebKit 登录页。
 
 安装保留系统保护，ad-hoc 签名未做 Apple 公证。不得在公开 Issue 中分享 auth.json、Cookie、密钥或完整会话。
+
+## 0.3.0 Codex 账号验证
+
+新增的直连账号仅限 Codex，监测默认关闭。凭据通过用户主动选择的 auth.json 或手动填写的 Access Token 导入；只读取选中的文件，不扫描其他账号目录，不修改 Codex 的登录状态。Refresh Token 和 ID Token 不保存，也不用于自动续期。
+
+保存前必须对固定的 `https://chatgpt.com/backend-api/wham/usage` 发起只读请求并解析有效额度。请求禁用重定向和 Cookie；验证失败、取消或被新操作替代时不写入凭据。新增凭据只保存到本应用 Keychain，不使用原版的数据库保存选项。已有网关/NewAPI/Sub2API 行为保留。
+
+过期凭据提示用户在 Codex 中重新认证后再导入，不悄悄切换账号。配额和 credits 不当作美元账单，云端账户额度不与本机对话费用混合。导入功能不是网页登录或完整 OAuth 续期客户端。
+
+非刘海模式是覆盖菜单栏的 NSPanel 浮窗，可能遮挡原有菜单项；可调节宽度、内容与横向位置。不需要辅助功能或屏幕录制权限来绘制该浮窗。

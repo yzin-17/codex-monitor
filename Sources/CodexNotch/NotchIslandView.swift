@@ -48,6 +48,8 @@ struct NotchIslandView: View {
     @ObservedObject var settings: CodexNotchSettings
     let onSettings: () -> Void
     @State private var pulse = false
+    @ObservedObject var preferences: HUDPreferences
+    @ObservedObject var codexAccounts: CodexAccountsStore
 
     private var snapshot: UsageSnapshot {
         viewModel.snapshot
@@ -65,35 +67,19 @@ struct NotchIslandView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .top) {
-            islandBackground
-            collapsedContent
-        }
-        .frame(
-            width: islandLayout.width,
-            height: islandLayout.collapsedHeight,
-            alignment: .top
-        )
-        .contentShape(Rectangle())
-        .onTapGesture {
-            overlayState.isExpanded.toggle()
-        }
-        .contextMenu {
-            Button("设置") {
-                onSettings()
+        ConfigurableHUDView(preferences: preferences, accounts: codexAccounts, usage: viewModel,
+            remote: remoteViewModel, newAPI: newAPIViewModel, subAPI: subAPIViewModel,
+            settings: settings, menuBar: overlayState.usesCompactHUD,
+            notch: overlayState.usesCompactHUD ? nil : islandLayout)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .onTapGesture { overlayState.isExpanded.toggle() }
+            .contextMenu {
+                Button("设置", action: onSettings)
+                Button("刷新") { viewModel.refreshAll() }
+                Divider()
+                Button("退出 Codex Monitor") { NSApp.terminate(nil) }
             }
-            Button("刷新") {
-                viewModel.refreshAll()
-            }
-            Divider()
-            Button("退出 codex监测") {
-                NSApp.terminate(nil)
-            }
-        }
-        .onAppear {
-            pulse = true
-        }
-        .animation(topShellAnimation, value: islandLayout)
     }
 
     private var topShellAnimation: Animation? {
@@ -367,6 +353,9 @@ struct DetailPanelView: View {
     @State private var expandedTaskID: String?
     @State private var geometryRevision = 0
     private let previewCosts: [String: ConversationCostDetails]
+    @ObservedObject private var preferences: HUDPreferences
+    @ObservedObject private var codexAccounts: CodexAccountsStore
+    @State private var remoteSection = "gateway"
 
     init(viewModel: UsageViewModel, remoteViewModel: RemoteMonitorViewModel,
          newAPIViewModel: BalanceMonitorViewModel, subAPIViewModel: BalanceMonitorViewModel,
@@ -387,6 +376,8 @@ struct DetailPanelView: View {
         _detailPage = State(initialValue: initialPage)
         _expandedTaskID = State(initialValue: initialExpandedTaskID)
         self.previewCosts = previewCosts
+        self.preferences = settings.hudPreferences
+        self.codexAccounts = settings.codexAccounts
     }
 
 
@@ -407,7 +398,8 @@ struct DetailPanelView: View {
     }
 
     private var detailTopPadding: CGFloat {
-        IslandMetrics.detailContentTopPadding(
+        if preferences.value.mode.usesCompactOverlay(hasNotch: (currentScreen?.safeAreaInsets.top ?? 0) > 0) { return selectedPage == .codex ? 38 : 16 }
+        return IslandMetrics.detailContentTopPadding(
             safeAreaTop: ScreenNotchGeometry.topSafeInset(for: currentScreen),
             collapsedHeight: islandLayout.collapsedHeight
         )
@@ -415,8 +407,7 @@ struct DetailPanelView: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            BottomRoundedRectangle(radius: 24)
-                .fill(Color.black.opacity(0.985))
+            HUDGlassBackground(opacity: preferences.value.normalized.panelOpacity)
 
             ZStack(alignment: .top) {
                 VStack(spacing: 10) {
@@ -441,7 +432,17 @@ struct DetailPanelView: View {
                         case .codexRadar:
                             codexRadarContent
                         case .remoteCodex:
-                            remoteContent
+                            VStack(spacing: 10) {
+                                Picker("远程账户类型", selection: $remoteSection) {
+                                    Text("网关账户").tag("gateway")
+                                    Text("Codex 账号").tag("codex")
+                                }.pickerStyle(.segmented)
+                                if remoteSection == "gateway" { remoteContent }
+                                else {
+                                    ScrollView { CodexAccountsPanel(store: codexAccounts,
+                                        preferences: preferences, onSettings: onSettings) }
+                                }
+                            }
                         case .newAPI:
                             balanceContent(newAPIViewModel)
                         case .subAPI:
@@ -462,10 +463,8 @@ struct DetailPanelView: View {
             .animation(detailContentAnimation, value: overlayState.detailPresentationPhase)
             .allowsHitTesting(showsDetailContent)
         }
-        .frame(width: expandedLayout.logicalSize.width, height: expandedLayout.logicalSize.height)
-        .scaleEffect(expandedLayout.contentScale, anchor: .topLeading)
-        .frame(width: expandedLayout.frame.width, height: expandedLayout.frame.height, alignment: .topLeading)
-        .clipShape(BottomRoundedRectangle(radius: 24 * expandedLayout.contentScale))
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .clipShape(RoundedRectangle(cornerRadius: 20))
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)) { _ in
             geometryRevision += 1
         }
@@ -577,6 +576,9 @@ struct DetailPanelView: View {
         case .codexRadar:
             return codexRadarHeaderStatus
         case .remoteCodex:
+            if remoteSection == "codex" {
+                return !codexAccounts.monitoringEnabled ? "未启用" : codexAccounts.states.values.contains(where: \.isRefreshing) ? "读取中" : "\(codexAccounts.accounts.filter(\.enabled).count) 个账户"
+            }
             return remoteHeaderStatus
         case .newAPI:
             return balanceHeaderStatus(newAPIViewModel.snapshot)
@@ -596,7 +598,7 @@ struct DetailPanelView: View {
         case .codexRadar:
             codexRadarHeaderColor
         case .remoteCodex:
-            remoteStatusColor
+            remoteSection == "codex" ? (codexAccounts.states.values.contains(where: { $0.error != nil }) ? .orange : .white.opacity(0.70)) : remoteStatusColor
         case .newAPI:
             balanceStatusColor(newAPIViewModel.snapshot)
         case .subAPI:
@@ -662,7 +664,7 @@ struct DetailPanelView: View {
         case .codexRadar:
             codexRadarViewModel.isRefreshing
         case .remoteCodex:
-            remoteViewModel.isRefreshing
+            remoteSection == "codex" ? codexAccounts.states.values.contains(where: \.isRefreshing) : remoteViewModel.isRefreshing
         case .newAPI:
             newAPIViewModel.isRefreshing
         case .subAPI:
@@ -716,9 +718,7 @@ struct DetailPanelView: View {
 
     private var availablePages: [DetailPage] {
         var pages: [DetailPage] = [.codex, .performance, .skills, .codexRadar]
-        if settings.remoteMonitorEnabled {
-            pages.append(.remoteCodex)
-        }
+        pages.append(.remoteCodex) // 保留网关，新增 Codex 账号从此入口配置。
         if settings.newAPIMonitorEnabled {
             pages.append(.newAPI)
         }
@@ -746,7 +746,7 @@ struct DetailPanelView: View {
             }
             .padding(
                 .top,
-                IslandMetrics.quotaResetTopPadding(
+                preferences.value.mode.usesCompactOverlay(hasNotch: (currentScreen?.safeAreaInsets.top ?? 0) > 0) ? 8 : IslandMetrics.quotaResetTopPadding(
                     safeAreaTop: ScreenNotchGeometry.topSafeInset(for: currentScreen),
                     collapsedHeight: islandLayout.collapsedHeight
                 )
@@ -796,7 +796,8 @@ struct DetailPanelView: View {
         case .codexRadar:
             onCodexRadarRefresh()
         case .remoteCodex:
-            onRemoteRefresh()
+            if remoteSection == "codex" { codexAccounts.refreshAll(interactive: true) }
+            else { onRemoteRefresh() }
         case .newAPI:
             onNewAPIRefresh()
         case .subAPI:

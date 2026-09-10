@@ -601,6 +601,7 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var remoteCodexSettingsContent: some View {
+        CodexAccountsSettingsView(store: settings.codexAccounts)
         Section("远程账号监测") {
             Toggle(isOn: $draft.remoteMonitorEnabled) {
                 HelpLabel(title: "启用远程账号监测", help: "启用后详情页会出现“远程账号”tab，用于查看 CLIProxyAPI、CPA Manager Plus 或 Sub2API 中的 Codex 账号状态与额度。")
@@ -629,7 +630,9 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var launchAndAppearanceContent: some View {
-        Section("刘海显示") {
+        HUDLayoutEditorView(preferences: settings.hudPreferences, accounts: settings.codexAccounts,
+            remote: remoteViewModel, newAPI: newAPIViewModel, subAPI: subAPIViewModel)
+        Section("刘海几何（仅刘海屏模式）") {
             Picker(selection: $draft.notchDisplaySize) {
                 ForEach(NotchDisplaySize.allCases) { size in
                     Text(size.label).tag(size)
@@ -644,7 +647,7 @@ struct SettingsView: View {
                     Text(source.label).tag(source)
                 }
             } label: {
-                HelpLabel(title: "显示来源", help: "选择收起状态下刘海左右区域显示哪一种监控数据。自动模式会优先显示有提醒的外部监控，否则显示 Codex。")
+                HelpLabel(title: "旧版来源（兼容）", help: "仅当新 HUD 数据来源选择“沿用旧版来源选择 / 自动提醒”时生效；新账户请使用上方选择器。")
             }
             .pickerStyle(.menu)
 

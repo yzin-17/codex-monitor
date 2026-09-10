@@ -32,6 +32,9 @@ swiftc \
   "${ROOT_DIR}/Sources/CodexNotch/SecretStore.swift" \
   "${ROOT_DIR}/Sources/CodexNotch/CodexSessionEventDecoder.swift" \
   "${ROOT_DIR}/Sources/CodexNotch/CodexNotchSettings.swift" \
+  "${ROOT_DIR}/Sources/CodexNotch/HUDPreferences.swift" \
+  "${ROOT_DIR}/Sources/CodexNotch/CodexAccountModels.swift" \
+  "${ROOT_DIR}/Sources/CodexNotch/CodexAccountsStore.swift" \
   "${ROOT_DIR}/Sources/CodexNotch/CodexUsageStore.swift" \
   "${ROOT_DIR}/Sources/CodexNotch/BalanceMonitorModels.swift" \
   "${ROOT_DIR}/Sources/CodexNotch/BalanceAPIClient.swift" \

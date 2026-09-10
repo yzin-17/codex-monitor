@@ -646,6 +646,8 @@ private struct LocalUsageSettingsSnapshot: Equatable {
 
 @MainActor
 final class OverlayState: ObservableObject {
+    @Published var usesCompactHUD = false
+
     @Published var isExpanded = false
     @Published private(set) var detailPresentationPhase: DetailPresentationPhase = .hidden
 

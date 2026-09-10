@@ -3,7 +3,7 @@ import Foundation
 /// 展开面板独立于物理刘海；紧凑 HUD 的几何与动画保持原版。
 struct ExpandedPanelLayout: Equatable, Sendable {
     static let preferredSize = CGSize(width: 680, height: 720)
-    static let readableScale: CGFloat = 1.4
+    static let readableScale: CGFloat = 1.0
     let frame: CGRect
     let contentScale: CGFloat
     var logicalSize: CGSize {

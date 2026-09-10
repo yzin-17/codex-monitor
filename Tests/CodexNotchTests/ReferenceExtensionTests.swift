@@ -212,7 +212,7 @@ private func referenceCatalog(at now: Date) throws -> SkillCatalogSnapshot {
         let content = VStack(spacing: 0) {
             Text("原生 SwiftUI · 合成数据 · \(page.title)").font(.system(size: 10)).foregroundStyle(.white.opacity(0.6)).padding(6)
             view
-        }.background(Color.black).environment(\.colorScheme, .dark)
+        }.frame(width: 680, height: 746).background(Color.black).environment(\.colorScheme, .dark)
         let renderer = ImageRenderer(content: content)
         renderer.scale = 2
         let measured = try #require(renderer.cgImage)
@@ -241,4 +241,59 @@ private func referenceCatalog(at now: Date) throws -> SkillCatalogSnapshot {
         window.contentView = nil
         window.close()
     }
+
+    // 自定义布局与提供商页也走同一生产 View；仅注入合成数据及内存凭据库。
+    let previewStore = CodexAccountsStore(defaults: defaults,
+        vault: .init(read: { _, _ in "synthetic-only" }, write: { _, _ in }, delete: { _ in }),
+        client: .init(fetch: { _ in
+            Data(#"{"plan_type":"pro","rate_limit":{"primary_window":{"used_percent":54,"limit_window_seconds":18000},"secondary_window":{"used_percent":21,"limit_window_seconds":604800}}}"#.utf8)
+        }), automaticStart: false)
+    try await previewStore.verifyAndSave(.init(label: "合成示例 · 工作账号"), token: "synthetic-only")
+    try await previewStore.verifyAndSave(.init(label: "合成示例 · 个人账号"), token: "synthetic-only")
+    #expect(previewStore.states.values.filter { $0.usage != nil }.count == 2)
+    let prefs = settings.hudPreferences
+    prefs.value.mode = .menuBar
+    prefs.value.layout = .detailed
+    let hud = ConfigurableHUDView(preferences: prefs, accounts: previewStore, usage: usage,
+        remote: remote, newAPI: newAPI, subAPI: subAPI, settings: settings, menuBar: true)
+    try await captureCustomization(AnyView(hud), size: .init(width: 220, height: 22), name: "hud-menu-bar", output: output)
+    // 覆盖式 NSPanel 浮窗，实际菜单高度内，没有创建 NSStatusItem。
+    let floatFrame = FloatingHUDGeometry.frame(screen: CGRect(x: 0, y: 0, width: 1440, height: 900),
+        menuBarHeight: 24, contentSize: CGSize(width: 180, height: 20), maximumWidth: 220, position: 0.5)
+    #expect(floatFrame.height <= 24 && floatFrame.width == 180)
+    let floating = NSPanel(contentRect: floatFrame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+    floating.isReleasedWhenClosed = false
+    floating.level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1)
+    #expect(floating.styleMask.contains(.nonactivatingPanel))
+    #expect(floating.level.rawValue > NSWindow.Level.statusBar.rawValue)
+    floating.close()
+    let editor = Form {
+        HUDLayoutEditorView(preferences: prefs, accounts: previewStore, remote: remote, newAPI: newAPI, subAPI: subAPI)
+    }.formStyle(.grouped)
+    try await captureCustomization(AnyView(editor), size: .init(width: 710, height: 1020), name: "hud-layout", output: output)
+    let providerPanel = VStack(alignment: .leading) {
+        Text("原生界面 · 合成数据 · 非真实账户").font(.caption).foregroundStyle(.secondary)
+        CodexAccountsPanel(store: previewStore, preferences: prefs, onSettings: {})
+        Spacer()
+    }.padding(18).background(Color.black)
+    try await captureCustomization(AnyView(providerPanel), size: .init(width: 680, height: 520), name: "codex-accounts", output: output)
+    previewStore.stop()
+}
+
+@MainActor private func captureCustomization(_ view: AnyView, size: NSSize, name: String, output: URL?) async throws {
+    let host = NSHostingView(rootView: view.environment(\.colorScheme, .dark))
+    host.appearance = NSAppearance(named: .darkAqua)
+    host.frame = NSRect(origin: .zero, size: size)
+    let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false; window.contentView = host; window.setContentSize(size)
+    window.orderFrontRegardless(); host.layoutSubtreeIfNeeded()
+    try await Task.sleep(for: .milliseconds(200))
+    host.layoutSubtreeIfNeeded(); host.displayIfNeeded()
+    let bitmap = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+    host.cacheDisplay(in: host.bounds, to: bitmap)
+    if let output {
+        let png = try #require(bitmap.representation(using: .png, properties: [:]))
+        try png.write(to: output.appendingPathComponent(name + ".png"))
+    }
+    window.orderOut(nil); window.contentView = nil; window.close()
 }
