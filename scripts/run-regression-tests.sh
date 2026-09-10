@@ -33,6 +33,7 @@ swiftc \
   "${ROOT_DIR}/Sources/CodexNotch/CodexSessionEventDecoder.swift" \
   "${ROOT_DIR}/Sources/CodexNotch/CodexNotchSettings.swift" \
   "${ROOT_DIR}/Sources/CodexNotch/HUDPreferences.swift" \
+  "${ROOT_DIR}/Sources/CodexNotch/HUDLayoutModel.swift" \
   "${ROOT_DIR}/Sources/CodexNotch/CodexAccountModels.swift" \
   "${ROOT_DIR}/Sources/CodexNotch/CodexAccountsStore.swift" \
   "${ROOT_DIR}/Sources/CodexNotch/CodexUsageStore.swift" \

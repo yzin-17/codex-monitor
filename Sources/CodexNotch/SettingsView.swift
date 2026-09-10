@@ -631,33 +631,10 @@ struct SettingsView: View {
     @ViewBuilder
     private var launchAndAppearanceContent: some View {
         HUDLayoutEditorView(preferences: settings.hudPreferences, accounts: settings.codexAccounts,
-            remote: remoteViewModel, newAPI: newAPIViewModel, subAPI: subAPIViewModel)
-        Section("刘海几何（仅刘海屏模式）") {
-            Picker(selection: $draft.notchDisplaySize) {
-                ForEach(NotchDisplaySize.allCases) { size in
-                    Text(size.label).tag(size)
-                }
-            } label: {
-                HelpLabel(title: "显示大小", help: "标准模式显示状态名称和额度标签；窄刘海模式左侧只保留状态灯，右侧只显示额度数字。展开详情始终保持标准宽度。")
-            }
-            .pickerStyle(.segmented)
-
-            Picker(selection: $draft.notchDisplaySource) {
-                ForEach(NotchDisplaySource.allCases) { source in
-                    Text(source.label).tag(source)
-                }
-            } label: {
-                HelpLabel(title: "旧版来源（兼容）", help: "仅当新 HUD 数据来源选择“沿用旧版来源选择 / 自动提醒”时生效；新账户请使用上方选择器。")
-            }
-            .pickerStyle(.menu)
-
-            pointStepper(
-                "物理刘海微调",
-                value: $draft.notchWidthAdjustment,
-                range: -NotchPointAdjustment(IslandMetrics.notchAdjustmentLimit)...NotchPointAdjustment(IslandMetrics.notchAdjustmentLimit),
-                help: "默认会根据 macOS 顶部安全区域自动识别物理刘海宽度。只有在你的机型识别偏宽或偏窄时，才需要用这个值微调中心遮挡区。"
-            )
-        }
+            remote: remoteViewModel, newAPI: newAPIViewModel, subAPI: subAPIViewModel,
+            notchDisplaySize: Binding(get: { settings.notchDisplaySize }, set: { settings.notchDisplaySize = $0; draft.notchDisplaySize = $0 }),
+            notchAdjustment: Binding(get: { settings.notchWidthAdjustment }, set: { settings.notchWidthAdjustment = $0; draft.notchWidthAdjustment = $0 }),
+            legacySource: Binding(get: { settings.notchDisplaySource }, set: { settings.notchDisplaySource = $0; draft.notchDisplaySource = $0 }))
 
         Section("启动与外观") {
             Picker(selection: $draft.secretStorageMode) {

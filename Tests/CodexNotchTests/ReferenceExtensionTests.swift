@@ -257,6 +257,18 @@ private func referenceCatalog(at now: Date) throws -> SkillCatalogSnapshot {
     let hud = ConfigurableHUDView(preferences: prefs, accounts: previewStore, usage: usage,
         remote: remote, newAPI: newAPI, subAPI: subAPI, settings: settings, menuBar: true)
     try await captureCustomization(AnyView(hud), size: .init(width: 220, height: 22), name: "hud-menu-bar", output: output)
+    // 切换右侧来源后，本机运行指示不被账户状态替换；清空布局也只清空右侧。
+    prefs.value.sourceID = previewStore.accounts[0].hudID
+    #expect(hud.data.state == "OFF")
+    #expect(usage.snapshot.isRunning)
+    prefs.value.maximumWidth = 360
+    prefs.value.layout = .init(lines: [["primary", "space:8", "weekly", "tokensToday"]])
+    prefs.value.sourceID = "local"
+    try await captureCustomization(AnyView(hud), size: .init(width: 360, height: 22), name: "hud-fixed-status", output: output)
+    prefs.value.layout = .init(lines: [[]])
+    try await captureCustomization(AnyView(hud), size: .init(width: 100, height: 22), name: "hud-status-only", output: output)
+    prefs.value.layout = .detailed
+    prefs.value.maximumWidth = 220
     // 覆盖式 NSPanel 浮窗，实际菜单高度内，没有创建 NSStatusItem。
     let floatFrame = FloatingHUDGeometry.frame(screen: CGRect(x: 0, y: 0, width: 1440, height: 900),
         menuBarHeight: 24, contentSize: CGSize(width: 180, height: 20), maximumWidth: 220, position: 0.5)
