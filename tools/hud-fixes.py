@@ -25,6 +25,7 @@ s=s.replace('''        }
     private func chip''','''        } header: { Text("布局 · 拖动排序 / 点击添加") }
     }
     private func chip''',1)
+s=s.replace('Picker("面板动画", selection: $preferences.value.animation)', 'Picker("面板动画", selection: Binding(get: { preferences.value.animation }, set: { preferences.value.animation = $0 }))')
 p.write_text(s)
 p=root/'Sources/CodexNotch/CodexAccountsStore.swift'
 s=p.read_text().replace('import Security','import Security\nimport LocalAuthentication',1)
