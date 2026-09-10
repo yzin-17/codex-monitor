@@ -106,7 +106,7 @@ final class TokenPricingUpdater: ObservableObject {
     init(
         defaults: UserDefaults = .standard,
         cacheURL: URL = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/codex监测/ModelPricing/current.json"),
+            .appendingPathComponent("Library/Application Support/CodexMonitor-ALight/ModelPricing/current.json"),
         fetch: (@Sendable (URL) async throws -> Data)? = nil
     ) {
         self.defaults = defaults

@@ -67,11 +67,6 @@
       "sha256": "c363d457ca866d1059e35f254eca3bc9cc5387cf7db138bddfd581e55fa15faf"
     },
     {
-      "path": "Sources/CodexNotch/CodexRadarViewModel.swift",
-      "originalBlob": "082e40eb306dafe629de9294f216f5b96a706bd9",
-      "sha256": "1fbd8b9685486a97dd20b5b22aeeac743d21b44dd4c0fed8ef5b761a6b39fc1c"
-    },
-    {
       "path": "Sources/CodexNotch/CodexSessionEventDecoder.swift",
       "originalBlob": "79285b5179c4740383a691ed517dc0df41b2818e",
       "sha256": "46dbf7d47ce6896b68d5283eb2460196ae154ccfa3044020d94c017033ed5324"
@@ -165,11 +160,6 @@
       "path": "Sources/CodexNotch/TokenCostEstimator.swift",
       "originalBlob": "9c9c2ea73c3b3194a18dd9e613205b4da34e8bc2",
       "sha256": "48ace4ca4d865aa38cf34a508f0a171ef86a3090eac3b5d2ae2a49f45c9febaa"
-    },
-    {
-      "path": "Sources/CodexNotch/TokenPricingUpdater.swift",
-      "originalBlob": "8aa6187fd3eda951b68c88e6bfe8da7392a74892",
-      "sha256": "811b6c82627d4a3302b3f815b37be53fd31ed9af6831d0ba626b1ddc48fc11a6"
     },
     {
       "path": "Sources/CodexNotch/UsageRefreshState.swift",
@@ -344,6 +334,11 @@
       "sha256": "b68695ca9d973edc1b88ee4806248ce06c6b1abf67757b788706a4031999fcf0"
     },
     {
+      "path": "Sources/CodexNotch/CodexRadarViewModel.swift",
+      "originalBlob": "082e40eb306dafe629de9294f216f5b96a706bd9",
+      "sha256": "3b426994721b6dbecd175eaecd21d4050f10d0c7bc0e931783c5b75805eeb735"
+    },
+    {
       "path": "Sources/CodexNotch/NotchIslandView.swift",
       "originalBlob": "b3d901f875b52805aac55563843c3b18395defc6",
       "sha256": "130f68f2860327bb58aaf8a55f38187f9a73fe92a49d21bb4c72e502160f1b6a"
@@ -359,9 +354,14 @@
       "sha256": "f082216110cdda36d5a158046cce779cbf38973a473e5899e67d6100b50bb138"
     },
     {
+      "path": "Sources/CodexNotch/TokenPricingUpdater.swift",
+      "originalBlob": "8aa6187fd3eda951b68c88e6bfe8da7392a74892",
+      "sha256": "78bfed367bf6b5aadd9d2562e966c6e9e5f1febc8bcf766ee0caed9e22ecd757"
+    },
+    {
       "path": "scripts/build-app.sh",
       "originalBlob": "b8a1fa14d3455916eccc21131ca934de7169f800",
-      "sha256": "b7bc1ca990fbc470d4dc924fe7f054bb8c315a25da61f4517154192500ef5950"
+      "sha256": "6e922229fbf4273ee1f6634879e7d78070f52cd55d9a56b48eb5238148ae345c"
     },
     {
       "path": "scripts/install-user-app.sh",

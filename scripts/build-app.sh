@@ -16,6 +16,9 @@ mkdir -p "$DIST_DIR"
 if [[ "${CODEX_NOTCH_SKIP_TESTS:-0}" != "1" ]]; then
   "$ROOT_DIR/scripts/run-regression-tests.sh"
 fi
+ICON_BACKUP="$(mktemp "${TMPDIR:-/tmp}/codex-monitor-icon.XXXXXX")"
+cp "$ROOT_DIR/Resources/AppIcon.icns" "$ICON_BACKUP"
+trap 'cp "$ICON_BACKUP" "$ROOT_DIR/Resources/AppIcon.icns"; rm -f "$ICON_BACKUP"' EXIT
 swift "$ROOT_DIR/scripts/generate-app-icon.swift"
 find "$DIST_DIR" -maxdepth 1 -type f \( -name "$APP_NAME.dmg" -o -name "$APP_NAME-*.dmg" -o -name "$PACKAGE_NAME-*.dmg" \) -delete
 rm -rf "$DMG_STAGE_DIR" "$PACKAGE_STAGE_DIR"

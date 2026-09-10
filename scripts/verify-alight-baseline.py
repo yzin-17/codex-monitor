@@ -126,6 +126,11 @@ def expected(path, data):
         s = replace_once(s, '.formStyle(.grouped)\n                .disabled(!settings.secretStoreReady)', '.formStyle(.grouped)\n                .disabled(selectedTab != .skills && !settings.secretStoreReady)')
     if path == "Sources/CodexNotch/SettingsView.swift":
         s = replace_once(s, '        case .codex, .launch, .about:\n', '        case .skills:\n            break\n        case .codex, .launch, .about:\n')
+    if path.endswith('.swift'):
+        s = s.replace('Library/Application Support/codex监测/', 'Library/Application Support/CodexMonitor-ALight/')
+        s = s.replace('appendingPathComponent("codex监测/', 'appendingPathComponent("CodexMonitor-ALight/')
+    if path == 'scripts/build-app.sh':
+        s = replace_once(s, 'swift "$ROOT_DIR/scripts/generate-app-icon.swift"', 'ICON_BACKUP="$(mktemp "${TMPDIR:-/tmp}/codex-monitor-icon.XXXXXX")"\ncp "$ROOT_DIR/Resources/AppIcon.icns" "$ICON_BACKUP"\ntrap \'cp "$ICON_BACKUP" "$ROOT_DIR/Resources/AppIcon.icns"; rm -f "$ICON_BACKUP"\' EXIT\nswift "$ROOT_DIR/scripts/generate-app-icon.swift"')
     return s.encode()
 
 

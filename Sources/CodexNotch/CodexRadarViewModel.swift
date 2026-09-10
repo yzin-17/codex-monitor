@@ -259,7 +259,7 @@ private enum CodexRadarCache {
     static func defaultDirectory() -> URL {
         let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support")
-        return root.appendingPathComponent("codex监测/CodexRadar", isDirectory: true)
+        return root.appendingPathComponent("CodexMonitor-ALight/CodexRadar", isDirectory: true)
     }
 
     static func load(from directory: URL) -> CodexRadarSnapshot? {
