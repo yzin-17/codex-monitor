@@ -124,6 +124,8 @@ def expected(path, data):
         s = replace_once(s, '        case .codexRadar:\n            "waveform.path.ecg"', '        case .skills:\n            "square.stack.3d.up"\n        case .codexRadar:\n            "waveform.path.ecg"')
         s = replace_once(s, '        case .codexRadar:\n            codexRadarSettingsContent', '        case .skills:\n            SkillInsightsSettingsView()\n        case .codexRadar:\n            codexRadarSettingsContent')
         s = replace_once(s, '.formStyle(.grouped)\n                .disabled(!settings.secretStoreReady)', '.formStyle(.grouped)\n                .disabled(selectedTab != .skills && !settings.secretStoreReady)')
+    if path == "Sources/CodexNotch/SettingsView.swift":
+        s = replace_once(s, '        case .codex, .launch, .about:\n', '        case .skills:\n            break\n        case .codex, .launch, .about:\n')
     return s.encode()
 
 

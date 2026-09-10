@@ -1870,6 +1870,8 @@ struct SettingsView: View {
 
     private func refreshSelectedTab() {
         switch selectedTab {
+        case .skills:
+            break
         case .codex, .launch, .about:
             onRefresh()
         case .codexRadar:

@@ -356,7 +356,7 @@
     {
       "path": "Sources/CodexNotch/SettingsView.swift",
       "originalBlob": "d65c43f77e7d8e0dbf8825119871047549d1c1fe",
-      "sha256": "7980a9401d244c0992864cce9ea3c2f2c4d3980547a8cf4afa69edf66baf399a"
+      "sha256": "f082216110cdda36d5a158046cce779cbf38973a473e5899e67d6100b50bb138"
     },
     {
       "path": "scripts/build-app.sh",
