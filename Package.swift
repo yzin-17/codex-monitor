@@ -11,8 +11,12 @@ let package = Package(
         .executable(name: "CodexNotch", targets: ["CodexNotch"])
     ],
     targets: [
+        .systemLibrary(name: "CSQLite", pkgConfig: "sqlite3", providers: [.apt(["libsqlite3-dev"])]),
+        .target(name: "CodexMonitorCore", dependencies: ["CSQLite"]),
+        .testTarget(name: "CodexMonitorCoreTests", dependencies: ["CodexMonitorCore", "CSQLite"]),
         .executableTarget(
             name: "CodexNotch",
+            dependencies: ["CodexMonitorCore"],
             path: "Sources/CodexNotch",
             linkerSettings: [
                 .linkedLibrary("sqlite3")
@@ -20,7 +24,7 @@ let package = Package(
         ),
         .testTarget(
             name: "CodexNotchTests",
-            dependencies: ["CodexNotch"],
+            dependencies: ["CodexNotch", "CodexMonitorCore"],
             path: "Tests/CodexNotchTests"
         )
     ]

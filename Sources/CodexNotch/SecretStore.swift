@@ -93,7 +93,7 @@ struct SecretStoreFactory: Sendable {
 }
 
 struct KeychainSecretStore: SecretStore {
-    static let service = "com.alight.codexnotch.secret-vault"
+    static let service = "dev.yzin.codexmonitor.alight.secret-vault"
     static let account = "default"
 
     func loadVault() throws -> SecretVault {
@@ -144,7 +144,7 @@ struct DatabaseSecretStore: SecretStore {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support")
         return base
-            .appendingPathComponent("codex监测", isDirectory: true)
+            .appendingPathComponent("CodexMonitor-ALight", isDirectory: true)
             .appendingPathComponent("secrets.sqlite3")
     }
 

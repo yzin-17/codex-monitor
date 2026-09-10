@@ -1,25 +1,29 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-APP_NAME="codex监测"
-SOURCE_APP="$ROOT_DIR/dist/$APP_NAME.app"
+SOURCE_APP="$ROOT_DIR/dist/CodexMonitor.app"
 INSTALL_DIR="${CODEX_NOTCH_INSTALL_DIR:-$HOME/Applications}"
-TARGET_APP="$INSTALL_DIR/$APP_NAME.app"
-
-if [[ ! -d "$SOURCE_APP" ]]; then
-  echo "Missing $SOURCE_APP. Run ./scripts/build-app.sh first." >&2
+TARGET_APP="$INSTALL_DIR/CodexMonitor.app"
+replace=0
+case "${1:-}" in
+  '') ;;
+  --replace) replace=1 ;;
+  *) echo "用法：$0 [--replace]" >&2; exit 2 ;;
+esac
+[[ -d "$SOURCE_APP" ]] || { echo '请先运行 ./scripts/build-app.sh' >&2; exit 1; }
+if pgrep -x CodexMonitor >/dev/null; then
+  echo '请先正常退出 Codex Monitor，再安装。不会强制结束任何应用。' >&2
   exit 1
 fi
-
-pkill -x CodexNotch 2>/dev/null || true
+codesign --verify --deep --strict "$SOURCE_APP"
 mkdir -p "$INSTALL_DIR"
-rm -rf "$TARGET_APP"
-ditto "$SOURCE_APP" "$TARGET_APP"
-xattr -dr com.apple.quarantine "$TARGET_APP" 2>/dev/null || true
-if ! open "$TARGET_APP"; then
-  sleep 1
-  open "$TARGET_APP"
+if [[ -e "$TARGET_APP" ]]; then
+  [[ "$replace" == 1 ]] || { echo '应用已存在，请显式传入 --replace。' >&2; exit 1; }
+  BACKUP_DIR="$(mktemp -d "$INSTALL_DIR/CodexMonitor-backup-$(date +%Y%m%d-%H%M%S).XXXXXX")"
+  mv "$TARGET_APP" "$BACKUP_DIR/CodexMonitor.app"
+  echo "旧版已备份：$BACKUP_DIR"
 fi
-
-echo "Installed $TARGET_APP"
+ditto "$SOURCE_APP" "$TARGET_APP"
+codesign --verify --deep --strict "$TARGET_APP"
+open "$TARGET_APP"
+echo "已安装：$TARGET_APP"

@@ -46,6 +46,7 @@ private enum RefreshPreset: String, CaseIterable, Identifiable {
 private enum SettingsTab: String, CaseIterable, Identifiable {
     case codex
     case codexRadar
+    case skills
     case remoteCodex
     case newAPI
     case subAPI
@@ -58,6 +59,8 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
         switch self {
         case .codex:
             "Codex"
+        case .skills:
+            "Skills"
         case .codexRadar:
             "CodexRadar"
         case .remoteCodex:
@@ -77,6 +80,8 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
         switch self {
         case .codex:
             "circle.grid.2x2.fill"
+        case .skills:
+            "square.stack.3d.up"
         case .codexRadar:
             "waveform.path.ecg"
         case .remoteCodex:
@@ -247,7 +252,7 @@ struct SettingsView: View {
                     tabContent
                 }
                 .formStyle(.grouped)
-                .disabled(!settings.secretStoreReady)
+                .disabled(selectedTab != .skills && !settings.secretStoreReady)
 
                 footer
                     .disabled(!settings.secretStoreReady)
@@ -409,6 +414,8 @@ struct SettingsView: View {
         switch selectedTab {
         case .codex:
             codexSettingsContent
+        case .skills:
+            SkillInsightsSettingsView()
         case .codexRadar:
             codexRadarSettingsContent
         case .remoteCodex:

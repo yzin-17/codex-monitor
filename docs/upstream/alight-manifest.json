@@ -1,0 +1,372 @@
+{
+  "upstream": "ec9363d56a3692903f5ccb7462df2a0fbafc7297",
+  "unchanged": [
+    {
+      "path": ".gitignore",
+      "originalBlob": "36d44da715c9fa3e619eff9d7c169af816f25489",
+      "sha256": "e19f21827d576eb887dce068eb1048ce51fc92d94834cb49bfa0418c50335553"
+    },
+    {
+      "path": "Resources/AppIcon.icns",
+      "originalBlob": "1b56fbe72ec7522a1f839bfc4f47de4446db549a",
+      "sha256": "c0f14b4f7d8561540aecfdb132bd2d9a1dca2bfb91e4036425e93023d9146e07"
+    },
+    {
+      "path": "Sources/CodexNotch/AppDelegate.swift",
+      "originalBlob": "e42324c2372c770d4e1060aa7a5d5f7ee989b546",
+      "sha256": "b5c0fb7bdb9a0074b590026cbab51eb6288f0550b9e21a95907dcbdfffb61268"
+    },
+    {
+      "path": "Sources/CodexNotch/AppInfo.swift",
+      "originalBlob": "ba39d58f026c53264bd21824398782fbbf3c885e",
+      "sha256": "7c9d5a288cb5785c1f7057d2abd516d402d7aa7b6f775ed3a12267bcde390470"
+    },
+    {
+      "path": "Sources/CodexNotch/BalanceAPIClient.swift",
+      "originalBlob": "1736dac641e9070168365613088cb5ec701f52b3",
+      "sha256": "6126690a5d6430e3f7893a2bc7d16b2a20f4f12c4ce0e110873f2f591407ec3e"
+    },
+    {
+      "path": "Sources/CodexNotch/BalanceMonitorModels.swift",
+      "originalBlob": "0155ffe4c80a31656ced0e24253f912249d842c0",
+      "sha256": "1190b8371449c7d4fe6f4e17e019ed86f5a19aff0467095ce9f82747832dc245"
+    },
+    {
+      "path": "Sources/CodexNotch/BalanceMonitorViewModel.swift",
+      "originalBlob": "2467d8397fc240c12fea306805bb9a62bdc11897",
+      "sha256": "78496759badb8bd2d43d5049a563506c49f15854f8be44203b4861a285a93ea9"
+    },
+    {
+      "path": "Sources/CodexNotch/BottomRoundedRectangle.swift",
+      "originalBlob": "49856d6f6532e4dad45a84371d89c0059742f615",
+      "sha256": "762ddd9efdd576d49bfc7d023ca9c0fee79d6cb697b480e9b6579f5f33386ba4"
+    },
+    {
+      "path": "Sources/CodexNotch/CLIProxyAPIClient.swift",
+      "originalBlob": "b29e265a216d8a6fe1802154b1e78739d8a8730a",
+      "sha256": "1e2d14a6dfc069d379270244eaf215e4535fa5f0afd84bbdca2634542db3960c"
+    },
+    {
+      "path": "Sources/CodexNotch/CodexFileWatcher.swift",
+      "originalBlob": "2beaea2386d81d0dcdc1e31278311d7c8c08ba02",
+      "sha256": "e0e8a708c54bb4887ac6d4b61958dc7a19f01c550af7f9d9730612296466720c"
+    },
+    {
+      "path": "Sources/CodexNotch/CodexRadarClient.swift",
+      "originalBlob": "d3b7962bcfb6eea12d85436455b2e33bf5764762",
+      "sha256": "eb9dcc4c4ddab5793460dad7aec5e4c9ddcaae02e6d2b8954c39005a1fce51cc"
+    },
+    {
+      "path": "Sources/CodexNotch/CodexRadarModels.swift",
+      "originalBlob": "b7e3f742b6a8d5802190073bfe8320a67af4a22a",
+      "sha256": "6ccb66d739f244d9505f61fd5fd9b258c3134a958336f7fe70e287e6707a3986"
+    },
+    {
+      "path": "Sources/CodexNotch/CodexRadarNews.swift",
+      "originalBlob": "9f7abcf52312388c838b18269080ff6d7d560f73",
+      "sha256": "c363d457ca866d1059e35f254eca3bc9cc5387cf7db138bddfd581e55fa15faf"
+    },
+    {
+      "path": "Sources/CodexNotch/CodexRadarViewModel.swift",
+      "originalBlob": "082e40eb306dafe629de9294f216f5b96a706bd9",
+      "sha256": "1fbd8b9685486a97dd20b5b22aeeac743d21b44dd4c0fed8ef5b761a6b39fc1c"
+    },
+    {
+      "path": "Sources/CodexNotch/CodexSessionEventDecoder.swift",
+      "originalBlob": "79285b5179c4740383a691ed517dc0df41b2818e",
+      "sha256": "46dbf7d47ce6896b68d5283eb2460196ae154ccfa3044020d94c017033ed5324"
+    },
+    {
+      "path": "Sources/CodexNotch/CodexUsageStore.swift",
+      "originalBlob": "5a1c875d041f0c34d8b891009f121985251a5b36",
+      "sha256": "7bd5f39236f6b80284c4743d3f991d11a672a800973b6aaf434be08a8225dc55"
+    },
+    {
+      "path": "Sources/CodexNotch/DetailPresentation.swift",
+      "originalBlob": "cb74564280e900e8eeab4ded2930ed3b067a130b",
+      "sha256": "d66420778af4a7c05cb653d81b043a521099e1b42b1f11d5348bcebb9a50ad24"
+    },
+    {
+      "path": "Sources/CodexNotch/DisplayRedactor.swift",
+      "originalBlob": "0ee5a046afb37c68e540b66d17161d15280afc05",
+      "sha256": "e609d796c65d991fd4e5e1931c82182a362784afd66c9f5f695eac427b0e90b6"
+    },
+    {
+      "path": "Sources/CodexNotch/ExpandableWarningMessage.swift",
+      "originalBlob": "dad89dd0749ac04700010bb33f033e1cd1adb8f4",
+      "sha256": "d936aeb082a1c45c48086d6aa03212b17a6f9c0fddb029baf3d9312a57d8aca8"
+    },
+    {
+      "path": "Sources/CodexNotch/Formatters.swift",
+      "originalBlob": "31581a56f9f9a5f39e500f80722b6b7d28c89515",
+      "sha256": "cf48853503e34832aee7c6b82bf0f7aba869e2fb0404573d13ed0f91f366af3e"
+    },
+    {
+      "path": "Sources/CodexNotch/IslandMetrics.swift",
+      "originalBlob": "851ac6e1d0c8da4dc1afc40e6791453cfc5fa459",
+      "sha256": "65077677941520b0d59ab830629dc971830d9cd582ed8489e34274c35bdb08f3"
+    },
+    {
+      "path": "Sources/CodexNotch/KeychainStore.swift",
+      "originalBlob": "f8c15da8ab0a50b824d6f264abb481d324e3dec9",
+      "sha256": "a4e20578361ade29a3d1d64dd235ff48302a9ec1a5d8e28c926795c2fa368f2d"
+    },
+    {
+      "path": "Sources/CodexNotch/Models.swift",
+      "originalBlob": "11f4d97e427332536000462bc2c20c503802306e",
+      "sha256": "b45cf77574c78dd4313fdc4d88b54f79fdda57b6ade65b6ec09ae9c27651cf92"
+    },
+    {
+      "path": "Sources/CodexNotch/RateLimitResetCredits.swift",
+      "originalBlob": "06c0a20a019d45a381ba1702bdc910f77e68539a",
+      "sha256": "56ebc0b07e4a8da27f3bbdc980e9dff009c13c23ebc6526e7ec61fbe4cd4a9e5"
+    },
+    {
+      "path": "Sources/CodexNotch/RemoteMonitorModels.swift",
+      "originalBlob": "fcff3ed9febf250271b0fb2e3db7205597a8e24f",
+      "sha256": "827f91c2a3e8356ffd873ab8de66d97a3254a38e15f9f82f8b8322b0b65804b7"
+    },
+    {
+      "path": "Sources/CodexNotch/RemoteMonitorViewModel.swift",
+      "originalBlob": "fef7a3a6cf235bf33a23a25c9aff56888f725308",
+      "sha256": "2ca374c24077882be2d4acb06ea4b1329fe86bffa3d5dc1c49bfcc9d4d026db5"
+    },
+    {
+      "path": "Sources/CodexNotch/RemoteResetCreditsLoader.swift",
+      "originalBlob": "a7adcc573b0116ee90d157d4c0fd99b00935d000",
+      "sha256": "e58edfd80038703f92bb69d5327a4c7f05f2bd875f8d1a2b8560b7bb375d2f5a"
+    },
+    {
+      "path": "Sources/CodexNotch/ResetCreditsIndicator.swift",
+      "originalBlob": "8a2526dcc63e0cf0c56c5457f6a902d887333629",
+      "sha256": "ebb915fca2db36b153d07bba120121e66cdaa78f28e98ec653a2fd4227356e0c"
+    },
+    {
+      "path": "Sources/CodexNotch/ScreenNotchGeometry.swift",
+      "originalBlob": "120230dfa91552ddecaab1cad29e5fd93b0f3bce",
+      "sha256": "e2fef4179abafc84e39a2c71ae916c0c5c4424e210effc95b629b88bea1a0c74"
+    },
+    {
+      "path": "Sources/CodexNotch/Shell.swift",
+      "originalBlob": "f10e9c57f4ff7ae04ea7ee17e643b34c2213237e",
+      "sha256": "235db7d837b8217c88dd824cfeacf993006eeea01c8ea8ea0147a22dc8a6960b"
+    },
+    {
+      "path": "Sources/CodexNotch/SnapshotOutputFormatter.swift",
+      "originalBlob": "924032696f1159c8b633dcd090162aaa7aa17914",
+      "sha256": "cefd47bc368d28e3ba49519953ae979eefc28c7e4682126fe1e58d8e941fe5f8"
+    },
+    {
+      "path": "Sources/CodexNotch/Sub2APIRemoteClient.swift",
+      "originalBlob": "01a2ea7d9b057275b8c25da146f464c27881dc7a",
+      "sha256": "5fd24c21ce131849206732d0ebec6ef61f18354115bca096949b700dd4161e9c"
+    },
+    {
+      "path": "Sources/CodexNotch/TokenCostEstimator.swift",
+      "originalBlob": "9c9c2ea73c3b3194a18dd9e613205b4da34e8bc2",
+      "sha256": "48ace4ca4d865aa38cf34a508f0a171ef86a3090eac3b5d2ae2a49f45c9febaa"
+    },
+    {
+      "path": "Sources/CodexNotch/TokenPricingUpdater.swift",
+      "originalBlob": "8aa6187fd3eda951b68c88e6bfe8da7392a74892",
+      "sha256": "811b6c82627d4a3302b3f815b37be53fd31ed9af6831d0ba626b1ddc48fc11a6"
+    },
+    {
+      "path": "Sources/CodexNotch/UsageRefreshState.swift",
+      "originalBlob": "4e2e5b9e0aa0f8f1ee5486807fd7b345a920a6f8",
+      "sha256": "059daafbbe979108efbe3721a999989ba5ca9debbb3445db908d3fdd4da9226d"
+    },
+    {
+      "path": "Sources/CodexNotch/UsageViewModel.swift",
+      "originalBlob": "3d60ce894fe356b1f40d7a2bab0b4e55d7f58b4d",
+      "sha256": "7c9eca99726d1de59ecf770a6693b1d728ce2593ad92d7ae211e1f2db2657cb0"
+    },
+    {
+      "path": "Tests/CodexNotchRegressionTests/main.swift",
+      "originalBlob": "03cc76dfdc989152ebab56ad8130322a06591c64",
+      "sha256": "26f5b9745537bd65d1615c4cfe0ec93a89ec1e456d2a9bd6b1b463bde2bc442a"
+    },
+    {
+      "path": "Tests/CodexNotchTests/BalanceHTTPResponseTests.swift",
+      "originalBlob": "a8d13f8508f99e487805bbec58bf5b3a93c55f23",
+      "sha256": "56316341e2160fcfe04f4aed94ee9497dfc6525662caa233af824d577b72a0b8"
+    },
+    {
+      "path": "Tests/CodexNotchTests/CodexRadarDimensionsTests.swift",
+      "originalBlob": "d6d6d5164d7bb223e5b3bc98dcb0688519e06876",
+      "sha256": "e07fa20e6d7a7f7168722ea70c3ff4dbb73fcefcedf75441e23efce773533d7a"
+    },
+    {
+      "path": "Tests/CodexNotchTests/CodexRadarRefreshTests.swift",
+      "originalBlob": "016bce7bd33a111b176f7e284a46305df6bf314b",
+      "sha256": "748468cb1031d92d8d4fc1b8efb9ae59f4064538c138ec4733d10de8c99becfd"
+    },
+    {
+      "path": "Tests/CodexNotchTests/CodexRadarTests.swift",
+      "originalBlob": "523b6ddf14c184891010fdadbcd29e49a34dfc0c",
+      "sha256": "1e20125d22587bfdfc8eea9e420f750ba0cfd24ec987246d15d12494e095a624"
+    },
+    {
+      "path": "Tests/CodexNotchTests/NewAPIAuthenticationTests.swift",
+      "originalBlob": "e9bd6d3cb4a6f850cb9ee96dd1e8da25079efe88",
+      "sha256": "9b77f5257a36d0aea219c6768e16410d86edfe991293a38e947f2b99565ea6b1"
+    },
+    {
+      "path": "Tests/CodexNotchTests/RateLimitSourceTests.swift",
+      "originalBlob": "154a389c9d24b6b00af59e4df8605d6a18365616",
+      "sha256": "6e2c0b9bf9d220b6efc5b8abb4d48a4ecfe15f063f2059c69aa04d589df55642"
+    },
+    {
+      "path": "Tests/CodexNotchTests/SecretSettingsTests.swift",
+      "originalBlob": "7d9b64ed11cb3494280ec065320cc4a002fe40d7",
+      "sha256": "027d6ac3d83a713c86a9ef82c80337166dd5d7fb5327e30fbf86df595791a24b"
+    },
+    {
+      "path": "Tests/CodexNotchTests/Sub2APIRemoteClientTests.swift",
+      "originalBlob": "31408d14cdb522472b5aa3d45a4ed1841ce84de9",
+      "sha256": "685eb9e1a32b476e3a193247c0923efe95fd48668623751902aafbf70e24f994"
+    },
+    {
+      "path": "Tests/CodexNotchTests/TokenCostEstimatorTests.swift",
+      "originalBlob": "af45311e1be572c81d60d294b13650b4d7b549af",
+      "sha256": "6139bda869620559043afbb728b11da73f15aec8c968c62cb5cecb87afdb3113"
+    },
+    {
+      "path": "Tests/CodexNotchTests/TokenPricingUpdaterTests.swift",
+      "originalBlob": "f51c3a752a2221e983a11179f9ad1753aca2e77e",
+      "sha256": "559c5fb2b8921e3eea32c99ef94c798c060555d344f5c7c8ec0ee2bc9c664cfb"
+    },
+    {
+      "path": "Tests/CodexNotchTests/UsageEventLineScannerTests.swift",
+      "originalBlob": "9262ee303c94f96a7fdc61cfe3c11fa8b1f72f9f",
+      "sha256": "aad8b9be43a248d67493f313bdd5b43a60ffd7fe2c1feb5cb9fea7bb1230af3a"
+    },
+    {
+      "path": "Tests/CodexNotchTests/UsageRefreshStateTests.swift",
+      "originalBlob": "a8c530a5dca68ba89914ac0f97366d950d666b7c",
+      "sha256": "07e6241787f5c9e233bd8e9c837a09943cd350e5a4c73a2b80bfce75c27a8f53"
+    },
+    {
+      "path": "Tests/CodexNotchTests/UsageTodayTests.swift",
+      "originalBlob": "9c62facf8cc683bb42e8894270e994b8fbd754b1",
+      "sha256": "8c6f4ea7698242d231effd5941befb3eb122156aa61fc0d0e808a7ec72a2aa07"
+    },
+    {
+      "path": "design-qa.md",
+      "originalBlob": "3a033572d0899faf2b7f75ba99d6529faa33679e",
+      "sha256": "157924f85752c3069d19c77bf6c29616c2de42c20e31bedc7bb2cc45cd24cd47"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-07-20-notch-detail-animation.md",
+      "originalBlob": "e6347aea069d4c3f5f43e1c30910822798621563",
+      "sha256": "fc9cefb4420b61ecf075616c8b1994eb376f9ac02d0a5279ba38b92ff67a08e8"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-07-20-reset-credits-display.md",
+      "originalBlob": "c9ad18980a0ad9106a093f2df4febea71164492d",
+      "sha256": "defd1df3b4fe0edd7da8372b4bf56b48628e9500870a7f31fb5f0070e78faf91"
+    },
+    {
+      "path": "docs/superpowers/specs/2026-07-20-notch-detail-animation-design.md",
+      "originalBlob": "2baddb2f5c8c0e723939dcb24b95b8cf82b9de2e",
+      "sha256": "f04c9dbf63fecbb4679d3df9735317f10ffc00a1f75d9a44e78c76952a75a56e"
+    },
+    {
+      "path": "docs/superpowers/specs/2026-07-20-reset-credits-display-design.md",
+      "originalBlob": "214c55d9034a7769519631fe5b9d85a5793f7c95",
+      "sha256": "d9956bfae2947800d6ad4ed803f55a343ffa42dab650087130d2457c80fe41b2"
+    },
+    {
+      "path": "qa/newapi-response/README.md",
+      "originalBlob": "6001f8f017cd541334faf2f52b647927939817e9",
+      "sha256": "30d8b7080a29a5150290d7f5cebf325e2ec552a54b1fe1f094683edbecfdde7d"
+    },
+    {
+      "path": "qa/pricing-auth/README.md",
+      "originalBlob": "cf6a560110911b97ed3f3eae6f43a1e5194995dd",
+      "sha256": "8f2013902804a399c38cec70c20f0f091ae0678d36acaf5e7d7bc3372b766a73"
+    },
+    {
+      "path": "qa/quota-refresh/README.md",
+      "originalBlob": "de4a9db637135788ea19659c459c2cc9019566b6",
+      "sha256": "41a2469a7d4e15794051324902428188d546549a836c095767a33672df89a85e"
+    },
+    {
+      "path": "qa/radar-dimensions/README.md",
+      "originalBlob": "6ff5034a0bef19982efc2fbc90968ff721dc4c66",
+      "sha256": "224e3d0d502b1eb9da302e904795b478367372ed16f24831f7369720e231c7ea"
+    },
+    {
+      "path": "qa/radar-refresh/README.md",
+      "originalBlob": "653230cf554aa8f295972ea6997023b0ab3bd782",
+      "sha256": "c9f03a9a84a7d10dc66035ff4bd8534cee638ae12ba5e3c7e0062b6e570b77a2"
+    },
+    {
+      "path": "qa/token-cost-compact-final.jpeg",
+      "originalBlob": "932aae158c2f2091c14437532d5a155c47bdba3c",
+      "sha256": "0c2ea80af00d9cceb196d4e142ae4ac001ece70ef2af8914d88d6fdf3affd989"
+    },
+    {
+      "path": "qa/token-cost-comparison.png",
+      "originalBlob": "f74a7a062a882a0bc59cf5cefdde019346a8daee",
+      "sha256": "6666cce287893b87296df0dadb14809b1b355862842f96c1c640d6b15c1ec7dd"
+    },
+    {
+      "path": "qa/token-cost-popover-final.png",
+      "originalBlob": "bd358dbe1b45354dafed409828069c8cb05d2e38",
+      "sha256": "8168baa23812de025af6da9e1d607ad479940e2aad3adf00f3bfea71d7fedc93"
+    },
+    {
+      "path": "scripts/generate-app-icon.swift",
+      "originalBlob": "6be07be48d9b5157a76be68d954fe8cd1b7c5b7e",
+      "sha256": "da736177f0958f5a798bcfdf61a9980caf90b7579a00542edd4982f3aa0062cd"
+    },
+    {
+      "path": "scripts/run-regression-tests.sh",
+      "originalBlob": "c881932b3433d820712c3cfb2e61439181f6ad49",
+      "sha256": "ac86b8f741042d0d0d7215bb92f172bcd5c6d2d572b04cae33728ba0a7a1c703"
+    }
+  ],
+  "customized": [
+    {
+      "path": "Package.swift",
+      "originalBlob": "075323ca5296c8b451b82227e24091425e097582",
+      "sha256": "cd7f950d7e8c33350bcb3e39375be3dc17e4783e621f0827f035c911136ad786"
+    },
+    {
+      "path": "README.md",
+      "originalBlob": "fa2782be0112062d876c015d841cb8a4e9422ec9",
+      "sha256": "92e4dac01a04a7b45ac31e947c61411652f0f33e8799fb0b6466f29a28bbfe8f"
+    },
+    {
+      "path": "Sources/CodexNotch/CodexNotchSettings.swift",
+      "originalBlob": "c3a2ce18b802d3bc6e1f59249d3ac270f71bb5a1",
+      "sha256": "b68695ca9d973edc1b88ee4806248ce06c6b1abf67757b788706a4031999fcf0"
+    },
+    {
+      "path": "Sources/CodexNotch/NotchIslandView.swift",
+      "originalBlob": "b3d901f875b52805aac55563843c3b18395defc6",
+      "sha256": "130f68f2860327bb58aaf8a55f38187f9a73fe92a49d21bb4c72e502160f1b6a"
+    },
+    {
+      "path": "Sources/CodexNotch/SecretStore.swift",
+      "originalBlob": "4da7a76cfb18058074e5ab28eac7e9768849fe4e",
+      "sha256": "b5c1801f82a42f7802bf619d1be1abd864ed330736bbfc2341aa190ca5a68786"
+    },
+    {
+      "path": "Sources/CodexNotch/SettingsView.swift",
+      "originalBlob": "d65c43f77e7d8e0dbf8825119871047549d1c1fe",
+      "sha256": "7980a9401d244c0992864cce9ea3c2f2c4d3980547a8cf4afa69edf66baf399a"
+    },
+    {
+      "path": "scripts/build-app.sh",
+      "originalBlob": "b8a1fa14d3455916eccc21131ca934de7169f800",
+      "sha256": "b7bc1ca990fbc470d4dc924fe7f054bb8c315a25da61f4517154192500ef5950"
+    },
+    {
+      "path": "scripts/install-user-app.sh",
+      "originalBlob": "5234fa5cd28663483d2532a26e9b3c744b81e66f",
+      "sha256": "da44f681363d9174a262b238829f87868b63f06b34a9efbe6aa816597bdb1afd"
+    }
+  ]
+}

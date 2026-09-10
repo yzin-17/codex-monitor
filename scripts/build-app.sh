@@ -2,16 +2,17 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-APP_NAME="codex监测"
+APP_NAME="CodexMonitor"
 PACKAGE_NAME="codex-monitor"
 APP_VERSION="0.1.17"
-BUNDLE_ID="com.alight.codexnotch"
+BUNDLE_ID="dev.yzin.codexmonitor.alight"
 DIST_DIR="$ROOT_DIR/dist"
 APP_DIR="$DIST_DIR/$APP_NAME.app"
 DMG_STAGE_DIR="$DIST_DIR/dmg-stage"
 PACKAGE_STAGE_DIR="$DIST_DIR/package-stage"
 
 cd "$ROOT_DIR"
+mkdir -p "$DIST_DIR"
 if [[ "${CODEX_NOTCH_SKIP_TESTS:-0}" != "1" ]]; then
   "$ROOT_DIR/scripts/run-regression-tests.sh"
 fi
@@ -28,7 +29,7 @@ create_app_bundle() {
 
   rm -rf "$app_dir"
   mkdir -p "$macos_dir" "$resources_dir"
-  cp "$binary_path" "$macos_dir/CodexNotch"
+  cp "$binary_path" "$macos_dir/CodexMonitor"
   cp "$ROOT_DIR/Resources/AppIcon.icns" "$resources_dir/AppIcon.icns"
 
   cat > "$contents_dir/Info.plist" <<PLIST
@@ -39,7 +40,7 @@ create_app_bundle() {
   <key>CFBundleDevelopmentRegion</key>
   <string>en</string>
   <key>CFBundleExecutable</key>
-  <string>CodexNotch</string>
+  <string>CodexMonitor</string>
   <key>CFBundleIdentifier</key>
   <string>$BUNDLE_ID</string>
   <key>CFBundleInfoDictionaryVersion</key>

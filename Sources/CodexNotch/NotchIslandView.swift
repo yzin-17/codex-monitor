@@ -4,6 +4,7 @@ import SwiftUI
 private enum DetailPage: String, CaseIterable, Identifiable {
     case codex
     case codexRadar
+    case skills
     case remoteCodex
     case newAPI
     case subAPI
@@ -14,6 +15,8 @@ private enum DetailPage: String, CaseIterable, Identifiable {
         switch self {
         case .codex:
             "Codex"
+        case .skills:
+            "Skills"
         case .codexRadar:
             "Radar"
         case .remoteCodex:
@@ -354,6 +357,8 @@ struct DetailPanelView: View {
     let onNewAPIRefresh: () -> Void
     let onSubAPIRefresh: () -> Void
     let onCodexRadarRefresh: () -> Void
+    @StateObject private var skillsModel = SkillInsightsViewModel()
+    @AppStorage("skills.enabled") private var skillsEnabled = true
     @State private var detailPage: DetailPage = .codex
     @State private var showsRemoteUsageInfo = false
 
@@ -394,6 +399,8 @@ struct DetailPanelView: View {
                         switch selectedPage {
                         case .codex:
                             localContent
+                        case .skills:
+                            SkillInsightsPanelView(model: skillsModel)
                         case .codexRadar:
                             codexRadarContent
                         case .remoteCodex:
@@ -420,6 +427,9 @@ struct DetailPanelView: View {
         }
         .frame(width: islandLayout.width, height: detailHeight)
         .clipShape(BottomRoundedRectangle(radius: 24))
+        .onChange(of: skillsEnabled) { _, enabled in
+            if !enabled { skillsModel.cancel() }
+        }
     }
 
     private var showsDetailContent: Bool {
@@ -503,6 +513,8 @@ struct DetailPanelView: View {
         switch selectedPage {
         case .codex:
             snapshot.isRunning ? "正在运行" : "最近活动"
+        case .skills:
+            "Skills"
         case .codexRadar:
             "CodexRadar"
         case .remoteCodex:
@@ -518,6 +530,8 @@ struct DetailPanelView: View {
         switch selectedPage {
         case .codex:
             return snapshot.isRunning ? "\(snapshot.tasks.filter { $0.status == .running }.count) 个任务" : "空闲"
+        case .skills:
+            return skillsModel.status
         case .codexRadar:
             return codexRadarHeaderStatus
         case .remoteCodex:
@@ -533,6 +547,8 @@ struct DetailPanelView: View {
         switch selectedPage {
         case .codex:
             snapshot.isRunning ? Color(red: 0.61, green: 0.95, blue: 0.68) : .white.opacity(0.48)
+        case .skills:
+            Color(red: 0.61, green: 0.95, blue: 0.68)
         case .codexRadar:
             codexRadarHeaderColor
         case .remoteCodex:
@@ -595,6 +611,8 @@ struct DetailPanelView: View {
         switch selectedPage {
         case .codex:
             viewModel.isRefreshing
+        case .skills:
+            skillsModel.isAnalyzing
         case .codexRadar:
             codexRadarViewModel.isRefreshing
         case .remoteCodex:
@@ -610,6 +628,8 @@ struct DetailPanelView: View {
         switch selectedPage {
         case .codex:
             "刷新 Codex"
+        case .skills:
+            "本地分析 Skills / 继续回填"
         case .codexRadar:
             "刷新 CodexRadar"
         case .remoteCodex:
@@ -647,6 +667,7 @@ struct DetailPanelView: View {
 
     private var availablePages: [DetailPage] {
         var pages: [DetailPage] = [.codex]
+        if skillsEnabled { pages.append(.skills) }
         if settings.codexRadarEnabled {
             pages.append(.codexRadar)
         }
@@ -723,6 +744,8 @@ struct DetailPanelView: View {
         switch selectedPage {
         case .codex:
             onLocalRefresh()
+        case .skills:
+            skillsModel.analyze()
         case .codexRadar:
             onCodexRadarRefresh()
         case .remoteCodex:

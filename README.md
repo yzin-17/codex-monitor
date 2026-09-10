@@ -1,3 +1,29 @@
+# Codex Monitor · ALight 基线定制版
+
+本分支以 **ALight v0.1.17 原版源码**为基础，保留原版刘海 HUD、展开/收起动画、深色面板、Codex/Radar/远程账号页面、模型价格、额度和统计。此前独立重写的侧栏主窗口已经移除，不再作为应用基线。
+
+新增功能仅为同一详情面板里的 **Skills** Tab 与设置入口：目录、证据分级、7/30 天筛选、关联对话跳转和脱敏报告。Skills 手动触发本地分片分析，不调用模型；它的解析核心不参与原版 Token/成本计算。
+
+## 安装本定制版
+
+```bash
+git clone -b rework/alight-baseline-skills https://github.com/yzin-17/codex-monitor.git
+cd codex-monitor
+./scripts/install.sh
+# 已安装上一版时，先退出 Codex Monitor，然后：
+./scripts/install.sh --replace
+```
+
+安装到 `~/Applications/CodexMonitor.app`；Bundle ID、偏好、Keychain service 与派生数据和 ALight 原版隔离。不会强制结束 Codex/ChatGPT，不移除 quarantine。应用采用 ad-hoc 签名，未公证。
+
+首次展开原版 HUD，在设置 → Skills 添加项目与真实 Skill 目录，然后进入 Skills 点击分析。需要更多历史时点击继续；文件存在不代表已启用，读取成功不代表执行有效，逐 Skill Token 不可用。
+
+**安全口径改变：完整原版包含网络价格源、Radar、远程账户和本机 app-server 功能；不能再把整个 App 称为纯离线。** 不需要的功能由用户在原版设置里关闭。本次先保留，不静默删减。
+
+来源与许可见 [UPSTREAM.md](UPSTREAM.md)，变更与验收见 [重做记录](docs/ALIGHT_REWORK.md)。下面保留上游 README 原文；其中原版应用名称/安装说明应以本节定制版说明为准。
+
+---
+
 # codex监测 / Codex Monitor
 
 <p>

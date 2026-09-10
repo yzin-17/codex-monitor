@@ -24,10 +24,10 @@ private struct SMAppServiceLaunchAtLoginManager: LaunchAtLoginManaging {
 
 @MainActor
 final class CodexNotchSettings: ObservableObject {
-    nonisolated static let cliproxyKeychainService = "com.alight.codexnotch.cliproxy.management-key"
+    nonisolated static let cliproxyKeychainService = "dev.yzin.codexmonitor.alight.cliproxy.management-key"
     nonisolated static let cliproxyKeychainAccount = "default"
-    nonisolated static let newAPIKeychainService = "com.alight.codexnotch.newapi.password"
-    nonisolated static let subAPIKeychainService = "com.alight.codexnotch.subapi.password"
+    nonisolated static let newAPIKeychainService = "dev.yzin.codexmonitor.alight.newapi.password"
+    nonisolated static let subAPIKeychainService = "dev.yzin.codexmonitor.alight.subapi.password"
 
     private enum Keys {
         static let activeRefreshInterval = "activeRefreshInterval"
@@ -582,7 +582,7 @@ final class CodexNotchSettings: ObservableObject {
             key: .newAPIManagement,
             legacyLocations: [
                 (newAPIKeychainService, cliproxyKeychainAccount),
-                ("com.alight.codexnotch.newapi.management-key", cliproxyKeychainAccount)
+                ("dev.yzin.codexmonitor.alight.newapi.management-key", cliproxyKeychainAccount)
             ],
             vault: &loadedVault,
             includeLegacyKeychain: shouldReadLegacyNewAPIKeychain
@@ -839,7 +839,7 @@ final class CodexNotchSettings: ObservableObject {
                 }
                 do {
                     let legacySecret = try KeychainStore.read(
-                        service: "com.alight.codexnotch.remote-account-source",
+                        service: "dev.yzin.codexmonitor.alight.remote-account-source",
                         account: copy.id
                     )
                     if !legacySecret.isEmpty, let expectedBinding {
@@ -1008,9 +1008,9 @@ final class CodexNotchSettings: ObservableObject {
     nonisolated private static func balanceAccountKeychainService(for source: BalanceMonitorSource) -> String {
         switch source {
         case .newAPI:
-            "com.alight.codexnotch.newapi.account-password"
+            "dev.yzin.codexmonitor.alight.newapi.account-password"
         case .subAPI:
-            "com.alight.codexnotch.subapi.account-password"
+            "dev.yzin.codexmonitor.alight.subapi.account-password"
         }
     }
 
