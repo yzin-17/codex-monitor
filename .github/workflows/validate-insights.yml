@@ -49,7 +49,7 @@ jobs:
           ./scripts/build.sh > .baseline-output/build.log 2>&1 || { tail -200 .baseline-output/build.log; exit 1; }
           grep -E 'Test run with|All regression|Built |error:' .baseline-output/build.log || true
           codesign --verify --deep --strict dist/CodexMonitor.app
-          for page in codex performance skills codexRadar conversation-costs hud-menu-bar hud-layout codex-accounts hud-fixed-status hud-status-only remote-codex resetPrediction cli-resume; do
+          for page in codex performance skills codexRadar conversation-costs hud-menu-bar hud-layout codex-accounts hud-fixed-status hud-status-only remoteCodex resetPrediction cli-resume; do
             test -s ".baseline-output/ui/$page.png"
           done
           test -s dist/codex-monitor-0.4.0-arm64.dmg
