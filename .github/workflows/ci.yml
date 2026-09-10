@@ -1,0 +1,17 @@
+name: 本地核心与 macOS 构建
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: 工具链
+        run: swift --version
+      - name: 测试、离线边界与桌面构建
+        run: ./scripts/build.sh
+      - name: 产物信息
+        run: ls -lh dist && codesign -dv dist/CodexMonitor.app

@@ -1,0 +1,8 @@
+Building for production...
+[0/5] Write sources
+[2/5] Write swift-version--1BA0962812E73E12.txt
+[4/6] Compiling CodexMonitorCore Aggregation.swift
+[5/7] Compiling CodexMonitorCLI main.swift
+[5/7] Write Objects.LinkFileList
+[6/7] Linking codex-monitor
+Build of product 'codex-monitor' complete! (12.43s)

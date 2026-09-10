@@ -1,0 +1,182 @@
+Sources/CodexMonitorApp/SettingsView.swift:19:                        Text("包含 sessions、archived_sessions 和可选 state_*.sqlite 的目录。支持自定义 CODEX_HOME，但不会读取 auth.json。").font(.caption).foregroundStyle(.secondary)
+离线边界静态检查通过。
+Building for debugging...
+[0/17] Write sources
+[3/17] Write swift-version--1BA0962812E73E12.txt
+[5/26] Compiling CodexMonitorCore Domain.swift
+[6/26] Compiling CodexMonitorCore IncrementalScanner.swift
+[7/26] Compiling CodexMonitorCore SessionParser.swift
+[8/26] Compiling CodexMonitorCore SkillCatalog.swift
+[9/26] Compiling CodexMonitorCore Aggregation.swift
+[10/26] Compiling CodexMonitorCore AnalysisEngine.swift
+[11/26] Emitting module CodexMonitorCore
+[12/26] Compiling CodexMonitorCore Reports.swift
+[13/26] Compiling CodexMonitorCore SQLiteIndex.swift
+[14/27] Compiling CodexMonitorCore Utilities.swift
+[15/28] Wrapping AST for CodexMonitorCore for debugging
+[17/32] Emitting module CodexMonitorCLI
+[18/32] Compiling CodexMonitorCLI main.swift
+[19/33] Wrapping AST for CodexMonitorCLI for debugging
+[20/33] Write Objects.LinkFileList
+[21/33] Linking codex-monitor
+[23/33] Emitting module CodexMonitorCoreTests
+[24/33] Compiling CodexMonitorCoreTests CoreTests.swift
+[25/34] /mnt/data/codex-monitor/.build/x86_64-unknown-linux-gnu/debug/CodexMonitorPackageDiscoveredTests.derived/all-discovered-tests.swift
+[26/34] Write sources
+[27/34] Wrapping AST for CodexMonitorCoreTests for debugging
+[29/37] Emitting module CodexMonitorPackageDiscoveredTests
+[30/37] Compiling CodexMonitorPackageDiscoveredTests CodexMonitorCoreTests.swift
+[31/37] Compiling CodexMonitorPackageDiscoveredTests all-discovered-tests.swift
+[32/38] /mnt/data/codex-monitor/.build/x86_64-unknown-linux-gnu/debug/CodexMonitorPackageTests.derived/runner.swift
+[33/38] Write sources
+[34/38] Wrapping AST for CodexMonitorPackageDiscoveredTests for debugging
+[36/40] Compiling CodexMonitorPackageTests runner.swift
+[37/40] Emitting module CodexMonitorPackageTests
+[38/41] Wrapping AST for CodexMonitorPackageTests for debugging
+[39/41] Write Objects.LinkFileList
+[40/41] Linking CodexMonitorPackageTests.xctest
+Build complete! (11.58s)
+Test Suite 'All tests' started at 2026-09-10 05:35:07.072
+Test Suite 'debug.xctest' started at 2026-09-10 05:35:07.075
+Test Suite 'AggregationTests' started at 2026-09-10 05:35:07.075
+Test Case 'AggregationTests.testCyclesDoNotHangOrDuplicate' started at 2026-09-10 05:35:07.075
+Test Case 'AggregationTests.testCyclesDoNotHangOrDuplicate' passed (0.002 seconds)
+Test Case 'AggregationTests.testDefaultExportRedactsSessionMetadata' started at 2026-09-10 05:35:07.076
+Test Case 'AggregationTests.testDefaultExportRedactsSessionMetadata' passed (0.103 seconds)
+Test Case 'AggregationTests.testDescendantOfCycleUsesSameRepresentative' started at 2026-09-10 05:35:07.179
+Test Case 'AggregationTests.testDescendantOfCycleUsesSameRepresentative' passed (0.0 seconds)
+Test Case 'AggregationTests.testDuplicateFilesSameID' started at 2026-09-10 05:35:07.179
+Test Case 'AggregationTests.testDuplicateFilesSameID' passed (0.0 seconds)
+Test Case 'AggregationTests.testForkHistoryExcluded' started at 2026-09-10 05:35:07.179
+Test Case 'AggregationTests.testForkHistoryExcluded' passed (0.0 seconds)
+Test Case 'AggregationTests.testNestedChildrenCountOnce' started at 2026-09-10 05:35:07.180
+Test Case 'AggregationTests.testNestedChildrenCountOnce' passed (0.0 seconds)
+Test Case 'AggregationTests.testSkillReadPathMatchesEvenDifferentName' started at 2026-09-10 05:35:07.180
+Test Case 'AggregationTests.testSkillReadPathMatchesEvenDifferentName' passed (0.0 seconds)
+Test Case 'AggregationTests.testSkillSameNameNotAssignedTwice' started at 2026-09-10 05:35:07.180
+Test Case 'AggregationTests.testSkillSameNameNotAssignedTwice' passed (0.0 seconds)
+Test Case 'AggregationTests.testTimeWindowUsesEventDateNotFileDate' started at 2026-09-10 05:35:07.180
+Test Case 'AggregationTests.testTimeWindowUsesEventDateNotFileDate' passed (0.0 seconds)
+Test Case 'AggregationTests.testUnknownParentKeptVisible' started at 2026-09-10 05:35:07.181
+Test Case 'AggregationTests.testUnknownParentKeptVisible' passed (0.0 seconds)
+Test Suite 'AggregationTests' passed at 2026-09-10 05:35:07.181
+	 Executed 10 tests, with 0 failures (0 unexpected) in 0.106 (0.106) seconds
+Test Suite 'IndexTests' started at 2026-09-10 05:35:07.181
+Test Case 'IndexTests.testSQLiteMetadataAndParentEdges' started at 2026-09-10 05:35:07.181
+Test Case 'IndexTests.testSQLiteMetadataAndParentEdges' passed (0.002 seconds)
+Test Suite 'IndexTests' passed at 2026-09-10 05:35:07.183
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.002 (0.002) seconds
+Test Suite 'ParserTests' started at 2026-09-10 05:35:07.183
+Test Case 'ParserTests.testBaselineUnattributed' started at 2026-09-10 05:35:07.183
+Test Case 'ParserTests.testBaselineUnattributed' passed (0.004 seconds)
+Test Case 'ParserTests.testCompaction' started at 2026-09-10 05:35:07.187
+Test Case 'ParserTests.testCompaction' passed (0.0 seconds)
+Test Case 'ParserTests.testCounterGapIsNotAssignedToModelOrDate' started at 2026-09-10 05:35:07.187
+Test Case 'ParserTests.testCounterGapIsNotAssignedToModelOrDate' passed (0.001 seconds)
+Test Case 'ParserTests.testCumulativeCountersNotSummed' started at 2026-09-10 05:35:07.189
+Test Case 'ParserTests.testCumulativeCountersNotSummed' passed (0.001 seconds)
+Test Case 'ParserTests.testDuplicateEventsNotAdded' started at 2026-09-10 05:35:07.190
+Test Case 'ParserTests.testDuplicateEventsNotAdded' passed (0.001 seconds)
+Test Case 'ParserTests.testEchoAndCompoundShellDoNotCountAsRead' started at 2026-09-10 05:35:07.191
+Test Case 'ParserTests.testEchoAndCompoundShellDoNotCountAsRead' passed (0.0 seconds)
+Test Case 'ParserTests.testFailedReadNotCountedSuccessful' started at 2026-09-10 05:35:07.191
+Test Case 'ParserTests.testFailedReadNotCountedSuccessful' passed (0.001 seconds)
+Test Case 'ParserTests.testMalformedJSONMarkedPartial' started at 2026-09-10 05:35:07.192
+Test Case 'ParserTests.testMalformedJSONMarkedPartial' passed (0.0 seconds)
+Test Case 'ParserTests.testMentionDoesNotMeanRead' started at 2026-09-10 05:35:07.192
+Test Case 'ParserTests.testMentionDoesNotMeanRead' passed (0.001 seconds)
+Test Case 'ParserTests.testMissingTotalsNotInferred' started at 2026-09-10 05:35:07.193
+Test Case 'ParserTests.testMissingTotalsNotInferred' passed (0.001 seconds)
+Test Case 'ParserTests.testNoStatusReadStaysAttempt' started at 2026-09-10 05:35:07.194
+Test Case 'ParserTests.testNoStatusReadStaysAttempt' passed (0.001 seconds)
+Test Case 'ParserTests.testParentMetadataDecoded' started at 2026-09-10 05:35:07.194
+Test Case 'ParserTests.testParentMetadataDecoded' passed (0.0 seconds)
+Test Case 'ParserTests.testQuotaComesFromLocalLog' started at 2026-09-10 05:35:07.195
+Test Case 'ParserTests.testQuotaComesFromLocalLog' passed (0.001 seconds)
+Test Case 'ParserTests.testReadNeedsMatchedSuccess' started at 2026-09-10 05:35:07.196
+Test Case 'ParserTests.testReadNeedsMatchedSuccess' passed (0.0 seconds)
+Test Case 'ParserTests.testRelativeQuotedReadPath' started at 2026-09-10 05:35:07.196
+Test Case 'ParserTests.testRelativeQuotedReadPath' passed (0.0 seconds)
+Test Case 'ParserTests.testRollbackNotRecounted' started at 2026-09-10 05:35:07.196
+Test Case 'ParserTests.testRollbackNotRecounted' passed (0.001 seconds)
+Test Case 'ParserTests.testSameCounterAtDifferentTimeNotAdded' started at 2026-09-10 05:35:07.198
+Test Case 'ParserTests.testSameCounterAtDifferentTimeNotAdded' passed (0.001 seconds)
+Test Case 'ParserTests.testSkillsDisabledDoesNotExtractEvidence' started at 2026-09-10 05:35:07.199
+Test Case 'ParserTests.testSkillsDisabledDoesNotExtractEvidence' passed (0.0 seconds)
+Test Case 'ParserTests.testToolResultsCannotCreateUserMention' started at 2026-09-10 05:35:07.199
+Test Case 'ParserTests.testToolResultsCannotCreateUserMention' passed (0.0 seconds)
+Test Case 'ParserTests.testUnknownEventsIgnored' started at 2026-09-10 05:35:07.199
+Test Case 'ParserTests.testUnknownEventsIgnored' passed (0.0 seconds)
+Test Suite 'ParserTests' passed at 2026-09-10 05:35:07.199
+	 Executed 20 tests, with 0 failures (0 unexpected) in 0.016 (0.016) seconds
+Test Suite 'ScannerTests' started at 2026-09-10 05:35:07.199
+Test Case 'ScannerTests.testArchivedIncluded' started at 2026-09-10 05:35:07.200
+Test Case 'ScannerTests.testArchivedIncluded' passed (0.002 seconds)
+Test Case 'ScannerTests.testCacheCannotBeUnderCodex' started at 2026-09-10 05:35:07.202
+Test Case 'ScannerTests.testCacheCannotBeUnderCodex' passed (0.0 seconds)
+Test Case 'ScannerTests.testCacheHasNoPromptContent' started at 2026-09-10 05:35:07.202
+Test Case 'ScannerTests.testCacheHasNoPromptContent' passed (0.004 seconds)
+Test Case 'ScannerTests.testCancellation' started at 2026-09-10 05:35:07.206
+Test Case 'ScannerTests.testCancellation' passed (0.001 seconds)
+Test Case 'ScannerTests.testIncrementalAppendAndHalfLine' started at 2026-09-10 05:35:07.207
+Test Case 'ScannerTests.testIncrementalAppendAndHalfLine' passed (0.002 seconds)
+Test Case 'ScannerTests.testOversizedRowRecovers' started at 2026-09-10 05:35:07.209
+Test Case 'ScannerTests.testOversizedRowRecovers' passed (0.264 seconds)
+Test Case 'ScannerTests.testReadOnlySourceUnchanged' started at 2026-09-10 05:35:07.473
+Test Case 'ScannerTests.testReadOnlySourceUnchanged' passed (0.001 seconds)
+Test Case 'ScannerTests.testSourceSymlinkEscapeSkipped' started at 2026-09-10 05:35:07.474
+Test Case 'ScannerTests.testSourceSymlinkEscapeSkipped' passed (0.001 seconds)
+Test Case 'ScannerTests.testTruncateRebuilds' started at 2026-09-10 05:35:07.475
+Test Case 'ScannerTests.testTruncateRebuilds' passed (0.002 seconds)
+Test Case 'ScannerTests.testWarmCacheIsNotRewritten' started at 2026-09-10 05:35:07.477
+Test Case 'ScannerTests.testWarmCacheIsNotRewritten' passed (0.022 seconds)
+Test Suite 'ScannerTests' passed at 2026-09-10 05:35:07.500
+	 Executed 10 tests, with 0 failures (0 unexpected) in 0.3 (0.3) seconds
+Test Suite 'SkillAndPriceTests' started at 2026-09-10 05:35:07.500
+Test Case 'SkillAndPriceTests.testDuplicateModelPriceRejected' started at 2026-09-10 05:35:07.500
+Test Case 'SkillAndPriceTests.testDuplicateModelPriceRejected' passed (0.001 seconds)
+Test Case 'SkillAndPriceTests.testImportSkillsSnapshotStates' started at 2026-09-10 05:35:07.500
+Test Case 'SkillAndPriceTests.testImportSkillsSnapshotStates' passed (0.0 seconds)
+Test Case 'SkillAndPriceTests.testInvalidCatalogImport' started at 2026-09-10 05:35:07.501
+Test Case 'SkillAndPriceTests.testInvalidCatalogImport' passed (0.0 seconds)
+Test Case 'SkillAndPriceTests.testInvalidFrontmatterRejected' started at 2026-09-10 05:35:07.501
+Test Case 'SkillAndPriceTests.testInvalidFrontmatterRejected' passed (0.0 seconds)
+Test Case 'SkillAndPriceTests.testLongInputOutsideRateNotGuessed' started at 2026-09-10 05:35:07.501
+Test Case 'SkillAndPriceTests.testLongInputOutsideRateNotGuessed' passed (0.0 seconds)
+Test Case 'SkillAndPriceTests.testMultilineFrontmatter' started at 2026-09-10 05:35:07.501
+Test Case 'SkillAndPriceTests.testMultilineFrontmatter' passed (0.0 seconds)
+Test Case 'SkillAndPriceTests.testNegativePriceRejected' started at 2026-09-10 05:35:07.502
+Test Case 'SkillAndPriceTests.testNegativePriceRejected' passed (0.0 seconds)
+Test Case 'SkillAndPriceTests.testPriceDoesNotDoubleCountCached' started at 2026-09-10 05:35:07.502
+Test Case 'SkillAndPriceTests.testPriceDoesNotDoubleCountCached' passed (0.0 seconds)
+Test Case 'SkillAndPriceTests.testQuotedDescription' started at 2026-09-10 05:35:07.502
+Test Case 'SkillAndPriceTests.testQuotedDescription' passed (0.0 seconds)
+Test Case 'SkillAndPriceTests.testUnknownPriceExcluded' started at 2026-09-10 05:35:07.502
+Test Case 'SkillAndPriceTests.testUnknownPriceExcluded' passed (0.0 seconds)
+Test Suite 'SkillAndPriceTests' passed at 2026-09-10 05:35:07.502
+	 Executed 10 tests, with 0 failures (0 unexpected) in 0.003 (0.003) seconds
+Test Suite 'TokensTests' started at 2026-09-10 05:35:07.502
+Test Case 'TokensTests.testCachedAndReasoningAreSubsets' started at 2026-09-10 05:35:07.502
+Test Case 'TokensTests.testCachedAndReasoningAreSubsets' passed (0.0 seconds)
+Test Case 'TokensTests.testDisplay' started at 2026-09-10 05:35:07.502
+Test Case 'TokensTests.testDisplay' passed (0.0 seconds)
+Test Case 'TokensTests.testInvalidSubsetsAreClamped' started at 2026-09-10 05:35:07.502
+Test Case 'TokensTests.testInvalidSubsetsAreClamped' passed (0.0 seconds)
+Test Case 'TokensTests.testOverflowSaturates' started at 2026-09-10 05:35:07.503
+Test Case 'TokensTests.testOverflowSaturates' passed (0.0 seconds)
+Test Case 'TokensTests.testZeroInputRatioUnknown' started at 2026-09-10 05:35:07.503
+Test Case 'TokensTests.testZeroInputRatioUnknown' passed (0.0 seconds)
+Test Suite 'TokensTests' passed at 2026-09-10 05:35:07.503
+	 Executed 5 tests, with 0 failures (0 unexpected) in 0.0 (0.0) seconds
+Test Suite 'debug.xctest' passed at 2026-09-10 05:35:07.503
+	 Executed 56 tests, with 0 failures (0 unexpected) in 0.427 (0.427) seconds
+Test Suite 'All tests' passed at 2026-09-10 05:35:07.503
+	 Executed 56 tests, with 0 failures (0 unexpected) in 0.427 (0.427) seconds
+◇ Test run started.
+↳ Testing Library Version: 6.2.1 (c9d57c83568b06d)
+↳ Target Platform: x86_64-unknown-linux-gnu
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.
+[0/1] Planning build
+Building for debugging...
+[0/3] Write swift-version--1BA0962812E73E12.txt
+Build of product 'codex-monitor' complete! (0.11s)

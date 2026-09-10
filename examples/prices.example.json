@@ -1,0 +1,8 @@
+{
+  "currency": "USD",
+  "note": "演示费率，不是任何真实模型的价格。填写已核实的精确模型名和费率后导入。maxInput 是这一单档费率适用的单请求输入上限；超出则不猜价。",
+  "models": [
+    {"model": "demo-planner", "inputPerMillion": 3, "cachedPerMillion": 0.3, "outputPerMillion": 15, "maxInput": 272000},
+    {"model": "demo-worker", "inputPerMillion": 0.5, "cachedPerMillion": 0.05, "outputPerMillion": 3, "maxInput": 872000}
+  ]
+}
