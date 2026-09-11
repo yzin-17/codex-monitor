@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd -P)"
 APP_NAME="CodexMonitor"
 PACKAGE_NAME="codex-monitor"
 APP_VERSION="0.4.3"
@@ -11,7 +11,28 @@ APP_DIR="$DIST_DIR/$APP_NAME.app"
 DMG_STAGE_DIR="$DIST_DIR/dmg-stage"
 PACKAGE_STAGE_DIR="$DIST_DIR/package-stage"
 
+prepare_swiftpm_module_cache() {
+  local build_root="$ROOT_DIR/.build"
+  local marker="$build_root/.codex-monitor-root"
+  local previous_root=""
+
+  if [[ -f "$marker" ]]; then
+    previous_root="$(cat "$marker" 2>/dev/null || true)"
+  fi
+
+  # Swift PCM 文件会记录绝对 ModuleCache 路径。仓库移动后复用旧 .build 会触发
+  # "precompiled file ... was compiled with module cache path ..." / SwiftShims 缺失。
+  if [[ -d "$build_root" && "$previous_root" != "$ROOT_DIR" ]]; then
+    echo "SwiftPM build path changed; clearing stale module caches..."
+    find "$build_root" -type d \( -name ModuleCache -o -name ModuleCache.noindex \) -prune -exec rm -rf {} +
+  fi
+
+  mkdir -p "$build_root"
+  printf '%s\n' "$ROOT_DIR" > "$marker"
+}
+
 cd "$ROOT_DIR"
+prepare_swiftpm_module_cache
 if [[ "${CODEX_NOTCH_SKIP_TESTS:-0}" != "1" ]]; then
   "$ROOT_DIR/scripts/run-regression-tests.sh"
 fi
