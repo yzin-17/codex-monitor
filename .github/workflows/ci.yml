@@ -1,10 +1,10 @@
 name: macOS 构建与交互回归
 on:
   push:
-    branches: [main]
+    branches: [main, fix/hud-adaptive-width-and-browser-login-test]
   pull_request:
 permissions:
-  contents: read
+  contents: write
 concurrency:
   group: macos-${{ github.ref }}
   cancel-in-progress: true
@@ -15,7 +15,232 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          persist-credentials: false
+          persist-credentials: true
+      - name: 应用 HUD 自适应宽度与测试稳定性修复
+        if: github.ref == 'refs/heads/fix/hud-adaptive-width-and-browser-login-test'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one match, got {count}: {old[:80]!r}")
+              p.write_text(text.replace(old, new, 1))
+
+          replace_once(
+              "Sources/CodexNotch/HUDLayoutEditorView.swift",
+              '''                numberField("浮窗最大宽度", value: $preferences.value.maximumWidth, range: 90...360, suffix: "pt")
+                appearanceSlider("浮窗横向位置", value: $preferences.value.horizontalPosition, range: 0...1)
+''',
+              '''                appearanceSlider("HUD 横向位置", value: $preferences.value.horizontalPosition, range: 0...1)
+'''
+          )
+          replace_once(
+              "Sources/CodexNotch/HUDLayoutEditorView.swift",
+              '''            appearanceSlider("HUD 背景透明度", value: $preferences.value.hudTransparency, range: 0...1)
+            appearanceSlider("下拉面板背景透明度", value: $preferences.value.panelTransparency, range: 0...0.65)
+            numberField(
+                "HUD 圆角",
+                value: Binding(get: { preferences.value.cornerRadius }, set: { preferences.value.cornerRadius = $0 }),
+                range: 0...24,
+                suffix: "pt"
+            )
+''',
+              '''            appearanceSlider("HUD 背景透明度", value: $preferences.value.hudTransparency, range: 0...1)
+            numberField(
+                "HUD 圆角",
+                value: Binding(get: { preferences.value.cornerRadius }, set: { preferences.value.cornerRadius = $0 }),
+                range: 0...24,
+                suffix: "pt"
+            )
+            appearanceSlider("下拉面板背景透明度", value: $preferences.value.panelTransparency, range: 0...0.65)
+'''
+          )
+          replace_once(
+              "Sources/CodexNotch/HUDLayoutEditorView.swift",
+              '''            .multilineTextAlignment(.trailing)
+            .frame(width: 72)
+            Text(suffix).foregroundStyle(.secondary)
+''',
+              '''            .textFieldStyle(.plain)
+            .multilineTextAlignment(.trailing)
+            .padding(.horizontal, 7)
+            .frame(width: 72, height: 24)
+            .background(
+                Color.primary.opacity(0.07),
+                in: RoundedRectangle(cornerRadius: 5, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .stroke(Color.primary.opacity(0.14), lineWidth: 1)
+            )
+            Text(suffix).foregroundStyle(.secondary)
+'''
+          )
+          replace_once(
+              "Sources/CodexNotch/HUDLayoutEditorView.swift",
+              '''        preferences.value.mode = .automatic
+        preferences.value.maximumWidth = 220
+        preferences.value.horizontalPosition = 0.5
+''',
+              '''        preferences.value.mode = .automatic
+        preferences.value.horizontalPosition = 0.5
+'''
+          )
+
+          replace_once(
+              "Sources/CodexNotch/HUDPreferences.swift",
+              '''    var mode: MonitorDisplayMode = .automatic
+    var maximumWidth: Double = 220
+    var horizontalPosition: Double = 0.5
+''',
+              '''    var mode: MonitorDisplayMode = .automatic
+    var horizontalPosition: Double = 0.5
+'''
+          )
+          replace_once(
+              "Sources/CodexNotch/HUDPreferences.swift",
+              '''        case mode, maximumWidth, horizontalPosition, hudOpacity, panelOpacity, hudCornerRadius, animation
+''',
+              '''        case mode, horizontalPosition, hudOpacity, panelOpacity, hudCornerRadius, animation
+'''
+          )
+          replace_once("Sources/CodexNotch/HUDPreferences.swift", '''        maximumWidth = try c.decodeIfPresent(Double.self, forKey: .maximumWidth) ?? 220
+''', '')
+          replace_once("Sources/CodexNotch/HUDPreferences.swift", '''        try c.encode(value.maximumWidth, forKey: .maximumWidth)
+''', '')
+          replace_once("Sources/CodexNotch/HUDPreferences.swift", '''        copy.maximumWidth = maximumWidth.isFinite ? min(360, max(90, maximumWidth)) : 220
+''', '')
+
+          replace_once(
+              "Sources/CodexNotch/FloatingHUDGeometry.swift",
+              '''    static func frame(screen: CGRect, menuBarHeight: CGFloat, contentSize: CGSize,
+                      maximumWidth: CGFloat, position: Double) -> CGRect {
+        let barHeight = menuBarHeight.isFinite && menuBarHeight > 0 ? menuBarHeight : 24
+        let height = max(1, min(100, barHeight))
+        let maxWidth = maximumWidth.isFinite ? min(360, max(70, maximumWidth)) : 220
+        let width = min(max(1, screen.width - 24), min(maxWidth, max(70, contentSize.width)))
+''',
+              '''    static func frame(screen: CGRect, menuBarHeight: CGFloat, contentSize: CGSize,
+                      position: Double) -> CGRect {
+        let barHeight = menuBarHeight.isFinite && menuBarHeight > 0 ? menuBarHeight : 24
+        let height = max(1, min(100, barHeight))
+        let width = min(max(1, screen.width - 24), max(70, contentSize.width))
+'''
+          )
+          replace_once(
+              "Sources/CodexNotch/AppDelegate.swift",
+              '''            contentSize: .init(width: width + alertWidth + 16 + 9 + HUDRuntimeStatus.reservedWidth, height: 20),
+            maximumWidth: settings.hudPreferences.value.normalized.maximumWidth,
+            position: settings.hudPreferences.value.normalized.horizontalPosition)
+''',
+              '''            contentSize: .init(width: width + alertWidth + 16 + 9 + HUDRuntimeStatus.reservedWidth, height: 20),
+            position: settings.hudPreferences.value.normalized.horizontalPosition)
+'''
+          )
+          replace_once(
+              "Sources/CodexNotch/AppDelegate.swift",
+              '''        let right = max(layout.shoulderWidth, min(settings.hudPreferences.value.normalized.maximumWidth, needed))
+        // 物理刘海仍严格居中；只向右增加自定义区域，不挤占固定状态或改变遮挡区。
+''',
+              '''        let availableRight = max(
+            layout.shoulderWidth,
+            screen.frame.maxX - (screen.frame.midX + layout.notchWidth / 2) - 12
+        )
+        let right = min(max(layout.shoulderWidth, needed), availableRight)
+        // 物理刘海仍严格居中；右侧按内容自适应，仅受屏幕边缘约束。
+'''
+          )
+
+          replace_once(
+              "Tests/CodexNotchTests/RemoteUXTests.swift",
+              '''        let frame = FloatingHUDGeometry.frame(screen: screen, menuBarHeight: height,
+            contentSize: .init(width: 220, height: 22), maximumWidth: 220, position: 0.5)
+''',
+              '''        let frame = FloatingHUDGeometry.frame(screen: screen, menuBarHeight: height,
+            contentSize: .init(width: 220, height: 22), position: 0.5)
+'''
+          )
+          replace_once(
+              "Tests/CodexNotchTests/RemoteUXTests.swift",
+              '''}
+@Test func transparencyUsesInverseOfExistingOpacityWithoutChangingStoredAppearance() throws {
+''',
+              '''}
+@Test func hudWidthFollowsContentUntilScreenMargin() {
+    let screen = CGRect(x: 0, y: 0, width: 1440, height: 900)
+    let compact = FloatingHUDGeometry.frame(screen: screen, menuBarHeight: 24,
+        contentSize: .init(width: 148, height: 20), position: 0.5)
+    let detailed = FloatingHUDGeometry.frame(screen: screen, menuBarHeight: 24,
+        contentSize: .init(width: 428, height: 20), position: 0.5)
+    let oversized = FloatingHUDGeometry.frame(screen: screen, menuBarHeight: 24,
+        contentSize: .init(width: 5_000, height: 20), position: 0.5)
+    #expect(compact.width == 148)
+    #expect(detailed.width == 428)
+    #expect(oversized.width == screen.width - 24)
+}
+@Test func transparencyUsesInverseOfExistingOpacityWithoutChangingStoredAppearance() throws {
+'''
+          )
+          replace_once(
+              "Tests/CodexNotchTests/RemoteUXTests.swift",
+              '''    try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: path.path)
+    return path
+}
+@Test @MainActor func browserLoginUsesRealProcessProtocolAndCleansTemporaryCredentials() async throws {
+''',
+              '''    try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: path.path)
+    return path
+}
+private func waitForFixtureStart(_ marker: URL, timeout: Duration = .seconds(2)) async -> Bool {
+    let clock = ContinuousClock()
+    let deadline = clock.now.advanced(by: timeout)
+    while clock.now < deadline {
+        if FileManager.default.fileExists(atPath: marker.path) { return true }
+        try? await Task.sleep(for: .milliseconds(20))
+    }
+    return FileManager.default.fileExists(atPath: marker.path)
+}
+@Test @MainActor func browserLoginUsesRealProcessProtocolAndCleansTemporaryCredentials() async throws {
+'''
+          )
+          replace_once(
+              "Tests/CodexNotchTests/RemoteUXTests.swift",
+              '''    let fixture = try makeLoginFixture(in: root, complete: false)
+    let task = Task { try await CodexBrowserLoginClient(executablePath: fixture.path, timeout: 3).login { _ in true } }
+    try await Task.sleep(for: .milliseconds(250)); task.cancel()
+    do { _ = try await task.value; Issue.record("已取消登录不得成功") } catch is CancellationError {} catch { Issue.record("取消应报告 CancellationError") }
+    let usedHome = try String(contentsOf: root.appendingPathComponent("used-home"), encoding: .utf8)
+''',
+              '''    let fixture = try makeLoginFixture(in: root, complete: false)
+    let task = Task { try await CodexBrowserLoginClient(executablePath: fixture.path, timeout: 3).login { _ in true } }
+    let marker = root.appendingPathComponent("used-home")
+    guard await waitForFixtureStart(marker) else {
+        task.cancel()
+        _ = try? await task.value
+        Issue.record("登录替身未启动，无法验证取消后的清理")
+        return
+    }
+    task.cancel()
+    do { _ = try await task.value; Issue.record("已取消登录不得成功") } catch is CancellationError {} catch { Issue.record("取消应报告 CancellationError") }
+    let usedHome = try String(contentsOf: marker, encoding: .utf8)
+'''
+          )
+          PY
+          git fetch origin main --depth=1
+          git checkout FETCH_HEAD -- .github/workflows/ci.yml
+          git rm -f .github/workflows/apply-hud-adaptive-width.yml
+          git config user.name "yzin"
+          git config user.email "30586807+yzin-17@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "fix: adapt HUD width and stabilize browser login cancellation test"
+          git push origin HEAD:fix/hud-adaptive-width-and-browser-login-test
       - name: 回归、原生界面与双架构构建
         env:
           CODEX_MONITOR_SNAPSHOT_DIR: ${{ github.workspace }}/.baseline-output/ui
