@@ -23,21 +23,44 @@ final class PublicInsightsClient: NSObject, URLSessionTaskDelegate, @unchecked S
         let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
         defer { session.invalidateAndCancel() }
 
-        var request = URLRequest(url: source.endpoint)
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("CodexMonitor/0.4", forHTTPHeaderField: "User-Agent")
-        let (bytes, response) = try await session.bytes(for: request)
-        guard let http = response as? HTTPURLResponse else { throw PublicInsightError.invalidResponse }
-        if (300..<400).contains(http.statusCode) { throw PublicInsightError.redirect }
-        guard http.statusCode == 200 else { throw PublicInsightError.http(http.statusCode) }
-        guard response.expectedContentLength <= 2 * 1024 * 1024 else { throw PublicInsightError.tooLarge }
-        var data = Data()
-        for try await byte in bytes {
-            if data.count % 4096 == 0 { try Task.checkCancellation() }
-            guard data.count < 2 * 1024 * 1024 else { throw PublicInsightError.tooLarge }
-            data.append(byte)
+        func load(_ url: URL) async throws -> Data {
+            var request = URLRequest(url: url)
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            request.setValue("CodexMonitor/0.4", forHTTPHeaderField: "User-Agent")
+            let (bytes, response) = try await session.bytes(for: request)
+            guard let http = response as? HTTPURLResponse else { throw PublicInsightError.invalidResponse }
+            if (300..<400).contains(http.statusCode) { throw PublicInsightError.redirect }
+            guard http.statusCode == 200 else { throw PublicInsightError.http(http.statusCode) }
+            guard response.expectedContentLength <= 2 * 1024 * 1024 else { throw PublicInsightError.tooLarge }
+            var data = Data()
+            for try await byte in bytes {
+                if data.count % 4096 == 0 { try Task.checkCancellation() }
+                guard data.count < 2 * 1024 * 1024 else { throw PublicInsightError.tooLarge }
+                data.append(byte)
+            }
+            try Task.checkCancellation()
+            return data
         }
-        try Task.checkCancellation()
+
+        if source == .openAIStatus {
+            // 与 CodexBar 一致：优先 incident.io 原生结构，以获得 APIs / ChatGPT / Codex 等真实分组。
+            // 原生结构不可用时才退回经典 Statuspage summary.json。
+            do {
+                let incident = try await load(PublicInsightSource.openAIIncidentEndpoint)
+                let overlay = try? await load(PublicInsightSource.openAIStatusEndpoint)
+                return try PublicInsightParser.parseOpenAIIncident(
+                    incident,
+                    statusData: overlay,
+                    fetchedAt: Date()
+                )
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                try Task.checkCancellation()
+            }
+        }
+
+        let data = try await load(source.endpoint)
         return try PublicInsightParser.parse(data, source: source)
     }
 }
