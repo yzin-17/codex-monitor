@@ -5,8 +5,9 @@ struct HUDConfiguration: Codable, Equatable, Sendable {
     var mode: MonitorDisplayMode = .automatic
     var maximumWidth: Double = 220
     var horizontalPosition: Double = 0.5
-    var hudOpacity: Double = 0.985
-    var panelOpacity: Double = 0.985
+    var hudOpacity: Double = 0.90
+    var panelOpacity: Double = 0.90
+    var hudCornerRadius: Double? = 10
     var animation: MonitorPanelAnimation = .anchoredReveal
     var sourceID = "local"
     var showRemaining = true
@@ -20,12 +21,20 @@ struct HUDConfiguration: Codable, Equatable, Sendable {
         get { 1 - normalized.panelOpacity }
         set { panelOpacity = 1 - min(0.65, max(0, newValue.isFinite ? newValue : 0)) }
     }
+    var cornerRadius: Double {
+        get {
+            let value = hudCornerRadius ?? 10
+            return value.isFinite ? min(24, max(0, value)) : 10
+        }
+        set { hudCornerRadius = newValue.isFinite ? min(24, max(0, newValue)) : 10 }
+    }
     var normalized: Self {
         var copy = self
         copy.maximumWidth = maximumWidth.isFinite ? min(360, max(90, maximumWidth)) : 220
         copy.horizontalPosition = horizontalPosition.isFinite ? min(1, max(0, horizontalPosition)) : 0.5
-        copy.hudOpacity = hudOpacity.isFinite ? min(1, max(0, hudOpacity)) : 0.985
-        copy.panelOpacity = panelOpacity.isFinite ? min(1, max(0.35, panelOpacity)) : 0.985
+        copy.hudOpacity = hudOpacity.isFinite ? min(1, max(0, hudOpacity)) : 0.90
+        copy.panelOpacity = panelOpacity.isFinite ? min(1, max(0.35, panelOpacity)) : 0.90
+        copy.hudCornerRadius = cornerRadius
         copy.layout = layout.normalized
         copy.providerLayouts = providerLayouts.mapValues(\.normalized)
         if copy.sourceID.count > 150 { copy.sourceID = "local" }
@@ -50,7 +59,19 @@ struct HUDConfiguration: Codable, Equatable, Sendable {
             if abs(migrated.panelOpacity - 0.78) < 0.0001 { migrated.panelOpacity = 0.985 }
             value = migrated.normalized
             if let data = try? JSONEncoder().encode(value) { defaults.set(data, forKey: Self.key) }
+            // 首次从更早版本迁移时先保留该版本约定的黑底；0.4.2 已完成此迁移的用户再进入新默认迁移。
+            defaults.set(2, forKey: "hudAppearanceDefaultsVersion")
             defaults.set(1, forKey: "hudNeutralPaletteVersion")
+        }
+        // 0.4.3：仅迁移仍处于上一版默认值的透明度；用户主动调整过的值保持不变。
+        if defaults.integer(forKey: "hudAppearanceDefaultsVersion") < 2 {
+            var migrated = value
+            if abs(migrated.hudOpacity - 0.985) < 0.0001 { migrated.hudOpacity = 0.90 }
+            if abs(migrated.panelOpacity - 0.985) < 0.0001 { migrated.panelOpacity = 0.90 }
+            if migrated.hudCornerRadius == nil { migrated.hudCornerRadius = 10 }
+            value = migrated.normalized
+            if let data = try? JSONEncoder().encode(value) { defaults.set(data, forKey: Self.key) }
+            defaults.set(2, forKey: "hudAppearanceDefaultsVersion")
         }
     }
 }

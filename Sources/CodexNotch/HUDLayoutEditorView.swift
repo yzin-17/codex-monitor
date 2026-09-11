@@ -21,7 +21,7 @@ struct HUDLayoutEditorView: View {
         else { preferences.value.providerLayouts[scope] = layout.normalized }
     }
     var body: some View {
-        Group { presentationSection; sourceSection; layoutSection }
+        Group { presentationSection; layoutSection }
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)) { _ in
                 hasNotch = (NSScreen.main?.safeAreaInsets.top ?? 0) > 0
             }
@@ -29,7 +29,7 @@ struct HUDLayoutEditorView: View {
                 HUDConditionalEditor(initial: draft.rule, onSave: { rule in
                     var next = layout
                     if draft.existing { next.conditionals[draft.id] = rule.normalized; save(next) }
-                    else { save(next.addingConditional(rule, id: draft.id)) }
+                    else { save(next.addingConditional(rule, id: draft.id, sourceID: preferences.value.sourceID)) }
                     ruleDraft = nil
                 }, onCancel: { ruleDraft = nil })
             }
@@ -42,7 +42,7 @@ struct HUDLayoutEditorView: View {
             if compactOverlay {
                 Text("覆盖菜单栏的浮窗，无刘海占位；高度填满当前屏幕菜单栏。左侧运行状态固定保留，右侧空间不足时仅裁剪自定义内容。")
                     .font(.caption).foregroundStyle(.secondary)
-                Stepper("浮窗最大宽度：\(Int(preferences.value.maximumWidth)) pt", value: $preferences.value.maximumWidth, in: 90...360, step: 10)
+                numberField("浮窗最大宽度", value: $preferences.value.maximumWidth, range: 90...360, suffix: "pt")
                 appearanceSlider("浮窗横向位置", value: $preferences.value.horizontalPosition, range: 0...1)
             } else {
                 Picker("刘海两侧布局", selection: notchDisplaySize) {
@@ -55,6 +55,7 @@ struct HUDLayoutEditorView: View {
             }
             appearanceSlider("HUD 背景透明度", value: $preferences.value.hudTransparency, range: 0...1)
             appearanceSlider("下拉面板背景透明度", value: $preferences.value.panelTransparency, range: 0...0.65)
+            numberField("HUD 圆角", value: Binding(get: { preferences.value.cornerRadius }, set: { preferences.value.cornerRadius = $0 }), range: 0...24, suffix: "pt")
             Button("恢复外观默认设定", action: resetAppearanceDefaults)
                 .help("恢复显示模式、刘海/浮窗几何、HUD/面板透明度和展开动画；不会改动右侧数据源或自定义布局。")
             Picker("面板动画", selection: Binding(get: { preferences.value.animation }, set: { preferences.value.animation = $0 })) {
@@ -72,15 +73,23 @@ struct HUDLayoutEditorView: View {
                 .monospacedDigit().frame(width: 44, alignment: .trailing)
         }
     }
-    private var sourceSection: some View {
+    private func numberField(_ title: String, value: Binding<Double>, range: ClosedRange<Double>, suffix: String) -> some View {
+        HStack(spacing: 8) {
+            Text(title)
+            Spacer()
+            TextField("", value: Binding(get: { value.wrappedValue }, set: { value.wrappedValue = min(range.upperBound, max(range.lowerBound, $0)) }), format: .number.precision(.fractionLength(0)))
+                .multilineTextAlignment(.trailing)
+                .frame(width: 72)
+            Text(suffix).foregroundStyle(.secondary)
+        }
+    }
+    private var layoutSection: some View {
         Section {
-            Picker("默认数据源（未绑定控件）", selection: $preferences.value.sourceID) {
-                Text("本机 Codex").tag("local")
-                Text("沿用旧版来源选择 / 自动提醒").tag("legacy")
-                ForEach(accounts.accounts) { Text("Codex · \($0.label)").tag($0.hudID) }
-                ForEach(remote.snapshot.accounts) { Text("网关 · \($0.displayName)").tag("remote:\($0.id)") }
-                ForEach(newAPI.snapshot.accounts) { Text("NewAPI · \($0.displayName)").tag("newapi:\($0.id)") }
-                ForEach(subAPI.snapshot.accounts) { Text("Sub2API · \($0.displayName)").tag("subapi:\($0.id)") }
+            Picker("当前数据源（新增控件绑定）", selection: $preferences.value.sourceID) {
+                ForEach(bindableSources) { source in Text(source.label).tag(source.id) }
+                if !bindableSources.contains(where: { $0.id == preferences.value.sourceID }) {
+                    Text("已移除的数据源").tag(preferences.value.sourceID)
+                }
             }
             if preferences.value.sourceID == "legacy" {
                 Picker("兼容来源", selection: legacySource) {
@@ -88,26 +97,32 @@ struct HUDLayoutEditorView: View {
                 }
             }
             Toggle("百分比显示剩余（关闭后显示已用）", isOn: $preferences.value.showRemaining)
-            Text("这里是未单独绑定控件时的默认数据源。单个布局控件可通过右键绑定到不同账号；左侧状态灯与 RUN / IDLE 始终反映本机 Codex。")
+            Text("点击或拖入的新控件会直接绑定到当前数据源；以后切换这里的来源不会改掉已绑定控件。已放置控件仍可右键重新绑定。左侧 RUN / IDLE 始终只反映本机 Codex。")
                 .font(.caption).foregroundStyle(.secondary)
-        } header: { Text("右侧数据来源") }
-    }
-    private var layoutSection: some View {
-        Section {
+            Divider()
             HStack {
                 Picker("布局作用域", selection: $scope) {
-                    Text("所有来源（默认）").tag("all"); Text("Codex 默认").tag("codex")
+                    Text("全部来源 · 默认布局").tag("all")
+                    Text("本机 Codex · 独立布局").tag("local")
+                    Text("Codex 账号 · 类型默认").tag("codex")
                     ForEach(accounts.accounts) { account in Text("Codex · \(account.label)").tag(account.hudID) }
-                    Text("网关账户").tag("gateway"); Text("NewAPI").tag("newapi:"); Text("Sub2API").tag("subapi:")
+                    Text("网关 · 类型默认").tag("gateway")
+                    ForEach(remote.snapshot.accounts) { account in Text("网关 · \(account.displayName)").tag("remote:\(account.id)") }
+                    Text("NewAPI · 类型默认").tag("newapi:")
+                    ForEach(newAPI.snapshot.accounts) { account in Text("NewAPI · \(account.displayName)").tag("newapi:\(account.id)") }
+                    Text("Sub2API · 类型默认").tag("subapi:")
+                    ForEach(subAPI.snapshot.accounts) { account in Text("Sub2API · \(account.displayName)").tag("subapi:\(account.id)") }
                 }
                 Menu("使用预设") {
-                    Button("紧凑额度") { save(.compact) }; Button("用量和重置") { save(.detailed) }
-                    Button("余额和费用") { save(.costs) }
+                    Button("紧凑额度") { save(boundPreset(.compact)) }; Button("用量和重置") { save(boundPreset(.detailed)) }
+                    Button("余额和费用") { save(boundPreset(.costs)) }
                     Button("仅保留左侧运行状态") { save(.init(lines: [[]])) }
                     if scope != "all" { Button("恢复跟随默认") { preferences.value.providerLayouts[scope] = nil } }
                 }
             }
-            Text("左侧为固定区域，不参与拖动。右侧控件可分别绑定不同账号，也可为每个 Codex 账号保存独立布局；每行最多 12 个控件、最多 2 行，空格和分隔点可以重复添加。")
+            Text(scopeHelp)
+                .font(.caption).foregroundStyle(.secondary)
+            Text("布局作用域只决定使用哪套控件排列；控件自己的数据源由绑定决定。每行最多 12 个控件、最多 2 行，空格和分隔点可以重复添加。")
                 .font(.caption).foregroundStyle(.secondary)
             preview
             ForEach(Array(layout.lines.enumerated()), id: \.offset) { row, values in
@@ -162,7 +177,7 @@ struct HUDLayoutEditorView: View {
                     costToday: "≈1.20 USD", cost30d: "≈12.30 USD"), remaining: preferences.value.showRemaining, menuBar: true)
                 Spacer(minLength: 0)
             }.padding(.horizontal, 8).frame(height: 22)
-                .background(Color.black.opacity(0.985), in: RoundedRectangle(cornerRadius: 5))
+                .background(Color.black.opacity(preferences.value.normalized.hudOpacity), in: RoundedRectangle(cornerRadius: CGFloat(preferences.value.cornerRadius), style: .continuous))
             HStack {
                 Label("固定运行状态", systemImage: "lock.fill").font(.caption)
                 Spacer(); Text("右侧为自定义内容").font(.caption)
@@ -170,7 +185,7 @@ struct HUDLayoutEditorView: View {
         }
     }
     private var bindableSources: [HUDBindableSource] {
-        var values: [HUDBindableSource] = [.init(id: "local", label: "本机 Codex")]
+        var values: [HUDBindableSource] = [.init(id: "local", label: "本机 Codex"), .init(id: "legacy", label: "旧版自动来源")]
         values += accounts.accounts.map { .init(id: $0.hudID, label: "Codex · " + $0.label) }
         values += remote.snapshot.accounts.map { .init(id: "remote:\($0.id)", label: "网关 · " + $0.displayName) }
         values += newAPI.snapshot.accounts.map { .init(id: "newapi:\($0.id)", label: "NewAPI · " + $0.displayName) }
@@ -180,12 +195,31 @@ struct HUDLayoutEditorView: View {
     private func sourceLabel(_ id: String) -> String {
         bindableSources.first(where: { $0.id == id })?.label ?? "已移除的数据源"
     }
+    private var scopeHelp: String {
+        if scope == "all" { return "默认布局：当前数据源没有更具体的布局时使用。多账号混排最适合在这里编辑。" }
+        if scope == "local" { return "本机 Codex 独立布局：当前数据源为本机 Codex 时优先于默认布局。" }
+        if scope == "codex" { return "Codex 类型默认：远程 Codex 账号没有账号专属布局时使用。" }
+        if scope == "gateway" { return "网关类型默认：当前数据源为任意网关账号、且没有该账号专属布局时使用。" }
+        if scope == "newapi:" { return "NewAPI 类型默认：当前数据源为任意 NewAPI 账号、且没有该账号专属布局时使用。" }
+        if scope == "subapi:" { return "Sub2API 类型默认：当前数据源为任意 Sub2API 账号、且没有该账号专属布局时使用。" }
+        return "账号专属布局：仅当当前数据源为「\(sourceLabel(scope))」时优先使用。"
+    }
+    private func boundPreset(_ preset: HUDLayout) -> HUDLayout {
+        var next = preset.normalized
+        for row in next.lines.indices {
+            for index in next.lines[row].indices {
+                next = next.settingSource(preferences.value.sourceID, at: .init(row: row, index: index))
+            }
+        }
+        return next.normalized
+    }
     private func resetAppearanceDefaults() {
         preferences.value.mode = .automatic
         preferences.value.maximumWidth = 220
         preferences.value.horizontalPosition = 0.5
-        preferences.value.hudOpacity = 0.985
-        preferences.value.panelOpacity = 0.985
+        preferences.value.hudOpacity = 0.90
+        preferences.value.panelOpacity = 0.90
+        preferences.value.cornerRadius = 10
         preferences.value.animation = .anchoredReveal
         notchDisplaySize.wrappedValue = .standard
         notchAdjustment.wrappedValue = 0
@@ -194,7 +228,7 @@ struct HUDLayoutEditorView: View {
 
     private func add(_ metric: HUDMetric) {
         if metric == .conditional { ruleDraft = .init() }
-        else { save(layout.inserting(metric, row: layout.lines.count - 1)) }
+        else { save(layout.inserting(metric, row: layout.lines.count - 1, sourceID: preferences.value.sourceID)) }
     }
     private func chipLabel(_ title: String, symbol: String) -> some View {
         Label(title, systemImage: symbol).font(.system(size: 11)).lineLimit(2)
@@ -211,7 +245,7 @@ struct HUDLayoutEditorView: View {
             .contextMenu {
                 if ![HUDMetric.space, .separatorDot, .hidden].contains(metric) {
                     Menu("绑定数据源") {
-                        Button("跟随默认数据源") { save(layout.settingSource(nil, at: p)) }
+                        Button("解除绑定（跟随当前数据源）") { save(layout.settingSource(nil, at: p)) }
                         Divider()
                         ForEach(bindableSources) { source in
                             Button(source.label) { save(layout.settingSource(source.id, at: p)) }
@@ -246,7 +280,7 @@ struct HUDLayoutEditorView: View {
         if metric == .conditional { ruleDraft = .init(); return true }
         // 调色板中的空格是新增项；从布局拖动的空格是移动现有项，两者不会相互误判。
         if row < layout.lines.count && layout.lines[row].count >= HUDLayout.maximumItemsPerLine && !layout.lines[row].contains(metric.rawValue) { return false }
-        var next = layout.inserting(metric, row: row)
+        var next = layout.inserting(metric, row: row, sourceID: preferences.value.sourceID)
         if let before, let last = next.lines[row].indices.last { next = next.moving(from: .init(row: row, index: last), toRow: row, before: before) }
         save(next); return true
     }

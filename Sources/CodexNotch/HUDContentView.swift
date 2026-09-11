@@ -186,7 +186,7 @@ struct ConfigurableHUDView: View {
         }
         .frame(height: menuBar ? MenuBarMetrics.height() : nil)
         .background(HUDGlassBackground(opacity: preferences.value.normalized.hudOpacity))
-        .clipShape(RoundedRectangle(cornerRadius: menuBar ? 5 : 14))
+        .clipShape(RoundedRectangle(cornerRadius: CGFloat(preferences.value.normalized.cornerRadius), style: .continuous))
         .preferredColorScheme(.dark)
     }
     @ViewBuilder private var forecastBadge: some View {
