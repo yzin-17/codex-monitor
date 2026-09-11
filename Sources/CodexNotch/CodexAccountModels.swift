@@ -22,6 +22,8 @@ struct CodexAccountUsage: Equatable, Sendable {
     var quotas: [AccountQuota] = []
     var plan: String?
     var credits: String?
+    /// 额度接口实际返回的工作区身份；接口未返回时保持 nil，不用配置值冒充。
+    var returnedWorkspaceID: String? = nil
     var capturedAt = Date()
 }
 enum CodexAccountError: Error, LocalizedError, Sendable, Equatable {
@@ -84,9 +86,12 @@ enum CodexAccountUsageParser {
     static func parse(_ data: Data, workspaceID: String = "", now: Date = Date()) throws -> CodexAccountUsage {
         guard data.count <= maximumBytes else { throw CodexAccountError.tooLarge }
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw CodexAccountError.invalidResponse }
-        if !workspaceID.isEmpty, let returned = root["account_id"] as? String ?? root["chatgpt_account_id"] as? String,
-           returned != workspaceID { throw CodexAccountError.accountMismatch }
-        var result = CodexAccountUsage(capturedAt: now)
+        let returnedWorkspaceID = (root["account_id"] as? String ?? root["chatgpt_account_id"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !workspaceID.isEmpty, let returnedWorkspaceID, !returnedWorkspaceID.isEmpty,
+           returnedWorkspaceID != workspaceID { throw CodexAccountError.accountMismatch }
+        var result = CodexAccountUsage(returnedWorkspaceID: returnedWorkspaceID?.isEmpty == false ? returnedWorkspaceID : nil,
+            capturedAt: now)
         func windows(_ limits: [String: Any], prefix: String = "", title: String = "") -> [AccountQuota] {
             [("primary_window", "5h"), ("secondary_window", "7d")].compactMap { key, fallback in
                 guard let item = limits[key] as? [String: Any], let used = number(item["used_percent"]), (0...100).contains(used) else { return nil }

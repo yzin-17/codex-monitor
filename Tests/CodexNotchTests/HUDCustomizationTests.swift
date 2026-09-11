@@ -37,6 +37,15 @@ import Testing
     #expect(c.layout(for: "gateway") == .costs)
     #expect(c.layout(for: "codex") == .compact)
 }
+@Test func hudSupportsExplicitFiveHourAndIndependentAccountLayouts() {
+    var data = HUDEntityData(primary: 46, primaryLabel: "5h", primaryWindow: .init(remaining: 46, label: "5h"), lanes: [.init(remaining: 46, label: "5h")])
+    #expect(data.display(.fiveHour, remaining: true).text == "5h 46%")
+    data.weekly = 20; data.weeklyWindow = .init(remaining: 20, label: "7d")
+    #expect(data.display(.automatic, remaining: true).label == "7d")
+    var c = HUDConfiguration(); c.providerLayouts["codex-account:one"] = .costs; c.providerLayouts["codex-account:two"] = .detailed
+    #expect(c.layout(for: "codex-account:one") == .costs)
+    #expect(c.layout(for: "codex-account:two") == .detailed)
+}
 @Test @MainActor func hudPreferencesRoundTripAndMigrateLegacySelection() throws {
     let suite = "hud-roundtrip-\(UUID())", defaults = try #require(UserDefaults(suiteName: suite))
     defer { defaults.removePersistentDomain(forName: suite) }
@@ -95,10 +104,12 @@ import Testing
 
 private func fixture(_ text: String) -> Data { Data(text.utf8) }
 private let validQuotaJSON = #"{"plan_type":"pro","rate_limit":{"primary_window":{"used_percent":54,"limit_window_seconds":18000,"reset_at":1800000000},"secondary_window":{"used_percent":21,"limit_window_seconds":604800}},"credits":{"balance":9}}"#
-@Test func codexParserKeepsQuotaCreditsAndPlanSeparate() throws {
-    let value = try CodexAccountUsageParser.parse(fixture(validQuotaJSON))
+@Test func codexParserKeepsQuotaCreditsPlanAndReturnedIdentitySeparate() throws {
+    let data = fixture(#"{"account_id":"work-1","plan_type":"pro","rate_limit":{"primary_window":{"used_percent":54,"limit_window_seconds":18000,"reset_at":1800000000},"secondary_window":{"used_percent":21,"limit_window_seconds":604800}},"credits":{"balance":9}}"#)
+    let value = try CodexAccountUsageParser.parse(data, workspaceID: "work-1")
     #expect(value.quotas.map(\.remainingPercent) == [46,79])
     #expect(value.plan == "pro" && value.credits == "9.00 credits")
+    #expect(value.returnedWorkspaceID == "work-1")
 }
 @Test func codexParserRejectsWrongAccountAndEmptySuccess() {
     #expect(throws: CodexAccountError.accountMismatch) {

@@ -12,7 +12,7 @@ struct PublicInsightCard: View {
                     .toggleStyle(.switch).controlSize(.mini).fixedSize()
             }
             if !store.enabled.contains(source) {
-                Text("启用后每 5 分钟读取此公开网站，不发送账号凭据或本地会话数据。")
+                Text(source == .openAIStatus ? "启用后每 5 分钟读取官方公开状态，不发送账号凭据或本地会话数据。" : "启用后每 30 分钟读取此公开预测，不发送账号凭据或本地会话数据。")
                     .font(.system(size: 11)).foregroundStyle(MonitorTheme.textSecondary)
             } else if let snapshot = store.snapshots[source] {
                 TimelineView(.periodic(from: .now, by: 60)) { context in
@@ -59,20 +59,25 @@ struct PublicInsightCard: View {
             }
             Text(snapshot.summary).font(.system(size: 11)).foregroundStyle(MonitorTheme.textSecondary).fixedSize(horizontal: false, vertical: true)
             if let announcement = snapshot.announcement { Text(announcement).font(.system(size: 11)).foregroundStyle(MonitorTheme.warning) }
+            if source == .observatory, let text = snapshot.latestTiboText {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Tibo 最新动态").font(.system(size: 10, weight: .semibold)).foregroundStyle(MonitorTheme.textPrimary)
+                    Text(text).font(.system(size: 10)).foregroundStyle(MonitorTheme.textSecondary).lineLimit(3)
+                    HStack {
+                        if let date = snapshot.latestTiboAt { Text(date.formatted(date: .abbreviated, time: .shortened)) }
+                        Spacer()
+                        if let url = snapshot.latestTiboURL { Link("查看原帖 ↗", destination: url) }
+                    }.font(.system(size: 9.5)).foregroundStyle(MonitorTheme.textTertiary)
+                }.padding(8).background(MonitorTheme.sectionFill.opacity(0.65), in: RoundedRectangle(cornerRadius: 8))
+            }
             if let reset = snapshot.lastResetAt { Text("该站记录上次事件：\(reset.formatted(date: .abbreviated, time: .shortened))").font(.system(size: 10)).foregroundStyle(MonitorTheme.textTertiary) }
         } else {
             HStack(spacing: 6) {
                 Circle().fill(snapshot.overallIndicator == "none" ? MonitorTheme.healthy : MonitorTheme.warning).frame(width: 6, height: 6)
                 Text("OpenAI 总体：\(snapshot.summary)").font(.system(size: 11)).foregroundStyle(MonitorTheme.textPrimary)
             }
-            ForEach(snapshot.components) { component in
-                HStack {
-                    Text(component.name).foregroundStyle(MonitorTheme.textSecondary)
-                    Spacer()
-                    Text(component.label).foregroundStyle(component.affected ? MonitorTheme.warning : MonitorTheme.healthy)
-                }.font(.system(size: 11))
-            }
-            if snapshot.components.isEmpty { Text("本次响应没有可识别的 Codex 组件，不推断其状态。").font(.system(size: 10)).foregroundStyle(MonitorTheme.warning) }
+            statusComponents(snapshot.components)
+            if snapshot.components.isEmpty { Text("本次响应没有组件状态。").font(.system(size: 10)).foregroundStyle(MonitorTheme.warning) }
             ForEach(Array(snapshot.incidents.enumerated()), id: \.offset) { _, text in
                 Text("官方事件：\(text)").font(.system(size: 10)).foregroundStyle(MonitorTheme.warning)
             }
@@ -85,6 +90,29 @@ struct PublicInsightCard: View {
             Text("\(snapshot.isForecast ? "来源生成" : "官方状态变更")：\(updated.formatted(date: .abbreviated, time: .shortened))")
                 .font(.system(size: 10)).foregroundStyle(MonitorTheme.textTertiary)
         }
+    }
+    @ViewBuilder private func statusComponents(_ components: [PublicStatusComponent]) -> some View {
+        let groups = components.filter { $0.isGroup == true }.sorted { ($0.position ?? 999) < ($1.position ?? 999) }
+        let groupedIDs = Set(groups.map(\.id))
+        let ungrouped = components.filter { $0.isGroup != true && ($0.groupID == nil || !groupedIDs.contains($0.groupID!)) }
+            .sorted { ($0.position ?? 999) < ($1.position ?? 999) }
+        ForEach(ungrouped) { component in statusRow(component) }
+        ForEach(groups) { group in
+            let children = components.filter { $0.groupID == group.id && $0.isGroup != true }
+                .sorted { ($0.position ?? 999) < ($1.position ?? 999) }
+            DisclosureGroup {
+                VStack(spacing: 5) { ForEach(children) { child in statusRow(child) } }
+                    .padding(.leading, 14).padding(.top, 4)
+            } label: { statusRow(group) }
+        }
+    }
+    private func statusRow(_ component: PublicStatusComponent) -> some View {
+        HStack {
+            Circle().fill(component.affected ? MonitorTheme.warning : MonitorTheme.healthy).frame(width: 6, height: 6)
+            Text(component.name).foregroundStyle(MonitorTheme.textSecondary).lineLimit(1)
+            Spacer()
+            Text(component.label).foregroundStyle(component.affected ? MonitorTheme.warning : MonitorTheme.healthy)
+        }.font(.system(size: 11))
     }
 }
 struct ResetPredictionPanel: View {

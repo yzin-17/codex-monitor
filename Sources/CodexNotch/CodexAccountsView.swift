@@ -27,14 +27,14 @@ struct CodexAccountsSettingsView: View {
             ForEach(store.accounts) { account in
                 HStack {
                     Toggle(account.label, isOn: Binding(get: { account.enabled }, set: { store.setEnabled($0, id: account.id) }))
-                    if account.verifiedAt != nil { Text("已验证读取权限").font(.caption).foregroundStyle(.secondary) }
+                    if account.verifiedAt != nil { Text("官方额度接口").font(.caption).foregroundStyle(.secondary) }
                     Button("重新验证") { store.refresh(id: account.id, interactive: true) }
                         .disabled(!store.monitoringEnabled || !account.enabled)
                     Button("编辑") { draft = account; token = ""; error = nil; editing = true }
                     Button("删除", role: .destructive) { deleting = account }
                 }
             }
-            Button("添加 Codex 账号 · 网页授权", action: beginAdding)
+            Button("添加 Codex 账号", action: beginAdding)
             if let error = store.lastError { Text(error).font(.caption).foregroundStyle(.red) }
         }
         .onChange(of: addRequest, initial: true) { _, request in
@@ -204,7 +204,16 @@ struct CodexAccountsPanel: View {
                     }
                 }
                 if let credits = usage.credits { Text("Credits：\(credits)").monospacedDigit() }
-                Text("读取于 \(usage.capturedAt.formatted(date: .abbreviated, time: .shortened))").font(.system(size: 10)).foregroundStyle(.secondary)
+                Text("数据源：Codex 官方额度接口 · 读取于 \(usage.capturedAt.formatted(date: .abbreviated, time: .shortened))")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+                if let returned = usage.returnedWorkspaceID {
+                    Text("接口返回工作区：\(returned)").font(.system(size: 10)).foregroundStyle(.secondary)
+                } else {
+                    Text("接口未返回工作区身份").font(.system(size: 10)).foregroundStyle(.secondary)
+                }
+                if !account.workspaceID.isEmpty {
+                    Text("请求工作区：\(account.workspaceID) · 非本地日志").font(.system(size: 10)).foregroundStyle(.secondary)
+                }
             } else if let error = state?.error { Text(error).foregroundStyle(.orange).font(.caption) }
             else { Text(account.enabled && store.monitoringEnabled ? "等待读取" : "未读取").foregroundStyle(.secondary) }
         }.font(.system(size: 11)).padding(12)

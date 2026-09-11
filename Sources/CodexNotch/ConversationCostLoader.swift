@@ -69,7 +69,8 @@ final class ConversationCostLoader: @unchecked Sendable {
         var agents: [AgentCostDetail] = []
         var skillRows: [String: SkillTurnCost] = [:]
         var pending = false
-        for (agentID, depth) in participants {
+        for (index, participant) in participants.enumerated() {
+            let (agentID, depth) = participant
             try checkCancellation(shouldCancel)
             guard let node = nodes[agentID] else {
                 agents.append(.init(id: agentID, parentID: nil, depth: depth, model: "模型未知",
@@ -79,9 +80,20 @@ final class ConversationCostLoader: @unchecked Sendable {
             }
             var state = progress[agentID] ?? Progress(accumulator: .init(isChild: depth > 0, skillsEnabled: includeSkills))
             if remaining > 0 && ProcessInfo.processInfo.systemUptime < deadline {
-                do { try scan(node, state: &state, deadline: deadline, remaining: &remaining, shouldCancel: shouldCancel) }
+                // 为尚未扫描的每个代理预留自己的 I/O 与时间片，避免超大的主代理日志
+                // 把整轮预算耗尽，导致子代理长期停留在“模型未知”。未用完的预算会自然
+                // 留给后续代理，下一次“继续扫描”再从各自游标续读。
+                let agentsLeft = max(1, participants.count - index)
+                let minimumSlice: UInt64 = 256 * 1024
+                let byteSlice = min(remaining, max(minimumSlice, remaining / UInt64(agentsLeft)))
+                var localRemaining = byteSlice
+                let now = ProcessInfo.processInfo.systemUptime
+                let timeSlice = max(0.05, (deadline - now) / Double(agentsLeft))
+                let localDeadline = min(deadline, now + timeSlice)
+                do { try scan(node, state: &state, deadline: localDeadline, remaining: &localRemaining, shouldCancel: shouldCancel) }
                 catch is CancellationError { throw CancellationError() }
                 catch { state.complete = false; warnings.insert("部分日志读取失败，当前金额仅包含已读取记录。") }
+                remaining -= min(remaining, byteSlice - localRemaining)
             }
             progress[agentID] = state
             pending = pending || !state.complete
@@ -233,7 +245,16 @@ final class ConversationCostLoader: @unchecked Sendable {
             }
             return
         }
-        if type == "session_meta" { state.cwd = payload["cwd"] as? String; return }
+        if type == "session_meta" {
+            state.cwd = payload["cwd"] as? String
+            // 某些 Codex 版本会把实际模型直接写进子代理 session_meta。只接受明确字段，
+            // 不从父代理、文件名或角色猜测模型。
+            if let model = (payload["model"] as? String) ?? (payload["model_name"] as? String),
+               !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                state.accumulator.setModel(model)
+            }
+            return
+        }
         if type == "turn_context" {
             state.cwd = payload["cwd"] as? String ?? state.cwd
             let line = String(decoding: data, as: UTF8.self)

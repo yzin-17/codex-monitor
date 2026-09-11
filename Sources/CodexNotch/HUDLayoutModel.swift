@@ -16,7 +16,7 @@ enum MonitorPanelAnimation: String, Codable, CaseIterable, Identifiable, Sendabl
 }
 enum HUDMetric: String, Codable, CaseIterable, Identifiable, Sendable {
     case icon, provider, account, state // state 仅用于旧配置迁移，运行状态不属于自定义区域。
-    case primary, weekly, scopedWeekly, automatic, primaryLane, secondaryLane, tertiaryLane
+    case fiveHour, primary, weekly, scopedWeekly, automatic, primaryLane, secondaryLane, tertiaryLane
     case primaryPace, weeklyPace, scopedPace, automaticPace, usageBar, tokensToday
     case resetCountdown, resetTime, primaryCountdown, weeklyCountdown, scopedCountdown
     case primaryResetTime, weeklyResetTime, scopedResetTime, runsOut, runsOutCompact
@@ -27,7 +27,7 @@ enum HUDMetric: String, Codable, CaseIterable, Identifiable, Sendable {
     var title: String {
         switch self {
         case .icon: "图标"; case .provider: "来源名称"; case .account: "账户"; case .state: "运行状态（固定）"
-        case .primary: "会话 %"; case .weekly: "每周 %"; case .scopedWeekly: "范围每周 %"; case .automatic: "自动 %"
+        case .fiveHour: "5 小时额度 %"; case .primary: "会话 %"; case .weekly: "每周 %"; case .scopedWeekly: "范围每周 %"; case .automatic: "自动 %"
         case .primaryLane: "第一额度 %"; case .secondaryLane: "第二额度 %"; case .tertiaryLane: "第三额度 %"
         case .primaryPace: "会话节奏"; case .weeklyPace: "每周节奏"; case .scopedPace: "范围每周节奏"; case .automaticPace: "自动节奏"
         case .usageBar: "用量条"; case .tokensToday: "今日 Token"
@@ -42,7 +42,7 @@ enum HUDMetric: String, Codable, CaseIterable, Identifiable, Sendable {
     var group: String {
         switch self {
         case .icon, .provider, .account, .state: "身份"
-        case .primary, .weekly, .scopedWeekly, .automatic, .primaryLane, .secondaryLane, .tertiaryLane,
+        case .fiveHour, .primary, .weekly, .scopedWeekly, .automatic, .primaryLane, .secondaryLane, .tertiaryLane,
              .primaryPace, .weeklyPace, .scopedPace, .automaticPace, .usageBar, .tokensToday: "用量"
         case .balance, .costToday, .cost30d: "费用"
         case .separatorDot, .space, .hidden: "布局"
@@ -63,7 +63,7 @@ enum HUDMetric: String, Codable, CaseIterable, Identifiable, Sendable {
         default: "percent"
         }
     }
-    var isQuota: Bool { [.primary, .weekly, .scopedWeekly, .automatic, .primaryLane, .secondaryLane, .tertiaryLane, .usageBar].contains(self) }
+    var isQuota: Bool { [.fiveHour, .primary, .weekly, .scopedWeekly, .automatic, .primaryLane, .secondaryLane, .tertiaryLane, .usageBar].contains(self) }
     var isPace: Bool { [.primaryPace, .weeklyPace, .scopedPace, .automaticPace].contains(self) }
     var isCountdown: Bool { [.resetCountdown, .primaryCountdown, .weeklyCountdown, .scopedCountdown].contains(self) }
     var isAbsoluteReset: Bool { [.resetTime, .primaryResetTime, .weeklyResetTime, .scopedResetTime].contains(self) }

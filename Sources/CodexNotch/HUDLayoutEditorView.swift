@@ -94,7 +94,8 @@ struct HUDLayoutEditorView: View {
         Section {
             HStack {
                 Picker("布局作用域", selection: $scope) {
-                    Text("所有来源（默认）").tag("all"); Text("Codex").tag("codex")
+                    Text("所有来源（默认）").tag("all"); Text("Codex 默认").tag("codex")
+                    ForEach(accounts.accounts) { account in Text("Codex · \(account.label)").tag(account.hudID) }
                     Text("网关账户").tag("gateway"); Text("NewAPI").tag("newapi:"); Text("Sub2API").tag("subapi:")
                 }
                 Menu("使用预设") {
@@ -104,7 +105,7 @@ struct HUDLayoutEditorView: View {
                     if scope != "all" { Button("恢复跟随默认") { preferences.value.providerLayouts[scope] = nil } }
                 }
             }
-            Text("左侧为固定区域，不参与拖动。下面只编辑右侧，每行最多 12 个控件、最多 2 行；空格和分隔点可以重复添加。")
+            Text("左侧为固定区域，不参与拖动。可为每个 Codex 账号保存独立布局；右侧每行最多 12 个控件、最多 2 行，空格和分隔点可以重复添加。")
                 .font(.caption).foregroundStyle(.secondary)
             preview
             ForEach(Array(layout.lines.enumerated()), id: \.offset) { row, values in

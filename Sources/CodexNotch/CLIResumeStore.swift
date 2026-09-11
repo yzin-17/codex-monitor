@@ -80,6 +80,14 @@ final class CLIResumeStore: ObservableObject {
         tickets = next; prepared[id] = nil; notes[id] = check.quotaPaused ? "已开启：等待同一账号的官方额度恢复。" : "已开启：仅在此对话因官方额度不足停止后开始等待恢复。"
         schedule()
     }
+    func updateMessage(_ id: String, message: String) throws {
+        guard var ticket = tickets[id], ![CLIResumeTicket.Phase.dispatching, .finished].contains(ticket.phase) else { throw CLIResumeError.busy }
+        ticket.message = try CLIResumePolicy.message(message)
+        var next = tickets; next[id] = ticket
+        try persist(next, handled: handled)
+        tickets = next; notes[id] = "续跑提示词已更新；账号、权限和等待事件未改变。"
+    }
+
     func cancel(_ id: String) {
         tasks[id]?.cancel(); prepared[id] = nil
         if var ticket = tickets[id] {

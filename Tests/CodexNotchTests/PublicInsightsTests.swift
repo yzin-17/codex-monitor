@@ -14,14 +14,14 @@ private var insightISO: String { ISO8601DateFormatter().string(from: insightNow)
     }
     #expect(PublicInsightSource.willReset.website.absoluteString == "https://www.willcodexquotareset.com/")
 }
-@Test func officialStatusFiltersCodexComponentsWithoutInventingIndividualAvailability() throws {
+@Test func officialStatusKeepsFullComponentTreeWithoutInventingIndividualAvailability() throws {
     let data = try publicJSON(["status": ["indicator": "minor", "description": "Partial degradation"],
         "page": ["updated_at": "2020-01-01T00:00:00Z"], "components": [
             ["id":"codex", "name":"Codex API", "status":"operational"],
             ["id":"images", "name":"Images", "status":"major_outage"],
             ["id":"login", "name":"Login", "status":"degraded_performance"]]])
     let value = try PublicInsightParser.parse(data, source: .openAIStatus, fetchedAt: insightNow)
-    #expect(value.components.count == 2)
+    #expect(value.components.count == 3)
     #expect(value.components[0].label == "正常")
     #expect(value.overallIndicator == "minor")
     #expect(!value.isStale(now: insightNow)) // 状态最后变更时间较早不等于本次读取失败。
@@ -57,10 +57,38 @@ private var insightISO: String { ISO8601DateFormatter().string(from: insightNow)
     let partial = try publicJSON(["fetchedAt": insightISO, "sourceErrors": ["status":"unavailable"], "forecast": ["horizonHours":48, "score":23]])
     #expect(try PublicInsightParser.parse(partial, source: .willReset, fetchedAt: insightNow).upstreamStale)
 }
-@Test func publicCacheFutureOrAgedSnapshotIsStale() {
-    let value = PublicInsightSnapshot(source: .willReset, fetchedAt: insightNow, summary: "test")
-    #expect(value.isStale(now: insightNow.addingTimeInterval(901)))
-    #expect(value.isStale(now: insightNow.addingTimeInterval(-61)))
+@Test func publicCacheUsesPerSourceRefreshWindowsAndRejectsFutureData() {
+    let forecast = PublicInsightSnapshot(source: .willReset, fetchedAt: insightNow, summary: "test")
+    #expect(!forecast.isStale(now: insightNow.addingTimeInterval(1801)))
+    #expect(forecast.isStale(now: insightNow.addingTimeInterval(5401)))
+    let status = PublicInsightSnapshot(source: .openAIStatus, fetchedAt: insightNow, summary: "test")
+    #expect(status.isStale(now: insightNow.addingTimeInterval(1501)))
+    #expect(forecast.isStale(now: insightNow.addingTimeInterval(-61)))
+    #expect(PublicInsightSource.openAIStatus.refreshInterval == 300)
+    #expect(PublicInsightSource.observatory.refreshInterval == 1800)
+    #expect(PublicInsightSource.willReset.refreshInterval == 1800)
+}
+
+
+@Test func observatoryKeepsTrustedTiboActivity() throws {
+    let data = try publicJSON(["checkedAt": insightISO, "viewModel": ["probability48h": 0.71],
+        "latestTiboActivity": ["text": "Codex reset update", "createdAt": insightISO,
+            "sourceUrl": "https://x.com/thsottiaux/status/123456789"]])
+    let value = try PublicInsightParser.parse(data, source: .observatory, fetchedAt: insightNow)
+    #expect(value.latestTiboText == "Codex reset update")
+    #expect(value.latestTiboURL?.host == "x.com")
+}
+@Test @MainActor func forecastAlertNeedsFreshEnabledProbabilityStrictlyAboveSeventy() async throws {
+    let suite = "public-alert-\(UUID())", defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let store = PublicInsightsStore(defaults: defaults, automatic: false, fetcher: { source in
+        PublicInsightSnapshot(source: source, fetchedAt: Date(), summary: "fixture", probabilities: [48: source == .observatory ? 71 : 70])
+    })
+    store.setEnabled(.observatory, true); store.setEnabled(.willReset, true)
+    let deadline = ProcessInfo.processInfo.systemUptime + 3
+    while store.snapshots.count < 2 && ProcessInfo.processInfo.systemUptime < deadline { try await Task.sleep(for: .milliseconds(20)) }
+    #expect(store.forecastAlert?.probability == 71)
+    store.stop()
 }
 
 @Test @MainActor func publicSourcesDefaultOffAndRemainIndependent() async throws {

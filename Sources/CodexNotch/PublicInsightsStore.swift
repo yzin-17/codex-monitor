@@ -83,17 +83,28 @@ final class PublicInsightsStore: ObservableObject {
     }
     func refreshPredictions() { for source in [PublicInsightSource.observatory, .willReset] { refresh(source) } }
     func refreshIfNeeded() {
-        for source in enabled where snapshots[source].map({ Date().timeIntervalSince($0.fetchedAt) >= 300 }) ?? true { refresh(source) }
+        let now = Date()
+        for source in enabled where snapshots[source].map({ now.timeIntervalSince($0.fetchedAt) >= source.refreshInterval }) ?? true { refresh(source) }
     }
     func stop() { timer?.invalidate(); timer = nil; for task in tasks.values { task.cancel() }; tasks.removeAll(); refreshing.removeAll() }
     private func schedule() {
         timer?.invalidate(); timer = nil
         guard automatic, !enabled.isEmpty else { return }
         refreshIfNeeded()
-        timer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
+        let interval = enabled.map(\.refreshInterval).min() ?? 1800
+        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refreshIfNeeded() }
         }
     }
+    var forecastAlert: (source: PublicInsightSource, probability: Double)? {
+        let now = Date()
+        return [PublicInsightSource.observatory, .willReset].compactMap { source -> (PublicInsightSource, Double)? in
+            guard enabled.contains(source), errors[source] == nil, let snapshot = snapshots[source], !snapshot.isStale(now: now),
+                  let highest = snapshot.probabilities.values.max(), highest > 70 else { return nil }
+            return (source, highest)
+        }.max { $0.1 < $1.1 }
+    }
+
     func installPreview(_ values: [PublicInsightSnapshot]) {
         guard !automatic else { return }
         enabled = Set(values.map(\.source)); snapshots = Dictionary(uniqueKeysWithValues: values.map { ($0.source, $0) })
