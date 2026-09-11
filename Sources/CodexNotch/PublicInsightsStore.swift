@@ -87,9 +87,11 @@ final class PublicInsightsStore: ObservableObject {
         self.fetcher = fetcher ?? { try await PublicInsightsClient().fetch($0) }
 
         if defaults.object(forKey: "publicInsights.enabled.v1") == nil {
-            // 服务状态是性能页的基础诊断信息，默认开启；社区预测仍保持用户显式启用。
-            enabled = [.openAIStatus]
-            defaults.set([PublicInsightSource.openAIStatus.rawValue], forKey: "publicInsights.enabled.v1")
+            // 正常 App 启动时默认启用服务状态；automatic=false 的隔离测试/预览仍保持无网络默认值。
+            enabled = automatic ? [.openAIStatus] : []
+            if automatic {
+                defaults.set([PublicInsightSource.openAIStatus.rawValue], forKey: "publicInsights.enabled.v1")
+            }
         } else {
             enabled = Set((defaults.stringArray(forKey: "publicInsights.enabled.v1") ?? [])
                 .compactMap(PublicInsightSource.init(rawValue:)))
@@ -101,7 +103,6 @@ final class PublicInsightsStore: ObservableObject {
             for item in cache { snapshots[item.source] = item }
         }
 
-        // 只有已启用的公共来源才轮询。预览和测试不启动网络。
         if automatic { schedule() }
     }
 
