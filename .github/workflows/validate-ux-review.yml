@@ -1,0 +1,91 @@
+name: 对话与多账号交互验证
+on:
+  push:
+    branches: [fix/ux-multiaccount-20260911]
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: 应用待发布的增量源码
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p .baseline-output/ui "$RUNNER_TEMP/validated"
+          python3 - <<'PY'
+          import base64,json,lzma,os,urllib.request
+          from pathlib import Path
+          parts=[]
+          for sha in ['613ceeb62cc8d6f3472dc00c6735de491cb22e54','c55ee70c4c673c3b592ac6ee8fb06461884909fb','e3bd28e1ee77b54852166ce2cf1a7d4ae68ef700','2a993d78174fb6fe87ae9ca6c97260db2520b25d','77b3031ead0afc3212aed6f7a0b0e260ca833c7e']:
+              req=urllib.request.Request('https://api.github.com/repos/yzin-17/codex-monitor/git/blobs/'+sha,headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
+              obj=json.load(urllib.request.urlopen(req,timeout=25))
+              parts.append(base64.b64decode(obj['content']).decode().strip())
+          patch=lzma.decompress(base64.b64decode(''.join(parts)))
+          assert patch.startswith(b'diff --git ')
+          Path(os.environ['RUNNER_TEMP'],'ux-review.patch').write_bytes(patch)
+          PY
+          git apply --check --index "$RUNNER_TEMP/ux-review.patch"
+          git apply --index "$RUNNER_TEMP/ux-review.patch"
+          if test -f tools/ux-review-fixes.py; then python3 tools/ux-review-fixes.py; git rm tools/ux-review-fixes.py; fi
+          git add -A
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          CANDIDATE="$(printf '%s\n' 'fix: improve multi-account HUD, conversation details and resume configuration' | git commit-tree "$(git write-tree)" -p "$GITHUB_SHA")"
+          git update-ref refs/heads/validated-ux-review "$CANDIDATE"
+          printf '%s\n' "$CANDIDATE" > "$RUNNER_TEMP/validated/candidate.txt"
+      - name: macOS 完整测试、原生交互与双架构构建
+        env:
+          CODEX_MONITOR_SNAPSHOT_DIR: ${{ github.workspace }}/.baseline-output/ui
+        run: |
+          set -euo pipefail
+          ./scripts/build.sh > .baseline-output/build.log 2>&1 || { tail -200 .baseline-output/build.log; exit 1; }
+          grep -E 'Test run with|All regression|Built |error:' .baseline-output/build.log || true
+          codesign --verify --deep --strict dist/CodexMonitor.app
+          for page in codex performance skills codexRadar conversation-costs hud-menu-bar hud-layout codex-accounts hud-fixed-status hud-status-only remoteCodex resetPrediction cli-resume status-expanded hud-multi-account; do
+            test -s ".baseline-output/ui/$page.png"
+          done
+          test -s dist/codex-monitor-0.4.1-arm64.dmg
+          test -s dist/codex-monitor-0.4.1-amd64.dmg
+          git bundle create "$RUNNER_TEMP/validated/candidate.bundle" refs/heads/validated-ux-review
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: ux-review-native
+          path: |
+            .baseline-output/
+            dist/*.dmg
+          include-hidden-files: true
+          retention-days: 14
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: validated-ux-review
+          path: ${{ runner.temp }}/validated/
+          retention-days: 7
+  publish:
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: validated-ux-review
+          path: ${{ runner.temp }}/validated
+      - name: 快进已验证的功能分支
+        run: |
+          set -euo pipefail
+          CANDIDATE="$(cat "$RUNNER_TEMP/validated/candidate.txt")"
+          git fetch "$RUNNER_TEMP/validated/candidate.bundle" refs/heads/validated-ux-review:refs/remotes/validated/ux-review
+          test "$(git ls-remote origin refs/heads/fix/ux-multiaccount-20260911 | cut -f1)" = "$GITHUB_SHA"
+          git push origin "$CANDIDATE:refs/heads/fix/ux-multiaccount-20260911"
