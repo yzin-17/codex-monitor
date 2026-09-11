@@ -51,6 +51,7 @@ extension HUDEntityData {
             d.state = state?.isRefreshing == true ? "…" : state?.error != nil ? "!" : state?.usage == nil ? "—" : "OK"
             d.warning = state?.error
             if let s = state?.usage {
+                d.planType = s.plan
                 d.primary = s.quotas.first(where: { $0.id == "primary_window" })?.remainingPercent
                 d.primaryLabel = s.quotas.first(where: { $0.id == "primary_window" })?.label ?? "会话"
                 d.weekly = s.quotas.first(where: { $0.label == "7d" })?.remainingPercent
