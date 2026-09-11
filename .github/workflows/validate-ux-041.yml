@@ -28,8 +28,7 @@ jobs:
               req=urllib.request.Request('https://api.github.com/repos/yzin-17/codex-monitor/git/blobs/'+sha,headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
               obj=json.load(urllib.request.urlopen(req,timeout=30))
               chunks.append(base64.b64decode(obj['content']).decode().strip())
-          encoded=''.join(chunks)
-          patch=lzma.decompress(base64.b64decode(encoded))
+          patch=lzma.decompress(base64.b64decode(''.join(chunks)))
           assert patch.startswith(b'diff --git ')
           Path(os.environ['RUNNER_TEMP'],'ux-041.patch').write_bytes(patch)
           print('patch bytes',len(patch))
@@ -39,10 +38,8 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           p=Path('Sources/CodexNotch/AppDelegate.swift')
-          s=p.read_text()
-          needle='final class NotchOverlayController {'
-          if '@MainActor\n'+needle not in s:
-              s=s.replace(needle,'@MainActor\n'+needle,1)
+          s=p.read_text(); needle='final class NotchOverlayController {'
+          if '@MainActor\n'+needle not in s: s=s.replace(needle,'@MainActor\n'+needle,1)
           p.write_text(s)
           p=Path('Sources/CodexNotch/HUDDisplayData.swift')
           s=p.read_text()
@@ -55,6 +52,12 @@ jobs:
               'default: automaticWindow ?? .init(remaining: automatic, resetsAt: resetsAt, label: "自动")':'default: return automaticWindow ?? .init(remaining: automatic, resetsAt: resetsAt, label: "自动")',
           }
           for a,b in replacements.items(): s=s.replace(a,b)
+          p.write_text(s)
+          p=Path('Tests/CodexNotchTests/PublicInsightsTests.swift')
+          s=p.read_text().replace('@Test @MainActor func forecastAlertNeedsFreshEnabledProbabilityStrictlyAboveSeventy() throws {','@Test @MainActor func forecastAlertNeedsFreshEnabledProbabilityStrictlyAboveSeventy() async throws {')
+          p.write_text(s)
+          p=Path('Tests/CodexNotchTests/ReferenceExtensionTests.swift')
+          s=p.read_text().replace('remote: remote, newAPI: newAPI, subAPI: subAPI, settings: settings, menuBar: true)','remote: remote, newAPI: newAPI, subAPI: subAPI, settings: settings, publicInsights: usage.publicInsights, menuBar: true)')
           p.write_text(s)
           PY
           git add -A
