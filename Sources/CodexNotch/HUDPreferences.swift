@@ -136,6 +136,7 @@ struct HUDConfiguration: Codable, Equatable, Sendable {
         copy.hudOpacity = hudOpacity.isFinite ? min(1, max(0, hudOpacity)) : 0.90
         copy.panelOpacity = panelOpacity.isFinite ? min(1, max(0.35, panelOpacity)) : 0.90
         copy.hudCornerRadius = cornerRadius
+        copy.layout = layout.normalized
         copy.providerLayouts = providerLayouts.mapValues(\.normalized)
         if copy.sourceID.count > 150 { copy.sourceID = "local" }
 
@@ -152,13 +153,13 @@ struct HUDConfiguration: Codable, Equatable, Sendable {
         if !copy.layoutProfiles.contains(where: { $0.id == copy.activeLayoutID }) {
             copy.activeLayoutID = copy.layoutProfiles[0].id
         }
-        // 继续写 legacy layout，方便旧版读取；新代码只读 activeLayout。
-        copy.layout = copy.activeProfile.layout
         return copy
     }
 
-    /// 兼容旧调用：来源不再参与布局选择。
-    func layout(for _: String) -> HUDLayout { activeLayout }
+    /// 旧调用继续保持兼容；新 HUD 运行时直接使用 activeLayout，不再按来源自动换布局。
+    func layout(for provider: String) -> HUDLayout {
+        (providerLayouts[provider] ?? activeLayout).normalized
+    }
 
     mutating func selectLayout(_ id: String) {
         guard layoutProfiles.contains(where: { $0.id == id }) else { return }
