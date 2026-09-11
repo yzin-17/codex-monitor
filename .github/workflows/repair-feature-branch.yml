@@ -1,0 +1,54 @@
+name: Repair feature branch
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  repair:
+    if: github.event.head_commit.message == 'chore: repair feature branch compile issue'
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: fix/hud-layout-status-titles
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Repair, restore workflow, and validate compile
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('Sources/CodexNotch/CodexUsageStore.swift')
+          s=p.read_text()
+          old='''    private func repairedSessionTitle(indexed: String?, fallback: String?, path: String) -> String? {
+        let selected = indexed?.trimmingCharacters(in: .whitespacesAndNewlines)
+            .flatMap { $0.isEmpty ? nil : $0 }
+            ?? fallback?.trimmingCharacters(in: .whitespacesAndNewlines)
+                .flatMap { $0.isEmpty ? nil : $0 }
+        guard !path.isEmpty else { return selected }
+'''
+          new='''    private func repairedSessionTitle(indexed: String?, fallback: String?, path: String) -> String? {
+        func nonEmpty(_ value: String?) -> String? {
+            guard let value else { return nil }
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        let selected = nonEmpty(indexed) ?? nonEmpty(fallback)
+        guard !path.isEmpty else { return selected }
+'''
+          if s.count(old) != 1:
+              raise SystemExit(f'expected one helper match, got {s.count(old)}')
+          p.write_text(s.replace(old,new,1))
+          PY
+          git fetch origin main
+          git checkout origin/main -- .github/workflows/ci.yml
+          rm -f .github/workflows/apply-title-compile-fix.yml .github/workflows/apply-ui-polish.yml
+          git config user.name yzin
+          git config user.email 30586807+yzin-17@users.noreply.github.com
+          git add -A
+          git diff --cached --check
+          git commit -m 'fix: normalize optional titles safely'
+          git push origin HEAD:fix/hud-layout-status-titles
+          swift test -c release
