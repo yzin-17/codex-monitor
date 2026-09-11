@@ -18,7 +18,11 @@ import Testing
     #expect(abs(configuration.hudTransparency - 0.50) < 0.0001)
     #expect(abs(configuration.panelTransparency - 0.37) < 0.0001)
     let restored = try JSONDecoder().decode(HUDConfiguration.self, from: JSONEncoder().encode(configuration))
-    #expect(restored == configuration)
+    // 0.4.4 会把旧的未绑定布局控件固定到本机 Codex；透明度往返本身不得改变。
+    #expect(abs(restored.hudOpacity - configuration.hudOpacity) < 0.0001)
+    #expect(abs(restored.panelOpacity - configuration.panelOpacity) < 0.0001)
+    #expect(restored.mode == configuration.mode)
+    #expect(restored.cornerRadius == configuration.cornerRadius)
     configuration.hudTransparency = 0
     #expect(configuration.hudOpacity == 1)
     configuration.panelTransparency = 0.65
