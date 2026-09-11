@@ -137,6 +137,12 @@ final class TopAnchoredClippingView: NSView {
 }
 
 @MainActor
+private final class InteractiveDetailPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+}
+
+@MainActor
 final class NotchOverlayController {
     func shutdownAutomation() async { await viewModel.shutdownExtensions() }
     private let settings = CodexNotchSettings(loadSecretsSynchronously: false)
@@ -160,7 +166,7 @@ final class NotchOverlayController {
     private var presentationScreen: NSScreen? { NSScreen.main ?? NSScreen.screens.first }
 
     private let window: NSPanel
-    private let detailWindow: NSPanel
+    private let detailWindow: InteractiveDetailPanel
     private var detailContentContainer: TopAnchoredClippingView?
     private lazy var settingsController = SettingsWindowController(
         settings: settings,
@@ -256,7 +262,7 @@ final class NotchOverlayController {
             backing: .buffered,
             defer: false
         )
-        detailWindow = NSPanel(
+        detailWindow = InteractiveDetailPanel(
             contentRect: NSRect(x: 0, y: 0, width: IslandMetrics.width, height: IslandMetrics.detailHeight),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
@@ -630,10 +636,12 @@ final class NotchOverlayController {
         let data = HUDEntityData.resolve(source: settings.hudPreferences.value.sourceID, usage: viewModel,
             remote: remoteViewModel, newAPI: newAPIViewModel, subAPI: subAPIViewModel,
             accounts: settings.codexAccounts, settings: settings)
-        let width = HUDMetricStrip.measuredWidth(layout: settings.hudPreferences.value.layout(for: data.providerID),
+        let layoutKey = settings.hudPreferences.value.providerLayouts[settings.hudPreferences.value.sourceID] != nil ? settings.hudPreferences.value.sourceID : data.providerID
+        let width = HUDMetricStrip.measuredWidth(layout: settings.hudPreferences.value.layout(for: layoutKey),
             data: data, remaining: settings.hudPreferences.value.showRemaining, menuBar: true)
+        let alertWidth: CGFloat = viewModel.publicInsights.forecastAlert == nil ? 0 : 66
         return FloatingHUDGeometry.frame(screen: screen.frame, menuBarHeight: MenuBarMetrics.height(for: screen),
-            contentSize: .init(width: width + 16 + 9 + HUDRuntimeStatus.reservedWidth, height: 20),
+            contentSize: .init(width: width + alertWidth + 16 + 9 + HUDRuntimeStatus.reservedWidth, height: 20),
             maximumWidth: settings.hudPreferences.value.normalized.maximumWidth,
             position: settings.hudPreferences.value.normalized.horizontalPosition)
     }
@@ -793,8 +801,10 @@ final class NotchOverlayController {
         let data = HUDEntityData.resolve(source: settings.hudPreferences.value.sourceID, usage: viewModel,
             remote: remoteViewModel, newAPI: newAPIViewModel, subAPI: subAPIViewModel,
             accounts: settings.codexAccounts, settings: settings)
-        let needed = HUDMetricStrip.measuredWidth(layout: settings.hudPreferences.value.layout(for: data.providerID),
+        let layoutKey = settings.hudPreferences.value.providerLayouts[settings.hudPreferences.value.sourceID] != nil ? settings.hudPreferences.value.sourceID : data.providerID
+        let needed = HUDMetricStrip.measuredWidth(layout: settings.hudPreferences.value.layout(for: layoutKey),
             data: data, remaining: settings.hudPreferences.value.showRemaining, menuBar: false) + 12
+            + (viewModel.publicInsights.forecastAlert == nil ? 0 : 66)
         let right = max(layout.shoulderWidth, min(settings.hudPreferences.value.normalized.maximumWidth, needed))
         // 物理刘海仍严格居中；只向右增加自定义区域，不挤占固定状态或改变遮挡区。
         return NSRect(x: screen.frame.midX - layout.notchWidth / 2 - layout.shoulderWidth,

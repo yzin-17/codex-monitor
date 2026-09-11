@@ -604,23 +604,8 @@ struct SettingsView: View {
     @ViewBuilder
     private var remoteCodexSettingsContent: some View {
         Section("远程账户 · 数据源") {
-            HStack {
-                Picker("查看来源类型", selection: $remoteCategory) {
-                    ForEach(RemoteSourceCategory.allCases) { Text($0.title).tag($0) }
-                }
-                Menu("添加数据源") {
-                    Button("Codex 官方账号 · 浏览器授权") { remoteCategory = .codex; codexAddRequest = UUID() }
-                    Divider()
-                    ForEach(RemoteCodexDataSource.allCases) { source in
-                        Button("\(source.label) · 管理端账号池") {
-                            remoteCategory = .gateway
-                            startAddingRemoteSource(source: source)
-                        }
-                    }
-                    Divider()
-                    Button("NewAPI · 用户余额（PAT）") { remoteCategory = .newAPI; startAddingAccount(source: .newAPI) }
-                    Button("Sub2API · 用户余额") { remoteCategory = .subAPI; startAddingAccount(source: .subAPI) }
-                }
+            Picker("查看来源类型", selection: $remoteCategory) {
+                ForEach(RemoteSourceCategory.allCases) { Text($0.title).tag($0) }
             }
             Text(remoteCategory.detail).font(.caption).foregroundStyle(.secondary)
             Text("统一入口不合并凭据和数值：各来源独立启停、认证、刷新。已有配置原位保留，无需重新输入密钥。新增网关/余额来源先保存配置，再按需启用监测。")

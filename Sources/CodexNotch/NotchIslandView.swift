@@ -72,7 +72,7 @@ struct NotchIslandView: View {
     var body: some View {
         ConfigurableHUDView(preferences: preferences, accounts: codexAccounts, usage: viewModel,
             remote: remoteViewModel, newAPI: newAPIViewModel, subAPI: subAPIViewModel,
-            settings: settings, menuBar: overlayState.usesCompactHUD,
+            settings: settings, publicInsights: viewModel.publicInsights, menuBar: overlayState.usesCompactHUD,
             notch: overlayState.usesCompactHUD ? nil : islandLayout)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle())
@@ -753,7 +753,14 @@ struct DetailPanelView: View {
         .frame(height: IslandMetrics.detailPageSwitcherHeight)
     }
 
-    private var availablePages: [DetailPage] { [.codex, .performance, .skills, .codexRadar, .resetPrediction, .remoteCodex] }
+    private var availablePages: [DetailPage] {
+        var pages: [DetailPage] = [.codex, .performance, .skills, .codexRadar, .resetPrediction]
+        if settings.remoteMonitorEnabled || settings.newAPIMonitorEnabled || settings.subAPIMonitorEnabled
+            || (codexAccounts.monitoringEnabled && !codexAccounts.accounts.isEmpty) {
+            pages.append(.remoteCodex)
+        }
+        return pages
+    }
 
     private var selectedPage: DetailPage {
         if detailPage == .newAPI || detailPage == .subAPI { return .remoteCodex }
@@ -858,6 +865,7 @@ struct DetailPanelView: View {
                                 makeLoader: { viewModel.makeConversationCostLoader() },
                                 preview: previewCosts[task.id],
                                 resumeStore: viewModel.cliResume,
+                                codexAccounts: codexAccounts.accounts,
                                 onToggle: { expandedTaskID = expandedTaskID == task.id ? nil : task.id })
                         }
 
@@ -1501,6 +1509,7 @@ private struct TaskRow: View {
     let makeLoader: () -> ConversationCostLoader?
     let preview: ConversationCostDetails?
     let resumeStore: CLIResumeStore
+    let codexAccounts: [CodexAccount]
     let onToggle: () -> Void
 
     var body: some View {
@@ -1514,7 +1523,8 @@ private struct TaskRow: View {
                             Text(task.title)
                                 .font(.system(size: 11, weight: .bold))
                                 .foregroundStyle(.white.opacity(0.92))
-                                .lineLimit(1).truncationMode(.tail)
+                                .lineLimit(isExpanded ? 3 : 2).truncationMode(.tail)
+                                .fixedSize(horizontal: false, vertical: true)
                             Spacer(minLength: 4)
                             Text(task.status.label)
                                 .font(.system(size: 10, weight: .bold)).foregroundStyle(statusColor)
@@ -1543,7 +1553,7 @@ private struct TaskRow: View {
                 ConversationCostExpansion(task: task, skillsEnabled: skillsEnabled,
                     makeLoader: makeLoader, preview: preview)
                     .id(task.id)
-                CLIResumeControl(threadID: task.id, store: resumeStore)
+                CLIResumeControl(threadID: task.id, store: resumeStore, knownAccounts: codexAccounts)
             }
         }
         .padding(.horizontal, 10).padding(.vertical, 8)
@@ -2064,6 +2074,13 @@ private struct TokenUsagePopover: View {
             VStack(spacing: 7) {
                 usageRow("输入（未缓存）", tokens: breakdown.uncachedInputTokens)
                 usageRow("缓存输入", tokens: breakdown.cachedInputTokens)
+                HStack {
+                    Text("缓存命中率").foregroundStyle(.secondary)
+                    Spacer()
+                    Text(cacheHitRateText)
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                }
                 usageRow("输出（含推理）", tokens: breakdown.outputTokens)
             }
 
@@ -2100,6 +2117,12 @@ private struct TokenUsagePopover: View {
         .background(Color(red: 0.055, green: 0.058, blue: 0.064))
         .onHover(perform: onHoverChanged)
         .preferredColorScheme(.dark)
+    }
+
+    private var cacheHitRateText: String {
+        guard summary.hasComponentData, breakdown.inputTokens > 0 else { return "—" }
+        let ratio = Double(breakdown.cachedInputTokens) / Double(breakdown.inputTokens) * 100
+        return String(format: "%.1f%%", min(100, max(0, ratio)))
     }
 
     private func usageRow(_ label: String, tokens: Int) -> some View {

@@ -262,7 +262,7 @@ private func referenceCatalog(at now: Date) throws -> SkillCatalogSnapshot {
     prefs.value.mode = .menuBar
     prefs.value.layout = .detailed
     let hud = ConfigurableHUDView(preferences: prefs, accounts: previewStore, usage: usage,
-        remote: remote, newAPI: newAPI, subAPI: subAPI, settings: settings, menuBar: true)
+        remote: remote, newAPI: newAPI, subAPI: subAPI, settings: settings, publicInsights: usage.publicInsights, menuBar: true)
     try await captureCustomization(AnyView(hud), size: .init(width: 220, height: MenuBarMetrics.height()), name: "hud-menu-bar", output: output)
     // 切换右侧来源后，本机运行指示不被账户状态替换；清空布局也只清空右侧。
     prefs.value.sourceID = previewStore.accounts[0].hudID

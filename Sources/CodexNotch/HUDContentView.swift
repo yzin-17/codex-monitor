@@ -135,11 +135,14 @@ struct ConfigurableHUDView: View {
     @ObservedObject var newAPI: BalanceMonitorViewModel
     @ObservedObject var subAPI: BalanceMonitorViewModel
     @ObservedObject var settings: CodexNotchSettings
+    @ObservedObject var publicInsights: PublicInsightsStore
     var menuBar = false
     var notch: IslandLayout? = nil
     var data: HUDEntityData { .resolve(source: preferences.value.sourceID, usage: usage, remote: remote, newAPI: newAPI, subAPI: subAPI, accounts: accounts, settings: settings) }
+    private var forecastAlert: (PublicInsightSource, Double)? { publicInsights.forecastAlert }
+    private var layoutKey: String { preferences.value.providerLayouts[preferences.value.sourceID] != nil ? preferences.value.sourceID : data.providerID }
     var body: some View {
-        let layout = preferences.value.layout(for: data.providerID)
+        let layout = preferences.value.layout(for: layoutKey)
         let rightWidth = notch.map { max($0.shoulderWidth, min(preferences.value.normalized.maximumWidth, HUDMetricStrip.measuredWidth(layout: layout, data: data, remaining: preferences.value.showRemaining, menuBar: false) + 12)) } ?? 0
         Group {
             if let notch {
@@ -147,15 +150,25 @@ struct ConfigurableHUDView: View {
                     HUDRuntimeStatus(isRunning: usage.snapshot.isRunning, enablePulse: settings.enablePulse, compact: true, narrow: notch.shoulderWidth < HUDRuntimeStatus.reservedWidth)
                         .frame(width: notch.shoulderWidth, alignment: .center)
                     Color.clear.frame(width: notch.notchWidth)
-                    HUDMetricStrip(layout: layout, data: data, remaining: preferences.value.showRemaining)
-                        .frame(width: max(1, rightWidth - 8), alignment: .leading).clipped().padding(.leading, 8)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 7) {
+                            HUDMetricStrip(layout: layout, data: data, remaining: preferences.value.showRemaining)
+                            forecastBadge
+                        }.fixedSize(horizontal: true, vertical: false)
+                    }
+                    .frame(width: max(1, rightWidth - 8), alignment: .leading).padding(.leading, 8)
                 }.frame(width: notch.shoulderWidth + notch.notchWidth + rightWidth, height: notch.collapsedHeight)
             } else {
                 HStack(spacing: 9) {
                     HUDRuntimeStatus(isRunning: usage.snapshot.isRunning, enablePulse: settings.enablePulse, compact: menuBar)
                         .frame(width: HUDRuntimeStatus.reservedWidth, alignment: .leading)
-                    HUDMetricStrip(layout: layout, data: data, remaining: preferences.value.showRemaining, menuBar: menuBar)
-                        .frame(maxWidth: .infinity, alignment: .leading).clipped().layoutPriority(0)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 7) {
+                            HUDMetricStrip(layout: layout, data: data, remaining: preferences.value.showRemaining, menuBar: menuBar)
+                            forecastBadge
+                        }.fixedSize(horizontal: true, vertical: false)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading).layoutPriority(0)
                 }
                 .padding(.horizontal, 8).padding(.vertical, menuBar ? 0 : 4)
                 .frame(maxWidth: preferences.value.normalized.maximumWidth)
@@ -165,5 +178,15 @@ struct ConfigurableHUDView: View {
         .background(HUDGlassBackground(opacity: preferences.value.normalized.hudOpacity))
         .clipShape(RoundedRectangle(cornerRadius: menuBar ? 5 : 14))
         .preferredColorScheme(.dark)
+    }
+    @ViewBuilder private var forecastBadge: some View {
+        if let alert = forecastAlert {
+            Text(String(format: "预测 %.0f%%", alert.1))
+                .font(.system(size: menuBar ? 9 : 10, weight: .bold, design: .rounded))
+                .monospacedDigit().foregroundStyle(MonitorTheme.warning)
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(MonitorTheme.warning.opacity(0.12), in: Capsule())
+                .help("社区重置预测超过 70%，仅供参考；不会触发续跑")
+        }
     }
 }

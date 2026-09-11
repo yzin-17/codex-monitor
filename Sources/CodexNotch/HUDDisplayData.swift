@@ -44,13 +44,14 @@ struct HUDEntityData: Equatable {
     }
     func window(for metric: HUDMetric) -> HUDQuotaSample? {
         switch metric {
-        case .primary, .primaryPace, .primaryCountdown, .primaryResetTime: primaryWindow ?? .init(remaining: primary, label: primaryLabel)
-        case .weekly, .weeklyPace, .weeklyCountdown, .weeklyResetTime: weeklyWindow ?? .init(remaining: weekly, label: "7d")
-        case .scopedWeekly, .scopedPace, .scopedCountdown, .scopedResetTime: scopedWindow
-        case .primaryLane: lanes.first
-        case .secondaryLane: lanes.count > 1 ? lanes[1] : nil
-        case .tertiaryLane: lanes.count > 2 ? lanes[2] : nil
-        default: automaticWindow ?? .init(remaining: automatic, resetsAt: resetsAt, label: "自动")
+        case .fiveHour: return lanes.first(where: { $0.label.lowercased().replacingOccurrences(of: " ", with: "") == "5h" }) ?? primaryWindow
+        case .primary, .primaryPace, .primaryCountdown, .primaryResetTime: return primaryWindow ?? .init(remaining: primary, label: primaryLabel)
+        case .weekly, .weeklyPace, .weeklyCountdown, .weeklyResetTime: return weeklyWindow ?? .init(remaining: weekly, label: "7d")
+        case .scopedWeekly, .scopedPace, .scopedCountdown, .scopedResetTime: return scopedWindow
+        case .primaryLane: return lanes.first
+        case .secondaryLane: return lanes.count > 1 ? lanes[1] : nil
+        case .tertiaryLane: return lanes.count > 2 ? lanes[2] : nil
+        default: return automaticWindow ?? .init(remaining: automatic, resetsAt: resetsAt, label: "自动")
         }
     }
     func tone(for percent: Double?) -> HUDTone {
@@ -100,10 +101,11 @@ struct HUDEntityData: Equatable {
         if metric.isQuota && metric != .usageBar {
             let w = window(for: metric), percent = validPercent(w?.remaining)
             let label: String = switch metric {
+            case .fiveHour: w?.label ?? "5h"
             case .primary: primaryLabel
             case .weekly: "7d"
             case .scopedWeekly: w?.label ?? "范围"
-            case .automatic: ""
+            case .automatic: w?.label ?? "自动"
             default: w?.label ?? (metric == .primaryLane ? "第一" : metric == .secondaryLane ? "第二" : "第三")
             }
             return .init(label: label, value: percent.map { "\(Int((remaining ? $0 : 100 - $0).rounded()))%" } ?? "—", tone: tone(for: percent))

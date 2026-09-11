@@ -19,6 +19,7 @@ enum PublicInsightSource: String, CaseIterable, Codable, Identifiable, Sendable 
         case .willReset: URL(string: "https://www.willcodexquotareset.com/api/forecast")!
         }
     }
+    var refreshInterval: TimeInterval { self == .openAIStatus ? 300 : 1800 }
     var website: URL {
         switch self {
         case .openAIStatus: URL(string: "https://status.openai.com/")!
@@ -31,6 +32,9 @@ struct PublicStatusComponent: Codable, Equatable, Identifiable, Sendable {
     var id: String
     var name: String
     var state: String
+    var groupID: String? = nil
+    var isGroup: Bool? = nil
+    var position: Int? = nil
     var affected: Bool { state != "operational" }
     var label: String {
         switch state {
@@ -55,9 +59,12 @@ struct PublicInsightSnapshot: Codable, Equatable, Sendable {
     var overallIndicator: String?
     var announcement: String?
     var lastResetAt: Date?
+    var latestTiboText: String? = nil
+    var latestTiboAt: Date? = nil
+    var latestTiboURL: URL? = nil
     var isForecast: Bool { source != .openAIStatus }
     func isStale(now: Date = Date()) -> Bool {
-        upstreamStale || now.timeIntervalSince(fetchedAt) > 15 * 60 || fetchedAt > now.addingTimeInterval(60)
+        upstreamStale || now.timeIntervalSince(fetchedAt) > max(source.refreshInterval * 3, 15 * 60) || fetchedAt > now.addingTimeInterval(60)
     }
 }
 enum PublicInsightError: Error, LocalizedError {
@@ -99,10 +106,10 @@ enum PublicInsightParser {
             let parts = raw.prefix(300).compactMap { part -> PublicStatusComponent? in
                 guard let id = text(part["id"], limit: 100), let name = text(part["name"], limit: 150),
                       let state = text(part["status"], limit: 60) else { return nil }
-                // 不把无关 API/ChatGPT 组件故障误标为 Codex 故障。
-                guard name.localizedCaseInsensitiveContains("codex") || name.localizedCaseInsensitiveContains("VS Code")
-                        || name.lowercased() == "login" else { return nil }
-                return .init(id: id, name: name, state: state)
+                return .init(id: id, name: name, state: state,
+                    groupID: text(part["group_id"], limit: 100),
+                    isGroup: part["group"] as? Bool,
+                    position: (part["position"] as? NSNumber)?.intValue)
             }
             let incidents = (root["incidents"] as? [[String: Any]] ?? []).prefix(20).compactMap { text($0["name"]) }
             var snapshot = PublicInsightSnapshot(source: source, fetchedAt: fetchedAt,
@@ -125,6 +132,13 @@ enum PublicInsightParser {
                 summary: text(model["displayReasoningSummary"]) ?? "社区概率估计，仅供参考。", probabilities: values)
             snapshot.announcement = text(window?["summary"])
             snapshot.lastResetAt = date(root["lastRandomResetAt"])
+            if let activity = root["latestTiboActivity"] as? [String: Any] {
+                snapshot.latestTiboText = text(activity["text"], limit: 500)
+                snapshot.latestTiboAt = date(activity["createdAt"])
+                if let raw = text(activity["sourceUrl"], limit: 300),
+                   let url = URL(string: raw), url.scheme == "https", url.host == "x.com",
+                   url.path.hasPrefix("/thsottiaux/status/") { snapshot.latestTiboURL = url }
+            }
             return snapshot
         case .willReset:
             guard let forecast = root["forecast"] as? [String: Any],
