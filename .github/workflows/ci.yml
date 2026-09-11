@@ -1,10 +1,10 @@
 name: macOS 构建与交互回归
 on:
   push:
-    branches: [main, fix/hud-layout-status-titles]
+    branches: [main]
   pull_request:
 permissions:
-  contents: write
+  contents: read
 concurrency:
   group: macos-${{ github.ref }}
   cancel-in-progress: true
@@ -15,22 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          persist-credentials: true
-      - name: 应用并提交四项界面修复
-        if: github.ref == 'refs/heads/fix/hud-layout-status-titles'
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 -c "import base64; exec(base64.b64decode('ZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCmRlZiBvbmNlKHBhdGgsIG9sZCwgbmV3KToKICAgIHA9UGF0aChwYXRoKTsgcz1wLnJlYWRfdGV4dCgpCiAgICBpZiBzLmNvdW50KG9sZCkhPTE6IHJhaXNlIFN5c3RlbUV4aXQoZiJ7cGF0aH06IHtzLmNvdW50KG9sZCl9IG1hdGNoZXMiKQogICAgcC53cml0ZV90ZXh0KHMucmVwbGFjZShvbGQsbmV3LDEpKQoKb25jZSgiU291cmNlcy9Db2RleE5vdGNoL0hVRENvbnRlbnRWaWV3LnN3aWZ0IiwKJycnICAgICAgICAgICAgICAgIFRleHQodmFsdWUudmFsdWUpLmZvcmVncm91bmRTdHlsZSh2YWx1ZS50b25lLmNvbG9yKQogICAgICAgICAgICB9CiAgICAgICAgICAgIC5saW5lTGltaXQoMSkKJycnLAonJycgICAgICAgICAgICAgICAgVGV4dCh2YWx1ZS52YWx1ZSkKICAgICAgICAgICAgICAgICAgICAuZm9yZWdyb3VuZFN0eWxlKHZhbHVlLnRvbmUuY29sb3IpCiAgICAgICAgICAgICAgICAgICAgLmZpeGVkU2l6ZShob3Jpem9udGFsOiB0cnVlLCB2ZXJ0aWNhbDogZmFsc2UpCiAgICAgICAgICAgIH0KICAgICAgICAgICAgLmZpeGVkU2l6ZShob3Jpem9udGFsOiB0cnVlLCB2ZXJ0aWNhbDogZmFsc2UpCicnJykKb25jZSgiU291cmNlcy9Db2RleE5vdGNoL0hVRENvbnRlbnRWaWV3LnN3aWZ0IiwKJycnICAgICAgICAgICAgICAgICAgICAgICAgLmZvcmVncm91bmRTdHlsZShNb25pdG9yVGhlbWUudGV4dFNlY29uZGFyeSkKICAgICAgICAgICAgICAgIH0KICAgICAgICAgICAgICAgIFRleHQodmFsdWUudmFsdWUpCicnJywKJycnICAgICAgICAgICAgICAgICAgICAgICAgLmZvcmVncm91bmRTdHlsZShNb25pdG9yVGhlbWUudGV4dFNlY29uZGFyeSkKICAgICAgICAgICAgICAgICAgICAgICAgLmZpeGVkU2l6ZShob3Jpem9udGFsOiB0cnVlLCB2ZXJ0aWNhbDogZmFsc2UpCiAgICAgICAgICAgICAgICB9CiAgICAgICAgICAgICAgICBUZXh0KHZhbHVlLnZhbHVlKQonJycpCm9uY2UoIlNvdXJjZXMvQ29kZXhOb3RjaC9IVURMYXlvdXRFZGl0b3JWaWV3LnN3aWZ0IiwKJycnICAgICAgICAgICAgRGl2aWRlcigpCgogICAgICAgICAgICBQaWNrZXIoIuaWsOWinuaOp+S7tue7keWumuWIsCIsIHNlbGVjdGlvbjogJHByZWZlcmVuY2VzLnZhbHVlLnNvdXJjZUlEKSB7CicnJywKJycnICAgICAgICAgICAgUGlja2VyKCLmlrDlop7mjqfku7bnu5HlrprliLAiLCBzZWxlY3Rpb246ICRwcmVmZXJlbmNlcy52YWx1ZS5zb3VyY2VJRCkgewonJycpCm9uY2UoIlNvdXJjZXMvQ29kZXhOb3RjaC9Ob3RjaElzbGFuZFZpZXcuc3dpZnQiLAonJycgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBQZXJmb3JtYW5jZVBhbmVsVmlldyh2aWV3TW9kZWw6IHBlcmZvcm1hbmNlVmlld01vZGVsKQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBQdWJsaWNJbnNpZ2h0Q2FyZChzb3VyY2U6IC5vcGVuQUlTdGF0dXMsIHN0b3JlOiBwdWJsaWNJbnNpZ2h0cykKJycnLAonJycgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBQZXJmb3JtYW5jZVBhbmVsVmlldyh2aWV3TW9kZWw6IHBlcmZvcm1hbmNlVmlld01vZGVsKQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBUZXh0KCLmnI3liqHlmajnirbmgIEiKQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgLmZvbnQoLnN5c3RlbShzaXplOiAxMiwgd2VpZ2h0OiAuc2VtaWJvbGQpKQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgLmZvcmVncm91bmRTdHlsZShNb25pdG9yVGhlbWUudGV4dFByaW1hcnkpCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAuZnJhbWUobWF4V2lkdGg6IC5pbmZpbml0eSwgYWxpZ25tZW50OiAubGVhZGluZykKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC5wYWRkaW5nKC50b3AsIDIpCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIFB1YmxpY0luc2lnaHRDYXJkKHNvdXJjZTogLm9wZW5BSVN0YXR1cywgc3RvcmU6IHB1YmxpY0luc2lnaHRzKQonJycpCm9uY2UoIlNvdXJjZXMvQ29kZXhOb3RjaC9Ob3RjaElzbGFuZFZpZXcuc3dpZnQiLAonJycgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC5saW5lTGltaXQoaXNFeHBhbmRlZCA/IDMgOiAyKS50cnVuY2F0aW9uTW9kZSgudGFpbCkKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAuZml4ZWRTaXplKGhvcml6b250YWw6IGZhbHNlLCB2ZXJ0aWNhbDogdHJ1ZSkKJycnLAonJycgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC5saW5lTGltaXQobmlsKQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC5maXhlZFNpemUoaG9yaXpvbnRhbDogZmFsc2UsIHZlcnRpY2FsOiB0cnVlKQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC5sYXlvdXRQcmlvcml0eSgxKQonJycpCg=='))"
-          git fetch origin main --depth=1
-          git checkout FETCH_HEAD -- .github/workflows/ci.yml
-          git rm -f .github/workflows/apply-ui-polish.yml
-          git config user.name "yzin"
-          git config user.email "30586807+yzin-17@users.noreply.github.com"
-          git add -A
-          git diff --cached --check
-          git commit -m "fix: polish HUD numbers, layout, status and titles"
-          git push origin HEAD:fix/hud-layout-status-titles
+          persist-credentials: false
       - name: 回归、原生界面与双架构构建
         env:
           CODEX_MONITOR_SNAPSHOT_DIR: ${{ github.workspace }}/.baseline-output/ui
@@ -47,6 +32,7 @@ jobs:
           VERSION="$(tr -d '\r\n' < VERSION)"
           test -s "dist/codex-monitor-$VERSION-arm64.dmg"
           test -s "dist/codex-monitor-$VERSION-amd64.dmg"
+          ls -lh dist
       - name: 保存原生截图、日志与安装包
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

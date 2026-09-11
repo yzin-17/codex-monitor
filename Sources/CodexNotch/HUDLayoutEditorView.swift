@@ -177,8 +177,6 @@ struct HUDLayoutEditorView: View {
                     .disabled(!isDirty)
             }
 
-            Divider()
-
             Picker("新增控件绑定到", selection: $preferences.value.sourceID) {
                 ForEach(bindableSources) { source in Text(source.label).tag(source.id) }
                 if !bindableSources.contains(where: { $0.id == preferences.value.sourceID }) {

@@ -427,6 +427,11 @@ struct DetailPanelView: View {
                             ScrollView {
                                 VStack(spacing: 12) {
                                     PerformancePanelView(viewModel: performanceViewModel)
+                                    Text("服务器状态")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundStyle(MonitorTheme.textPrimary)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(.top, 2)
                                     PublicInsightCard(source: .openAIStatus, store: publicInsights)
                                 }
                             }
@@ -1523,8 +1528,9 @@ private struct TaskRow: View {
                             Text(task.title)
                                 .font(.system(size: 11, weight: .bold))
                                 .foregroundStyle(.white.opacity(0.92))
-                                .lineLimit(isExpanded ? 3 : 2).truncationMode(.tail)
+                                .lineLimit(nil)
                                 .fixedSize(horizontal: false, vertical: true)
+                                .layoutPriority(1)
                             Spacer(minLength: 4)
                             Text(task.status.label)
                                 .font(.system(size: 10, weight: .bold)).foregroundStyle(statusColor)

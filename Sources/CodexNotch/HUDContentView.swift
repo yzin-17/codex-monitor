@@ -114,10 +114,13 @@ struct HUDMetricStrip: View {
                     Text(value.label)
                         .font(.system(size: max(7, fontSize - 1.5), weight: .semibold))
                         .foregroundStyle(MonitorTheme.textSecondary)
+                        .fixedSize(horizontal: true, vertical: false)
                 }
-                Text(value.value).foregroundStyle(value.tone.color)
+                Text(value.value)
+                    .foregroundStyle(value.tone.color)
+                    .fixedSize(horizontal: true, vertical: false)
             }
-            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
         }
     }
 
