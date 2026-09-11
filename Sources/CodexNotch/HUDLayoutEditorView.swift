@@ -57,8 +57,7 @@ struct HUDLayoutEditorView: View {
             if compactOverlay {
                 Text("覆盖菜单栏的浮窗，无刘海占位；高度填满当前屏幕菜单栏。左侧运行状态固定保留，右侧空间不足时仅裁剪自定义内容。")
                     .font(.caption).foregroundStyle(.secondary)
-                numberField("浮窗最大宽度", value: $preferences.value.maximumWidth, range: 90...360, suffix: "pt")
-                appearanceSlider("浮窗横向位置", value: $preferences.value.horizontalPosition, range: 0...1)
+                appearanceSlider("HUD 横向位置", value: $preferences.value.horizontalPosition, range: 0...1)
             } else {
                 Picker("刘海两侧布局", selection: notchDisplaySize) {
                     ForEach(NotchDisplaySize.allCases) { Text($0.label).tag($0) }
@@ -73,13 +72,13 @@ struct HUDLayoutEditorView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             appearanceSlider("HUD 背景透明度", value: $preferences.value.hudTransparency, range: 0...1)
-            appearanceSlider("下拉面板背景透明度", value: $preferences.value.panelTransparency, range: 0...0.65)
             numberField(
                 "HUD 圆角",
                 value: Binding(get: { preferences.value.cornerRadius }, set: { preferences.value.cornerRadius = $0 }),
                 range: 0...24,
                 suffix: "pt"
             )
+            appearanceSlider("下拉面板背景透明度", value: $preferences.value.panelTransparency, range: 0...0.65)
             Button("恢复外观默认设定", action: resetAppearanceDefaults)
                 .help("恢复显示模式、刘海/浮窗几何、HUD/面板透明度和展开动画；不会改动布局或控件账户绑定。")
             Picker("面板动画", selection: Binding(
@@ -114,8 +113,18 @@ struct HUDLayoutEditorView: View {
                 ),
                 format: .number.precision(.fractionLength(0))
             )
+            .textFieldStyle(.plain)
             .multilineTextAlignment(.trailing)
-            .frame(width: 72)
+            .padding(.horizontal, 7)
+            .frame(width: 72, height: 24)
+            .background(
+                Color.primary.opacity(0.07),
+                in: RoundedRectangle(cornerRadius: 5, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .stroke(Color.primary.opacity(0.14), lineWidth: 1)
+            )
             Text(suffix).foregroundStyle(.secondary)
         }
     }
@@ -345,7 +354,6 @@ struct HUDLayoutEditorView: View {
 
     private func resetAppearanceDefaults() {
         preferences.value.mode = .automatic
-        preferences.value.maximumWidth = 220
         preferences.value.horizontalPosition = 0.5
         preferences.value.hudOpacity = 0.90
         preferences.value.panelOpacity = 0.90
