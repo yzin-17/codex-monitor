@@ -10,6 +10,7 @@ struct HUDLayoutEditorView: View {
     var notchDisplaySize: Binding<NotchDisplaySize> = .constant(.standard)
     var notchAdjustment: Binding<NotchPointAdjustment> = .constant(0)
     var legacySource: Binding<NotchDisplaySource> = .constant(.codex)
+    var pulseEnabled: Binding<Bool> = .constant(true)
     @State private var scope = "all"
     @State private var ruleDraft: HUDRuleDraft?
     @State private var hasNotch = (NSScreen.main?.safeAreaInsets.top ?? 0) > 0
@@ -54,7 +55,8 @@ struct HUDLayoutEditorView: View {
             }
             appearanceSlider("HUD 背景透明度", value: $preferences.value.hudTransparency, range: 0...1)
             appearanceSlider("下拉面板背景透明度", value: $preferences.value.panelTransparency, range: 0...0.65)
-            Button("恢复原版黑色背景") { preferences.value.hudOpacity = 0.985; preferences.value.panelOpacity = 0.985 }
+            Button("恢复外观默认设定", action: resetAppearanceDefaults)
+                .help("恢复显示模式、刘海/浮窗几何、HUD/面板透明度和展开动画；不会改动右侧数据源或自定义布局。")
             Picker("面板动画", selection: Binding(get: { preferences.value.animation }, set: { preferences.value.animation = $0 })) {
                 ForEach(MonitorPanelAnimation.allCases) { Text($0.title).tag($0) }
             }
@@ -72,7 +74,7 @@ struct HUDLayoutEditorView: View {
     }
     private var sourceSection: some View {
         Section {
-            Picker("右侧展示账户", selection: $preferences.value.sourceID) {
+            Picker("默认数据源（未绑定控件）", selection: $preferences.value.sourceID) {
                 Text("本机 Codex").tag("local")
                 Text("沿用旧版来源选择 / 自动提醒").tag("legacy")
                 ForEach(accounts.accounts) { Text("Codex · \($0.label)").tag($0.hudID) }
@@ -86,7 +88,7 @@ struct HUDLayoutEditorView: View {
                 }
             }
             Toggle("百分比显示剩余（关闭后显示已用）", isOn: $preferences.value.showRemaining)
-            Text("账户选择只改变右侧指标；左侧状态灯与 RUN / IDLE 始终反映本机 Codex。")
+            Text("这里是未单独绑定控件时的默认数据源。单个布局控件可通过右键绑定到不同账号；左侧状态灯与 RUN / IDLE 始终反映本机 Codex。")
                 .font(.caption).foregroundStyle(.secondary)
         } header: { Text("右侧数据来源") }
     }
@@ -105,7 +107,7 @@ struct HUDLayoutEditorView: View {
                     if scope != "all" { Button("恢复跟随默认") { preferences.value.providerLayouts[scope] = nil } }
                 }
             }
-            Text("左侧为固定区域，不参与拖动。可为每个 Codex 账号保存独立布局；右侧每行最多 12 个控件、最多 2 行，空格和分隔点可以重复添加。")
+            Text("左侧为固定区域，不参与拖动。右侧控件可分别绑定不同账号，也可为每个 Codex 账号保存独立布局；每行最多 12 个控件、最多 2 行，空格和分隔点可以重复添加。")
                 .font(.caption).foregroundStyle(.secondary)
             preview
             ForEach(Array(layout.lines.enumerated()), id: \.offset) { row, values in
@@ -167,6 +169,29 @@ struct HUDLayoutEditorView: View {
             }.foregroundStyle(.secondary)
         }
     }
+    private var bindableSources: [HUDBindableSource] {
+        var values: [HUDBindableSource] = [.init(id: "local", label: "本机 Codex")]
+        values += accounts.accounts.map { .init(id: $0.hudID, label: "Codex · " + $0.label) }
+        values += remote.snapshot.accounts.map { .init(id: "remote:\($0.id)", label: "网关 · " + $0.displayName) }
+        values += newAPI.snapshot.accounts.map { .init(id: "newapi:\($0.id)", label: "NewAPI · " + $0.displayName) }
+        values += subAPI.snapshot.accounts.map { .init(id: "subapi:\($0.id)", label: "Sub2API · " + $0.displayName) }
+        return values
+    }
+    private func sourceLabel(_ id: String) -> String {
+        bindableSources.first(where: { $0.id == id })?.label ?? "已移除的数据源"
+    }
+    private func resetAppearanceDefaults() {
+        preferences.value.mode = .automatic
+        preferences.value.maximumWidth = 220
+        preferences.value.horizontalPosition = 0.5
+        preferences.value.hudOpacity = 0.985
+        preferences.value.panelOpacity = 0.985
+        preferences.value.animation = .anchoredReveal
+        notchDisplaySize.wrappedValue = .standard
+        notchAdjustment.wrappedValue = 0
+        pulseEnabled.wrappedValue = true
+    }
+
     private func add(_ metric: HUDMetric) {
         if metric == .conditional { ruleDraft = .init() }
         else { save(layout.inserting(metric, row: layout.lines.count - 1)) }
@@ -178,11 +203,21 @@ struct HUDLayoutEditorView: View {
     }
     private func placedChip(_ raw: String, at p: HUDLayoutPosition, count: Int) -> some View {
         let metric = HUDMetric.parse(raw) ?? .hidden
-        let id = String(raw.dropFirst(12))
-        let title = metric == .space ? "空格 \(HUDLayout.spaceWidth(raw)) pt" : metric == .conditional ? layout.conditionals[id]?.name ?? "条件" : metric.title
+        let id = HUDLayoutToken.conditionalID(raw) ?? ""
+        let baseTitle = metric == .space ? "空格 \(HUDLayout.spaceWidth(raw)) pt" : metric == .conditional ? layout.conditionals[id]?.name ?? "条件" : metric.title
+        let title = HUDLayoutToken.sourceID(raw).map { baseTitle + " · " + sourceLabel($0) } ?? baseTitle
         return Button { save(layout.removing(at: p)) } label: { chipLabel(title, symbol: metric.symbol) }
             .buttonStyle(.plain).draggable("hud-slot:\(p.row):\(p.index)")
             .contextMenu {
+                if ![HUDMetric.space, .separatorDot, .hidden].contains(metric) {
+                    Menu("绑定数据源") {
+                        Button("跟随默认数据源") { save(layout.settingSource(nil, at: p)) }
+                        Divider()
+                        ForEach(bindableSources) { source in
+                            Button(source.label) { save(layout.settingSource(source.id, at: p)) }
+                        }
+                    }
+                }
                 if metric == .space {
                     ForEach([4, 8, 12, 16, 24, 32, 48], id: \.self) { width in
                         Button("空格宽度 \(width) pt") { save(layout.settingSpace(width, at: p)) }
@@ -260,4 +295,9 @@ private struct HUDConditionalEditor: View {
             ForEach(HUDMetric.allCases.filter { $0 != .conditional && $0 != .state }) { Text($0.title).tag($0) }
         }
     }
+}
+
+private struct HUDBindableSource: Identifiable {
+    let id: String
+    let label: String
 }

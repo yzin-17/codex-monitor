@@ -191,7 +191,6 @@ struct CodexAccountsPanel: View {
                 if !account.enabled { Text("已关闭").foregroundStyle(.secondary) }
                 Spacer()
                 Button("验证") { store.refresh(id: account.id, interactive: true) }.disabled(!store.monitoringEnabled || !account.enabled)
-                Button(preferences.value.sourceID == account.hudID ? "HUD 正在展示" : "显示到 HUD") { preferences.value.sourceID = account.hudID }
             }
             if let usage = state?.usage {
                 if let error = state?.error { Text("旧数据 · \(error)").foregroundStyle(.orange).font(.caption) }
@@ -206,14 +205,6 @@ struct CodexAccountsPanel: View {
                 if let credits = usage.credits { Text("Credits：\(credits)").monospacedDigit() }
                 Text("数据源：Codex 官方额度接口 · 读取于 \(usage.capturedAt.formatted(date: .abbreviated, time: .shortened))")
                     .font(.system(size: 10)).foregroundStyle(.secondary)
-                if let returned = usage.returnedWorkspaceID {
-                    Text("接口返回工作区：\(returned)").font(.system(size: 10)).foregroundStyle(.secondary)
-                } else {
-                    Text("接口未返回工作区身份").font(.system(size: 10)).foregroundStyle(.secondary)
-                }
-                if !account.workspaceID.isEmpty {
-                    Text("请求工作区：\(account.workspaceID) · 非本地日志").font(.system(size: 10)).foregroundStyle(.secondary)
-                }
             } else if let error = state?.error { Text(error).foregroundStyle(.orange).font(.caption) }
             else { Text(account.enabled && store.monitoringEnabled ? "等待读取" : "未读取").foregroundStyle(.secondary) }
         }.font(.system(size: 11)).padding(12)

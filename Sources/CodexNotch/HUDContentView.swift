@@ -8,7 +8,6 @@ struct HUDGlassBackground: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     var body: some View {
         Color.black.opacity(reduceTransparency ? 1 : min(1, max(0, opacity)))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(MonitorTheme.panelStroke, lineWidth: MonitorTheme.Stroke.hairline))
     }
 }
 extension HUDTone {
@@ -56,7 +55,9 @@ struct HUDMetricStrip: View {
     let data: HUDEntityData
     var remaining = true
     var menuBar = false
+    var dataForRaw: ((String) -> HUDEntityData)? = nil
     private var rows: [[String]] { layout.normalized.lines }
+    private func entity(_ raw: String) -> HUDEntityData { dataForRaw?(raw) ?? data }
     private var fontSize: CGFloat { menuBar && rows.count == 2 ? min(9, MenuBarMetrics.height() / 2.5) : 11 }
     var body: some View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
@@ -75,21 +76,22 @@ struct HUDMetricStrip: View {
         }
     }
     private func visible(_ row: [String], at now: Date) -> [String] {
-        row.filter { data.resolvedMetric(raw: $0, layout: layout, now: now) != .hidden }
+        row.filter { entity($0).resolvedMetric(raw: $0, layout: layout, now: now) != .hidden }
     }
     @ViewBuilder private func cell(_ raw: String, now: Date) -> some View {
-        let metric = data.resolvedMetric(raw: raw, layout: layout, now: now)
+        let itemData = entity(raw)
+        let metric = itemData.resolvedMetric(raw: raw, layout: layout, now: now)
         if metric == .space { Color.clear.frame(width: CGFloat(HUDLayout.spaceWidth(raw)), height: 1).accessibilityHidden(true) }
-        else if metric == .icon { Image(systemName: "scope").foregroundStyle(MonitorTheme.textPrimary).accessibilityLabel(data.provider) }
+        else if metric == .icon { Image(systemName: "scope").foregroundStyle(MonitorTheme.textPrimary).accessibilityLabel(itemData.provider) }
         else if metric == .usageBar {
             ZStack(alignment: .leading) {
                 Capsule().fill(MonitorTheme.progressTrack)
-                Capsule().fill(data.tone(for: data.automatic).color)
-                    .frame(width: 26 * CGFloat((remaining ? data.automatic : data.automatic.map { 100 - $0 }) ?? 0) / 100)
+                Capsule().fill(itemData.tone(for: itemData.automatic).color)
+                    .frame(width: 26 * CGFloat((remaining ? itemData.automatic : itemData.automatic.map { 100 - $0 }) ?? 0) / 100)
             }.frame(width: 26, height: 4)
-                .accessibilityLabel("用量 \(data.text(.usageBar, remaining: remaining, now: now))")
+                .accessibilityLabel("用量 \(itemData.text(.usageBar, remaining: remaining, now: now))")
         } else {
-            let value = metric.map { data.display($0, remaining: remaining, now: now) } ?? HUDDisplayValue(value: "—", tone: .tertiary)
+            let value = metric.map { itemData.display($0, remaining: remaining, now: now) } ?? HUDDisplayValue(value: "—", tone: .tertiary)
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 if !value.label.isEmpty {
                     Text(value.label).font(.system(size: max(7, fontSize - 1.5), weight: .semibold))
@@ -101,26 +103,30 @@ struct HUDMetricStrip: View {
     }
     private func helpText(now: Date) -> String {
         let entries = rows.flatMap { $0 }.compactMap { raw -> String? in
-            guard let metric = data.resolvedMetric(raw: raw, layout: layout, now: now) else { return "条件：数据不足（—）" }
+            let itemData = entity(raw)
+            guard let metric = itemData.resolvedMetric(raw: raw, layout: layout, now: now) else { return "条件：数据不足（—）" }
             if [.space, .hidden, .separatorDot].contains(metric) { return nil }
-            return metric.title + "：" + data.text(metric, remaining: remaining, now: now)
+            let source = HUDLayoutToken.sourceID(raw).map { " [\($0)]" } ?? ""
+            return metric.title + source + "：" + itemData.text(metric, remaining: remaining, now: now)
         }
         return (data.warning.map { "注意：\($0)\n" } ?? "") + entries.joined(separator: "\n") + "\n节奏/预计用尽仅按本窗口平均速度估算；缺少可靠窗口数据时显示 —。"
     }
     /// 与渲染使用同一字段/条件/空格宽度，避免靠整行缩放挤入菜单栏。
-    @MainActor static func measuredWidth(layout: HUDLayout, data: HUDEntityData, remaining: Bool, menuBar: Bool, now: Date = Date()) -> CGFloat {
+    @MainActor static func measuredWidth(layout: HUDLayout, data: HUDEntityData, remaining: Bool, menuBar: Bool,
+                                         now: Date = Date(), dataForRaw: ((String) -> HUDEntityData)? = nil) -> CGFloat {
         let rows = layout.normalized.lines
         let size: CGFloat = menuBar && rows.count == 2 ? min(9, MenuBarMetrics.height() / 2.5) : 11
         let font = NSFont.monospacedDigitSystemFont(ofSize: size, weight: .semibold)
         let labelFont = NSFont.systemFont(ofSize: max(7, size - 1.5), weight: .semibold)
         return rows.map { row in
-            let visible = row.filter { data.resolvedMetric(raw: $0, layout: layout, now: now) != .hidden }
+            let visible = row.filter { (dataForRaw?($0) ?? data).resolvedMetric(raw: $0, layout: layout, now: now) != .hidden }
             return visible.reduce(CGFloat(0)) { sum, raw in
-                let metric = data.resolvedMetric(raw: raw, layout: layout, now: now)
+                let itemData = dataForRaw?(raw) ?? data
+                let metric = itemData.resolvedMetric(raw: raw, layout: layout, now: now)
                 if metric == .space { return sum + CGFloat(HUDLayout.spaceWidth(raw)) }
                 if metric == .icon { return sum + 12 }
                 if metric == .usageBar { return sum + 26 }
-                let v = metric.map { data.display($0, remaining: remaining, now: now) } ?? .init(value: "—")
+                let v = metric.map { itemData.display($0, remaining: remaining, now: now) } ?? .init(value: "—")
                 let label = v.label.isEmpty ? 0 : (v.label as NSString).size(withAttributes: [.font: labelFont]).width + 4
                 return sum + label + (v.value as NSString).size(withAttributes: [.font: font]).width
             } + CGFloat(max(0, visible.count - 1)) * 5
@@ -141,9 +147,13 @@ struct ConfigurableHUDView: View {
     var data: HUDEntityData { .resolve(source: preferences.value.sourceID, usage: usage, remote: remote, newAPI: newAPI, subAPI: subAPI, accounts: accounts, settings: settings) }
     private var forecastAlert: (PublicInsightSource, Double)? { publicInsights.forecastAlert }
     private var layoutKey: String { preferences.value.providerLayouts[preferences.value.sourceID] != nil ? preferences.value.sourceID : data.providerID }
+    private func dataForRaw(_ raw: String) -> HUDEntityData {
+        let source = HUDLayoutToken.sourceID(raw) ?? preferences.value.sourceID
+        return .resolve(source: source, usage: usage, remote: remote, newAPI: newAPI, subAPI: subAPI, accounts: accounts, settings: settings)
+    }
     var body: some View {
         let layout = preferences.value.layout(for: layoutKey)
-        let rightWidth = notch.map { max($0.shoulderWidth, min(preferences.value.normalized.maximumWidth, HUDMetricStrip.measuredWidth(layout: layout, data: data, remaining: preferences.value.showRemaining, menuBar: false) + 12)) } ?? 0
+        let rightWidth = notch.map { max($0.shoulderWidth, min(preferences.value.normalized.maximumWidth, HUDMetricStrip.measuredWidth(layout: layout, data: data, remaining: preferences.value.showRemaining, menuBar: false, dataForRaw: dataForRaw) + 12)) } ?? 0
         Group {
             if let notch {
                 HStack(spacing: 0) {
@@ -152,7 +162,7 @@ struct ConfigurableHUDView: View {
                     Color.clear.frame(width: notch.notchWidth)
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 7) {
-                            HUDMetricStrip(layout: layout, data: data, remaining: preferences.value.showRemaining)
+                            HUDMetricStrip(layout: layout, data: data, remaining: preferences.value.showRemaining, dataForRaw: dataForRaw)
                             forecastBadge
                         }.fixedSize(horizontal: true, vertical: false)
                     }
@@ -164,7 +174,7 @@ struct ConfigurableHUDView: View {
                         .frame(width: HUDRuntimeStatus.reservedWidth, alignment: .leading)
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 7) {
-                            HUDMetricStrip(layout: layout, data: data, remaining: preferences.value.showRemaining, menuBar: menuBar)
+                            HUDMetricStrip(layout: layout, data: data, remaining: preferences.value.showRemaining, menuBar: menuBar, dataForRaw: dataForRaw)
                             forecastBadge
                         }.fixedSize(horizontal: true, vertical: false)
                     }
