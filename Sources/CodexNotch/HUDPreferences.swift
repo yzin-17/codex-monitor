@@ -36,7 +36,7 @@ struct HUDConfiguration: Codable, Equatable, Sendable {
     /// 仅为读取旧配置保留。新版本统一显示剩余额度，不再向用户暴露切换入口。
     var showRemaining = true
 
-    /// 兼容 0.4.3 及更早配置。运行时不再按来源选择这些布局。
+    /// 兼容 0.4.3 及更早配置。迁移到命名布局后运行时会清空旧覆盖。
     var layout = HUDLayout.compact
     var providerLayouts: [String: HUDLayout] = [:]
 
@@ -139,7 +139,8 @@ struct HUDConfiguration: Codable, Equatable, Sendable {
         copy.hudCornerRadius = cornerRadius
         copy.showRemaining = true
         copy.layout = layout.normalized
-        copy.providerLayouts = providerLayouts.mapValues(\.normalized)
+        // 命名布局已经取代旧 provider 覆盖。清空迁移残留，避免窗口测量与实际渲染选中不同布局。
+        copy.providerLayouts = [:]
         if copy.sourceID.count > 150 { copy.sourceID = "local" }
 
         var seen = Set<String>()
@@ -158,9 +159,9 @@ struct HUDConfiguration: Codable, Equatable, Sendable {
         return copy
     }
 
-    /// 旧调用仅保留签名兼容；新 HUD 运行时始终使用当前命名布局。
+    /// 旧调用继续保持兼容；迁移完成后的 normalized 配置不再保留 provider 覆盖。
     func layout(for provider: String) -> HUDLayout {
-        activeLayout
+        (providerLayouts[provider] ?? activeLayout).normalized
     }
 
     mutating func selectLayout(_ id: String) {
