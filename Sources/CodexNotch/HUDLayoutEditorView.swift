@@ -132,7 +132,7 @@ struct HUDLayoutEditorView: View {
     private var layoutSection: some View {
         Section {
             layoutToolbar
-            Text("选择“当前布局”会立即应用到 HUD；下面对控件排列或账号绑定的编辑先进入草稿，点“保存布局”后才替换当前 HUD。布局只负责排列，数据来源保存在每个控件自身。")
+            Text("选择“当前布局”会立即应用到 HUD；下面对控件排列或账号绑定的编辑先进入草稿，点“保存布局”后才替换当前 HUD。布局只负责排列，数据来源保存在每个数据控件自身；图标仅作标识，不绑定账号。")
                 .font(.caption).foregroundStyle(.secondary)
 
             preview
@@ -198,7 +198,7 @@ struct HUDLayoutEditorView: View {
                 }
             }
             Toggle("百分比显示剩余（关闭后显示已用）", isOn: $preferences.value.showRemaining)
-            Text("这里只决定接下来新增控件绑定哪个账号。切换它不会切换 HUD 布局，也不会改变已经放置的控件。已放置控件的绑定会直接显示在控件名称下方，并可右键重新选择。左侧 RUN / IDLE 始终只反映本机 Codex。")
+            Text("这里只决定接下来新增的数据控件绑定哪个账号。切换它不会切换 HUD 布局，也不会改变已经放置的控件。已放置的数据控件绑定会直接显示在控件名称下方，并可右键重新选择；图标不绑定账号。左侧 RUN / IDLE 始终只反映本机 Codex。")
                 .font(.caption).foregroundStyle(.secondary)
 
             ForEach(HUDMetric.groups, id: \.self) { group in
@@ -210,12 +210,14 @@ struct HUDLayoutEditorView: View {
                             .draggable("metric:" + metric.rawValue)
                             .help(metric == .space
                                   ? "点击添加一个 8 pt 空格；右键已放置的空格可调整宽度。"
+                                  : metric == .icon
+                                  ? "点击添加 OpenAI 图标；图标只作标识，不绑定数据源"
                                   : "点击添加或拖到布局；新控件会绑定到上方选中的数据源")
                     }
                 }
             }
 
-            Text("每行最多 12 个控件、最多 2 行。空格和分隔点可以重复添加。节奏及预计用尽是窗口内平均速度估算；来源不提供数据时显示 —，不会自动改绑到其他账号。")
+            Text("每行最多 12 个控件、最多 2 行。空格和分隔点可以重复添加。第一/第二/第三额度属于旧版同一数据源的顺序窗口，已从新建控件中移除；旧布局仍可兼容读取。节奏及预计用尽是窗口内平均速度估算；来源不提供数据时显示 —，不会自动改绑到其他账号。")
                 .font(.caption).foregroundStyle(.secondary)
         } header: { Text("右侧自定义布局") }
     }
@@ -399,23 +401,26 @@ struct HUDLayoutEditorView: View {
 
     @ViewBuilder
     private func chipLabel(_ title: String, metric: HUDMetric, source: String? = nil) -> some View {
-        HStack(spacing: 6) {
-            if metric == .icon {
-                OpenAIKnotIcon(size: 13).foregroundStyle(.primary)
-            } else {
+        if metric == .icon {
+            OpenAIKnotIcon(size: 16)
+                .foregroundStyle(.primary)
+                .frame(width: 36, height: 28, alignment: .center)
+                .background(.quaternary, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        } else {
+            HStack(spacing: 6) {
                 Image(systemName: metric.symbol)
-            }
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title).lineLimit(1)
-                if let source {
-                    Text(source).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title).lineLimit(1)
+                    if let source {
+                        Text(source).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1)
+                    }
                 }
             }
+            .font(.system(size: 11))
+            .padding(.horizontal, 9)
+            .padding(.vertical, 6)
+            .background(.quaternary, in: Capsule())
         }
-        .font(.system(size: 11))
-        .padding(.horizontal, 9)
-        .padding(.vertical, 6)
-        .background(.quaternary, in: Capsule())
     }
 
     private func placedChip(_ raw: String, at p: HUDLayoutPosition, count: Int) -> some View {
@@ -425,9 +430,8 @@ struct HUDLayoutEditorView: View {
         if metric == .space { baseTitle = "空格 \(HUDLayout.spaceWidth(raw)) pt" }
         else if metric == .conditional { baseTitle = layout.conditionals[id]?.name ?? "条件" }
         else { baseTitle = metric.title }
-        let source = [HUDMetric.space, .separatorDot, .hidden].contains(metric)
-            ? nil
-            : sourceLabel(HUDLayoutToken.sourceID(raw) ?? "local")
+        let canBindSource = ![HUDMetric.icon, .space, .separatorDot, .hidden].contains(metric)
+        let source = canBindSource ? sourceLabel(HUDLayoutToken.sourceID(raw) ?? "local") : nil
 
         return Button { edit(layout.removing(at: p)) } label: {
             chipLabel(baseTitle, metric: metric, source: source)
@@ -435,7 +439,7 @@ struct HUDLayoutEditorView: View {
         .buttonStyle(.plain)
         .draggable("hud-slot:\(p.row):\(p.index)")
         .contextMenu {
-            if ![HUDMetric.space, .separatorDot, .hidden].contains(metric) {
+            if canBindSource {
                 Menu("绑定数据源") {
                     ForEach(bindableSources) { source in
                         Button(source.label) { edit(layout.settingSource(source.id, at: p)) }
@@ -460,7 +464,9 @@ struct HUDLayoutEditorView: View {
             Button("移除") { edit(layout.removing(at: p)) }
         }
         .dropDestination(for: String.self) { items, _ in drop(items, row: p.row, before: p.index) }
-        .accessibilityLabel(baseTitle + "，绑定 " + (source ?? "无数据来源") + "，点击移除，拖动排序，右键设置")
+        .accessibilityLabel(metric == .icon
+                            ? "OpenAI 图标，点击移除，拖动排序"
+                            : baseTitle + "，绑定 " + (source ?? "无数据来源") + "，点击移除，拖动排序，右键设置")
     }
 
     private func position(_ payload: String?) -> HUDLayoutPosition? {
@@ -525,7 +531,7 @@ private struct HUDConditionalEditor: View {
             ForEach(rule.predicates.indices, id: \.self) { i in
                 HStack {
                     Picker("指标", selection: $rule.predicates[i].metric) {
-                        ForEach(HUDMetric.allCases.filter(\.isNumeric)) { Text($0.title).tag($0) }
+                        ForEach(HUDMetric.allCases.filter { $0.isNumeric && !$0.isOrdinalLane }) { Text($0.title).tag($0) }
                     }
                     .frame(width: 150)
                     if rule.predicates[i].metric.isQuota {
@@ -565,7 +571,7 @@ private struct HUDConditionalEditor: View {
 
     private func branch(_ title: String, selection: Binding<HUDMetric>) -> some View {
         Picker(title, selection: selection) {
-            ForEach(HUDMetric.allCases.filter { $0 != .conditional && $0 != .state }) {
+            ForEach(HUDMetric.allCases.filter { $0 != .conditional && $0 != .state && !$0.isOrdinalLane }) {
                 Text($0.title).tag($0)
             }
         }
