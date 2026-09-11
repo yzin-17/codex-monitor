@@ -60,14 +60,7 @@ enum Formatters {
 
     static func shortTitle(_ title: String) -> String {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
-            return "未命名任务"
-        }
-        if trimmed.count <= 22 {
-            return trimmed
-        }
-        let end = trimmed.index(trimmed.startIndex, offsetBy: 22)
-        return String(trimmed[..<end]) + "..."
+        return trimmed.isEmpty ? "未命名任务" : trimmed
     }
 
     static func relativeAge(_ date: Date, now: Date = Date()) -> String {
