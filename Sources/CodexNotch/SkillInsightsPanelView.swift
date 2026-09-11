@@ -24,7 +24,7 @@ struct SkillInsightsPanelView: View {
             SkillInsightMetric(label: "目录成本", value: "~\(snapshot.enabledCatalogTokenEstimate)")
             SkillInsightMetric(label: "确认使用", value: "\(snapshot.confirmedUseCount)")
             SkillInsightMetric(label: "疑似漏触发", value: "\(snapshot.suspectedMissCount)")
-            SkillInsightMetric(label: "影子命中", value: "\(snapshot.shadowHitCount)")
+            SkillInsightMetric(label: SkillInsightsDisplayLabels.shadowEvidence, value: "\(snapshot.shadowHitCount)")
             SkillInsightMetric(label: "建议复测", value: "\(snapshot.retestCount)")
             SkillInsightMetric(
                 label: "完整度",
@@ -164,22 +164,29 @@ private struct SkillInsightMetric: View {
     }
 }
 
+enum SkillInsightsDisplayLabels {
+    static let nameColumn = "Skill"
+    static let shadowEvidence = "关闭匹配"
+    static let shadowExplanation = "Skill 当前关闭，但任务内容符合其适用范围；仅用于判断是否值得复测或恢复，不代表该 Skill 实际执行。"
+}
+
 private enum SkillInsightTableLayout {
     static let skillWidth: CGFloat = 176
     static let stateWidth: CGFloat = 34
     static let evidenceWidth: CGFloat = 40
+    static let shadowWidth: CGFloat = 54
     static let costWidth: CGFloat = 44
 }
 
 private struct SkillInsightTableHeader: View {
     var body: some View {
         HStack(spacing: 6) {
-            Text("技能").frame(width: SkillInsightTableLayout.skillWidth, alignment: .leading)
+            Text(SkillInsightsDisplayLabels.nameColumn).frame(width: SkillInsightTableLayout.skillWidth, alignment: .leading)
             Text("状态").frame(width: SkillInsightTableLayout.stateWidth)
             Text("直接").frame(width: SkillInsightTableLayout.evidenceWidth)
             Text("强证").frame(width: SkillInsightTableLayout.evidenceWidth)
             Text("推断").frame(width: SkillInsightTableLayout.evidenceWidth)
-            Text("影子").frame(width: SkillInsightTableLayout.evidenceWidth)
+            Text(SkillInsightsDisplayLabels.shadowEvidence).frame(width: SkillInsightTableLayout.shadowWidth)
             Text("成本").frame(width: SkillInsightTableLayout.costWidth)
             Text("建议").frame(maxWidth: .infinity, alignment: .trailing)
         }
@@ -187,7 +194,7 @@ private struct SkillInsightTableHeader: View {
         .foregroundStyle(MonitorTheme.textSecondary)
         .padding(.horizontal, 10)
         .frame(height: 26)
-        .help("直接=DIRECT，强证=STRONG，推断=INFERRED，影子=SHADOW；成本为 name + description 的近似目录 Token")
+        .help("直接=DIRECT，强证=STRONG，推断=INFERRED；\(SkillInsightsDisplayLabels.shadowEvidence)=SHADOW。\(SkillInsightsDisplayLabels.shadowExplanation) 成本为 name + description 的近似目录 Token。")
     }
 }
 
@@ -216,7 +223,7 @@ private struct SkillInsightTableRow: View {
             count(row.directCount, color: MonitorTheme.running)
             count(row.strongCount, color: MonitorTheme.healthy)
             count(row.inferredCount, color: MonitorTheme.textSecondary)
-            count(row.shadowCount, color: MonitorTheme.warning)
+            count(row.shadowCount, color: MonitorTheme.warning, width: SkillInsightTableLayout.shadowWidth)
             Text("~\(row.skill.catalogTokenEstimate)")
                 .font(.system(size: 9, weight: .semibold, design: .rounded))
                 .foregroundStyle(MonitorTheme.textSecondary)
@@ -239,12 +246,12 @@ private struct SkillInsightTableRow: View {
         .accessibilityLabel(accessibilityLabel)
     }
 
-    private func count(_ value: Int, color: Color) -> some View {
+    private func count(_ value: Int, color: Color, width: CGFloat = SkillInsightTableLayout.evidenceWidth) -> some View {
         Text("\(value)")
             .font(.system(size: 9.4, weight: .semibold, design: .rounded))
             .foregroundStyle(value > 0 ? color : MonitorTheme.textTertiary)
             .monospacedDigit()
-            .frame(width: SkillInsightTableLayout.evidenceWidth)
+            .frame(width: width)
     }
 
     private var sessionReference: String {
@@ -258,12 +265,13 @@ private struct SkillInsightTableRow: View {
         """
         \(row.skill.path)
         该 Skill 在 \(row.relatedSessionCount) 个 Session 中有证据；相关 Session 合计 \(row.relatedSessionTokens) Token，但无法精确归因到该 Skill。
+        \(SkillInsightsDisplayLabels.shadowEvidence) \(row.shadowCount)：\(SkillInsightsDisplayLabels.shadowExplanation)
         疑似漏触发 \(row.suspectedMissCount)，疑似误触发 \(row.suspectedMisfireCount)，现有能力替代 \(row.replacedByExistingCount)，证据质量 \(row.evidenceQuality.rawValue)。
         """
     }
 
     private var accessibilityLabel: String {
-        "\(row.skill.name)，\(row.skill.enabled ? "启用" : "关闭")，直接 \(row.directCount)，强证 \(row.strongCount)，推断 \(row.inferredCount)，影子 \(row.shadowCount)，建议 \(row.recommendation.rawValue)"
+        "\(row.skill.name)，\(row.skill.enabled ? "启用" : "关闭")，直接 \(row.directCount)，强证 \(row.strongCount)，推断 \(row.inferredCount)，\(SkillInsightsDisplayLabels.shadowEvidence) \(row.shadowCount)，建议 \(row.recommendation.rawValue)"
     }
 
     private var recommendationColor: Color {

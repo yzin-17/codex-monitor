@@ -39,6 +39,32 @@ struct ResetCreditsDisplay: Equatable {
         return "最近到期 \(minutes)分"
     }
 
+    func remainingExpiryText(at now: Date) -> String? {
+        guard availableCount > 0 else { return nil }
+        let futureDates = expiryDates.filter { $0 > now }
+        guard !futureDates.isEmpty else {
+            return expiryDates.isEmpty ? "到期时间未知" : "到期信息待刷新"
+        }
+        return futureDates
+            .map { compactRemainingTime(until: $0, from: now) }
+            .joined(separator: " · ")
+    }
+
+    private func compactRemainingTime(until expiry: Date, from now: Date) -> String {
+        let minutes = max(1, Int(ceil(expiry.timeIntervalSince(now) / 60)))
+        let days = minutes / 1_440
+        let hours = (minutes % 1_440) / 60
+        let remainderMinutes = minutes % 60
+
+        if days > 0 {
+            return hours > 0 ? "\(days)d \(hours)h" : "\(days)d"
+        }
+        if hours > 0 {
+            return remainderMinutes > 0 ? "\(hours)h \(remainderMinutes)m" : "\(hours)h"
+        }
+        return "\(remainderMinutes)m"
+    }
+
     var showsInfoButton: Bool {
         availableCount > 0 && !expiryDates.isEmpty
     }
@@ -162,11 +188,14 @@ struct ResetCreditsIndicator: View {
                     .layoutPriority(1)
 
                 TimelineView(.periodic(from: .now, by: 60)) { context in
-                    if showsCountdown, let text = display.nearestExpiryText(at: context.date) {
+                    if showsCountdown, let text = display.remainingExpiryText(at: context.date) {
                         Text(text)
                             .font(.system(size: fontSize, weight: .semibold, design: .rounded))
-                            .monospacedDigit().foregroundStyle(foregroundColor)
-                            .lineLimit(1).help("最近一笔可用重置次数的到期倒计时，不是 5h/7d 额度自动恢复时间。")
+                            .monospacedDigit()
+                            .foregroundStyle(foregroundColor)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.62)
+                            .help("全部可用重置次数的剩余时间，不是 5h/7d 额度自动恢复时间。")
                     }
                 }
 
