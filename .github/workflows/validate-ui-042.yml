@@ -36,6 +36,13 @@ jobs:
           if '0.4.1' not in s:
               raise SystemExit('no remaining 0.4.1 regression assertion found')
           p.write_text(s.replace('0.4.1', '0.4.2'))
+
+          p = Path('scripts/build-app.sh')
+          s = p.read_text()
+          old = 'APP_VERSION="0.4.1"'
+          if old not in s:
+              raise SystemExit('build-app.sh 0.4.1 version literal not found')
+          p.write_text(s.replace(old, 'APP_VERSION="0.4.2"'))
           PY
           git rm .github/patches/ui-polish-042.part0 .github/patches/ui-polish-042.part1 .github/patches/ui-polish-042.part2 .github/workflows/validate-ui-042.yml
           git add -A
