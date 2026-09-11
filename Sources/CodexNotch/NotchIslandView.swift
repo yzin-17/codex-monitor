@@ -2122,6 +2122,10 @@ private struct TokenUsagePopover: View {
         summary.breakdown
     }
 
+    private var modelRows: [TokenModelCostRow] {
+        summary.modelCostRows
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 11) {
             HStack(alignment: .firstTextBaseline) {
@@ -2159,6 +2163,11 @@ private struct TokenUsagePopover: View {
             }
             .font(.system(size: 11.5, weight: .semibold))
 
+            if !modelRows.isEmpty {
+                Divider()
+                modelCostBreakdown
+            }
+
             if !summary.hasComponentData, summary.totalTokens > 0 {
                 Text("本地记录未提供完整的 Token 构成明细")
                     .foregroundStyle(.secondary)
@@ -2175,16 +2184,58 @@ private struct TokenUsagePopover: View {
         }
         .font(.system(size: 10.5, weight: .medium))
         .padding(14)
-        .frame(width: 286, alignment: .leading)
+        .frame(width: 370, alignment: .leading)
         .background(Color(red: 0.055, green: 0.058, blue: 0.064))
         .onHover(perform: onHoverChanged)
         .preferredColorScheme(.dark)
+    }
+
+    private var modelCostBreakdown: some View {
+        VStack(spacing: 6) {
+            HStack(spacing: 8) {
+                Text("模型").frame(maxWidth: .infinity, alignment: .leading)
+                Text("Token").frame(width: 52, alignment: .trailing)
+                Text("费用").frame(width: 70, alignment: .trailing)
+                Text("占比").frame(width: 44, alignment: .trailing)
+            }
+            .font(.system(size: 9.2, weight: .semibold))
+            .foregroundStyle(.tertiary)
+
+            ScrollView(.vertical, showsIndicators: false) {
+                LazyVStack(spacing: 6) {
+                    ForEach(modelRows) { row in
+                        HStack(spacing: 8) {
+                            Text(row.model)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .help(row.model)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Text(Formatters.compactTokens(row.tokens))
+                                .frame(width: 52, alignment: .trailing)
+                            Text(Formatters.estimatedCostUSD(row.costUSD))
+                                .frame(width: 70, alignment: .trailing)
+                            Text(modelShareText(row.costSharePercent))
+                                .frame(width: 44, alignment: .trailing)
+                        }
+                        .font(.system(size: 9.8, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(row.isComplete ? .primary : .secondary)
+                    }
+                }
+            }
+            .frame(maxHeight: 164)
+        }
     }
 
     private var cacheHitRateText: String {
         guard summary.hasComponentData, breakdown.inputTokens > 0 else { return "—" }
         let ratio = Double(breakdown.cachedInputTokens) / Double(breakdown.inputTokens) * 100
         return String(format: "%.1f%%", min(100, max(0, ratio)))
+    }
+
+    private func modelShareText(_ value: Double?) -> String {
+        guard let value, value.isFinite, value >= 0 else { return "--" }
+        return value >= 99.95 ? "100%" : String(format: "%.1f%%", value)
     }
 
     private func usageRow(_ label: String, tokens: Int) -> some View {

@@ -31,6 +31,23 @@ struct TokenUsageBreakdown: Equatable, Sendable {
     }
 }
 
+struct TokenModelCostRow: Equatable, Identifiable, Sendable {
+    let model: String
+    let tokens: Int
+    let costUSD: Double?
+    let costSharePercent: Double?
+    let isComplete: Bool
+
+    var id: String { model }
+}
+
+private struct TokenModelCostAccumulator {
+    var tokens = 0
+    var costUSD = 0.0
+    var hasPricedUsage = false
+    var hasUnpricedUsage = false
+}
+
 // Keep token components by model and per-request context tier. Cached summaries can
 // then use a new price catalog without scanning the user's rollout files again.
 struct TokenUsageSummary: Equatable, Sendable {
@@ -63,6 +80,63 @@ struct TokenUsageSummary: Equatable, Sendable {
         return totalTokens > value.unpriced ? value.cost : nil
     }
     var isComplete: Bool { totalTokens > 0 && unpricedTokens == 0 }
+
+    var modelCostRows: [TokenModelCostRow] {
+        let catalog = TokenCostCatalog.remoteSnapshot
+        var aggregates: [String: TokenModelCostAccumulator] = [:]
+
+        for (bucket, usage) in components {
+            var aggregate = aggregates[bucket.model] ?? TokenModelCostAccumulator()
+            aggregate.tokens = Self.saturatingAdd(aggregate.tokens, usage.totalTokens)
+            if usage.hasComponentData,
+               let price = TokenCostCatalog.price(for: bucket.model, remote: catalog) {
+                aggregate.costUSD += price.cost(for: usage, longContext: bucket.longContext)
+                aggregate.hasPricedUsage = true
+            } else {
+                aggregate.hasUnpricedUsage = true
+            }
+            aggregates[bucket.model] = aggregate
+        }
+
+        if missingTokens > 0 {
+            let label = missingModels.count == 1 ? (missingModels.first ?? "未定价明细") : "未定价明细"
+            var aggregate = aggregates[label] ?? TokenModelCostAccumulator()
+            aggregate.tokens = Self.saturatingAdd(aggregate.tokens, missingTokens)
+            aggregate.hasUnpricedUsage = true
+            aggregates[label] = aggregate
+        }
+
+        let knownCostTotal = aggregates.values.reduce(0.0) { partial, aggregate in
+            partial + (aggregate.hasPricedUsage ? aggregate.costUSD : 0)
+        }
+
+        return aggregates.map { model, aggregate in
+            let cost = aggregate.hasPricedUsage ? aggregate.costUSD : nil
+            let share = cost.flatMap { value in
+                knownCostTotal > 0 ? value / knownCostTotal * 100 : nil
+            }
+            return TokenModelCostRow(
+                model: model,
+                tokens: aggregate.tokens,
+                costUSD: cost,
+                costSharePercent: share,
+                isComplete: aggregate.hasPricedUsage && !aggregate.hasUnpricedUsage
+            )
+        }
+        .sorted { lhs, rhs in
+            switch (lhs.costUSD, rhs.costUSD) {
+            case let (left?, right?) where left != right:
+                return left > right
+            case (.some, .none):
+                return true
+            case (.none, .some):
+                return false
+            default:
+                if lhs.tokens != rhs.tokens { return lhs.tokens > rhs.tokens }
+                return lhs.model.localizedCaseInsensitiveCompare(rhs.model) == .orderedAscending
+            }
+        }
+    }
 
     mutating func add(_ usage: TokenUsageBreakdown, model: String?) {
         breakdown.add(usage)
