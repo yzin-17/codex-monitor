@@ -55,7 +55,7 @@ struct HUDEntityData: Equatable {
         return validPercent(primary) != nil
     }
     private var hidesFiveHourQuota: Bool {
-        CodexPlanKind(planType: planType) == .pro || !hasFiveHourQuota
+        !hasFiveHourQuota
     }
     private func isFiveHourMetric(_ metric: HUDMetric) -> Bool {
         [.fiveHour, .primary, .primaryPace, .primaryCountdown, .primaryResetTime].contains(metric)

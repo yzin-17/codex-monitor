@@ -42,6 +42,9 @@ final class CodexRadarViewModel: ObservableObject {
         self.cacheDirectory = cacheDirectory
         self.selectionDefaults = selectionDefaults
         self.now = now
+        if settings.preferenceStore.object(forKey: "codexRadarEnabled") == nil {
+            settings.codexRadarEnabled = true
+        }
         selectedDimension = selectionDefaults.string(forKey: "codexRadarDimension")
             .flatMap(CodexRadarDimension.init(rawValue:)) ?? .comprehensive
         observedEnabled = settings.codexRadarEnabled
