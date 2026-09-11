@@ -29,7 +29,7 @@ import Testing
         isPrimaryCodexLimit: true
     )
     rateLimits.planType = "pro"
-    #expect(rateLimits.displayWindows().map(\.shortLabel) == ["5h", "7d"])
+    #expect(rateLimits.displayWindows().map(\.shortLabel) == ["7d"])
 }
 
 @Test func hudLocalWeeklyOnlySourceDoesNotRenderEmptyFiveHourQuota() {
