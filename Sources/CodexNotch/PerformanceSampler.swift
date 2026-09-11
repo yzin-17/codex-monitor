@@ -1,6 +1,9 @@
 import Foundation
 
 enum PerformanceSampler {
+    static let processListTimeout: TimeInterval = 5
+    static let memoryPressureTimeout: TimeInterval = 3
+
     static func capture(
         now: Date = Date(),
         cachedMemoryFreePercent: Int? = nil,
@@ -9,14 +12,14 @@ enum PerformanceSampler {
         let processOutput = try Shell.run(
             "/bin/ps",
             ["-axo", "pid=,ppid=,%cpu=,rss=,comm="],
-            timeout: 2
+            timeout: processListTimeout
         )
         let memoryFreePercent: Int?
         if refreshMemoryPressure {
             let memoryOutput = try? Shell.run(
                 "/usr/bin/memory_pressure",
                 ["-Q"],
-                timeout: 2
+                timeout: memoryPressureTimeout
             )
             memoryFreePercent = memoryOutput.flatMap(parseMemoryFreePercent)
         } else {
