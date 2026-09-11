@@ -179,6 +179,12 @@ struct ConfigurableHUDView: View {
     var menuBar = false
     var notch: IslandLayout? = nil
 
+    /// 兼容旧测试/诊断调用：反映编辑器当前选择的数据源；HUD 运行时不会用它切换布局或改绑控件。
+    var data: HUDEntityData {
+        .resolve(source: preferences.value.sourceID, usage: usage, remote: remote, newAPI: newAPI, subAPI: subAPI,
+                 accounts: accounts, settings: settings)
+    }
+
     /// 布局不再拥有“当前账号”。没有绑定信息的旧 token 只回退本机 Codex。
     private var localData: HUDEntityData {
         .resolve(source: "local", usage: usage, remote: remote, newAPI: newAPI, subAPI: subAPI,
