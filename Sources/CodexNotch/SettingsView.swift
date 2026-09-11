@@ -661,7 +661,8 @@ struct SettingsView: View {
             remote: remoteViewModel, newAPI: newAPIViewModel, subAPI: subAPIViewModel,
             notchDisplaySize: Binding(get: { settings.notchDisplaySize }, set: { settings.notchDisplaySize = $0; draft.notchDisplaySize = $0 }),
             notchAdjustment: Binding(get: { settings.notchWidthAdjustment }, set: { settings.notchWidthAdjustment = $0; draft.notchWidthAdjustment = $0 }),
-            legacySource: Binding(get: { settings.notchDisplaySource }, set: { settings.notchDisplaySource = $0; draft.notchDisplaySource = $0 }))
+            legacySource: Binding(get: { settings.notchDisplaySource }, set: { settings.notchDisplaySource = $0; draft.notchDisplaySource = $0 }),
+            pulseEnabled: $draft.enablePulse)
 
         Section("启动与外观") {
             Picker(selection: $draft.secretStorageMode) {
@@ -707,7 +708,7 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("codex监测")
                             .font(.system(size: 18, weight: .bold))
-                        Text("Mac 刘海屏上的 Codex 与远程账号监测工具")
+                        Text("Codex 本地用量、性能、Skills、预测与多账号监测工具")
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(.secondary)
                     }
@@ -718,10 +719,11 @@ struct SettingsView: View {
                 Divider()
 
                 infoRow(title: "版本", value: AppInfo.displayVersion)
-                infoRow(title: "本机监测", value: "Codex 运行状态、额度和 token 用量")
-                infoRow(title: "远程监测", value: "远程 Codex 账号、NewAPI 余额、Sub2API 余额")
+                infoRow(title: "本机", value: "运行状态、5h / 7d 额度、会话 Token 与 API 等价费用")
+                infoRow(title: "分析", value: "性能、Skills、Codex Radar 与社区重置预测")
+                infoRow(title: "远程", value: "Codex 官方账号、网关账号池与 NewAPI / Sub2API 余额")
 
-                Text("codex监测用于在 Mac 刘海屏区域展示 Codex 本机状态、额度用量和远程账号监测信息。")
+                Text("codex监测以菜单栏 / 刘海 HUD 提供常驻摘要，并通过展开面板集中查看本机任务、额度、代理费用、服务状态、预测与远程账号。网络数据源均按设置启用。")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1579,6 +1581,7 @@ struct SettingsView: View {
                 draft.resetRefreshDefaults()
                 selectedPreset = .balanced
             }
+            .help("仅把 Codex 本机的活跃、空闲、用量、文件监听和文件变更最小间隔恢复为平衡预设；不会立即刷新，也不会改动账号、外观、布局或远程数据源。点击“保存”后生效。")
 
             if !settings.secretStoreReady {
                 Text("正在读取认证信息")

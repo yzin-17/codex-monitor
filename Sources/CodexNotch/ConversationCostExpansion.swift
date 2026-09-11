@@ -107,13 +107,15 @@ import SwiftUI
                 Text(agent.model).lineLimit(1).foregroundStyle(.secondary)
                 Spacer(minLength: 4)
                 Text(agent.hasUsage ? Formatters.compactTokens(agent.usage.totalTokens) : "—")
-                Text(agent.hasUsage ? Formatters.estimatedCostUSD(agent.usage.costUSD) : "不可归属")
-                    .foregroundStyle(.cyan)
+                Text(agent.hasUsage ? Formatters.estimatedCostUSD(agent.usage.costUSD) : "未读到用量")
+                    .foregroundStyle(agent.hasUsage ? .cyan : .secondary)
+                    .help(agent.hasUsage ? "API 等价费用估算" : "已识别该代理，但当前扫描范围内没有读到可独立归属给它的 token_count 记录；不会按 $0 处理。")
             }.monospacedDigit()
             if agent.depth > 1 { Text("第 \(agent.depth) 层 · 上级 \(agent.parentID?.prefix(8) ?? "未知")").foregroundStyle(.secondary) }
             if agent.usage.unpricedTokens > 0 {
                 note("\(Formatters.compactTokens(agent.usage.unpricedTokens)) Token 缺少价格或明细，未计入金额。")
             } else if !agent.complete { note("日志仍未完整读取。") }
+            else if !agent.hasUsage { note("已识别代理身份，但日志没有该代理可独立归属的 token_count；费用保持未知。") }
         }
     }
     private func note(_ text: String) -> some View {

@@ -3,6 +3,7 @@ import SwiftUI
 struct PublicInsightCard: View {
     let source: PublicInsightSource
     @ObservedObject var store: PublicInsightsStore
+    @State private var statusComponentsExpanded = false
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
@@ -26,9 +27,8 @@ struct PublicInsightCard: View {
             }
             if let error = store.errors[source] { Text(error).font(.system(size: 10)).foregroundStyle(MonitorTheme.warning) }
             if source == .willReset {
-                Text("邮件提醒：可前往网站自行订阅。订阅与退订由网站管理，本工具不读取邮箱或接收邮件通知。")
-                    .font(.system(size: 10)).foregroundStyle(MonitorTheme.textSecondary)
-                Link("前往网站订阅 ↗", destination: source.website).font(.system(size: 11)).tint(MonitorTheme.textPrimary)
+                Link("前往网站邮件订阅 ↗", destination: source.website)
+                    .font(.system(size: 11)).tint(MonitorTheme.textPrimary)
             }
             HStack {
                 Link("查看来源 ↗", destination: source.website).tint(MonitorTheme.textSecondary)
@@ -76,13 +76,29 @@ struct PublicInsightCard: View {
                 Circle().fill(snapshot.overallIndicator == "none" ? MonitorTheme.healthy : MonitorTheme.warning).frame(width: 6, height: 6)
                 Text("OpenAI 总体：\(snapshot.summary)").font(.system(size: 11)).foregroundStyle(MonitorTheme.textPrimary)
             }
-            statusComponents(snapshot.components)
-            if snapshot.components.isEmpty { Text("本次响应没有组件状态。").font(.system(size: 10)).foregroundStyle(MonitorTheme.warning) }
-            ForEach(Array(snapshot.incidents.enumerated()), id: \.offset) { _, text in
-                Text("官方事件：\(text)").font(.system(size: 10)).foregroundStyle(MonitorTheme.warning)
+            DisclosureGroup(isExpanded: $statusComponentsExpanded) {
+                VStack(alignment: .leading, spacing: 6) {
+                    statusComponents(snapshot.components)
+                    if snapshot.components.isEmpty {
+                        Text("本次响应没有组件状态。").font(.system(size: 10)).foregroundStyle(MonitorTheme.warning)
+                    }
+                    ForEach(Array(snapshot.incidents.enumerated()), id: \.offset) { _, text in
+                        Text("官方事件：\(text)").font(.system(size: 10)).foregroundStyle(MonitorTheme.warning)
+                    }
+                    Text("官方聚合状态不代表你的网络、账号或单次请求一定正常。")
+                        .font(.system(size: 10)).foregroundStyle(MonitorTheme.textTertiary)
+                }
+                .padding(.top, 6)
+            } label: {
+                HStack {
+                    Text("服务组件").font(.system(size: 11, weight: .semibold)).foregroundStyle(MonitorTheme.textPrimary)
+                    Spacer()
+                    let affected = snapshot.components.filter(\.affected).count
+                    Text(affected == 0 ? "\(snapshot.components.count) 项正常" : "\(affected) 项受影响")
+                        .font(.system(size: 10)).foregroundStyle(affected == 0 ? MonitorTheme.healthy : MonitorTheme.warning)
+                }
             }
-            Text("官方聚合状态不代表你的网络、账号或单次请求一定正常。")
-                .font(.system(size: 10)).foregroundStyle(MonitorTheme.textTertiary)
+            .tint(MonitorTheme.textSecondary)
         }
         Text("最近获取：\(snapshot.fetchedAt.formatted(date: .abbreviated, time: .shortened))")
             .font(.system(size: 10)).foregroundStyle(MonitorTheme.textTertiary)

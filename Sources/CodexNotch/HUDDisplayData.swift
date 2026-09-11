@@ -87,7 +87,7 @@ struct HUDEntityData: Equatable {
     func resolvedMetric(raw: String, layout: HUDLayout, now: Date = Date()) -> HUDMetric? {
         guard let kind = HUDMetric.parse(raw) else { return nil }
         guard kind == .conditional else { return kind }
-        guard let stored = layout.conditionals[String(raw.dropFirst(12))], warning == nil else { return nil }
+        guard let id = HUDLayoutToken.conditionalID(raw), let stored = layout.conditionals[id], warning == nil else { return nil }
         if let capturedAt, now.timeIntervalSince(capturedAt) > 600 { return nil }
         let rule = stored.normalized
         var results: [Bool] = []

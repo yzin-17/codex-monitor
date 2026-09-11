@@ -222,5 +222,6 @@ private struct ResetCreditsExpiryPopover: View {
         }
         .padding(14)
         .frame(minWidth: 226, alignment: .leading)
+        .preferredColorScheme(.dark)
     }
 }

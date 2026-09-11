@@ -638,7 +638,12 @@ final class NotchOverlayController {
             accounts: settings.codexAccounts, settings: settings)
         let layoutKey = settings.hudPreferences.value.providerLayouts[settings.hudPreferences.value.sourceID] != nil ? settings.hudPreferences.value.sourceID : data.providerID
         let width = HUDMetricStrip.measuredWidth(layout: settings.hudPreferences.value.layout(for: layoutKey),
-            data: data, remaining: settings.hudPreferences.value.showRemaining, menuBar: true)
+            data: data, remaining: settings.hudPreferences.value.showRemaining, menuBar: true,
+            dataForRaw: { [self] raw in
+                HUDEntityData.resolve(source: HUDLayoutToken.sourceID(raw) ?? settings.hudPreferences.value.sourceID,
+                    usage: viewModel, remote: remoteViewModel, newAPI: newAPIViewModel, subAPI: subAPIViewModel,
+                    accounts: settings.codexAccounts, settings: settings)
+            })
         let alertWidth: CGFloat = viewModel.publicInsights.forecastAlert == nil ? 0 : 66
         return FloatingHUDGeometry.frame(screen: screen.frame, menuBarHeight: MenuBarMetrics.height(for: screen),
             contentSize: .init(width: width + alertWidth + 16 + 9 + HUDRuntimeStatus.reservedWidth, height: 20),
@@ -803,7 +808,12 @@ final class NotchOverlayController {
             accounts: settings.codexAccounts, settings: settings)
         let layoutKey = settings.hudPreferences.value.providerLayouts[settings.hudPreferences.value.sourceID] != nil ? settings.hudPreferences.value.sourceID : data.providerID
         let needed = HUDMetricStrip.measuredWidth(layout: settings.hudPreferences.value.layout(for: layoutKey),
-            data: data, remaining: settings.hudPreferences.value.showRemaining, menuBar: false) + 12
+            data: data, remaining: settings.hudPreferences.value.showRemaining, menuBar: false,
+            dataForRaw: { [self] raw in
+                HUDEntityData.resolve(source: HUDLayoutToken.sourceID(raw) ?? settings.hudPreferences.value.sourceID,
+                    usage: viewModel, remote: remoteViewModel, newAPI: newAPIViewModel, subAPI: subAPIViewModel,
+                    accounts: settings.codexAccounts, settings: settings)
+            }) + 12
             + (viewModel.publicInsights.forecastAlert == nil ? 0 : 66)
         let right = max(layout.shoulderWidth, min(settings.hudPreferences.value.normalized.maximumWidth, needed))
         // 物理刘海仍严格居中；只向右增加自定义区域，不挤占固定状态或改变遮挡区。

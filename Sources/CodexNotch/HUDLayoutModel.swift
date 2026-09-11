@@ -68,7 +68,40 @@ enum HUDMetric: String, Codable, CaseIterable, Identifiable, Sendable {
     var isCountdown: Bool { [.resetCountdown, .primaryCountdown, .weeklyCountdown, .scopedCountdown].contains(self) }
     var isAbsoluteReset: Bool { [.resetTime, .primaryResetTime, .weeklyResetTime, .scopedResetTime].contains(self) }
     var isNumeric: Bool { isQuota || isPace || isCountdown || [.runsOut, .runsOutCompact, .costToday, .cost30d].contains(self) }
-    static func parse(_ raw: String) -> Self? { Self(rawValue: String(raw.split(separator: ":").first ?? "")) }
+    static func parse(_ raw: String) -> Self? {
+        let core = HUDLayoutToken.core(raw)
+        return Self(rawValue: String(core.split(separator: ":").first ?? ""))
+    }
+}
+
+enum HUDLayoutToken {
+    static let bindingSeparator = "@@"
+
+    static func core(_ raw: String) -> String {
+        raw.components(separatedBy: bindingSeparator).first ?? raw
+    }
+
+    static func sourceID(_ raw: String) -> String? {
+        let parts = raw.components(separatedBy: bindingSeparator)
+        guard parts.count == 2 else { return nil }
+        let source = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !source.isEmpty, source.count <= 150, !source.contains(bindingSeparator) else { return nil }
+        return source
+    }
+
+    static func applying(sourceID: String?, to raw: String) -> String {
+        let base = core(raw)
+        guard let sourceID = sourceID?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !sourceID.isEmpty, sourceID.count <= 150, !sourceID.contains(bindingSeparator),
+              let metric = HUDMetric.parse(base), ![.space, .separatorDot, .hidden].contains(metric) else { return base }
+        return base + bindingSeparator + sourceID
+    }
+
+    static func conditionalID(_ raw: String) -> String? {
+        let core = core(raw)
+        guard core.hasPrefix("conditional:") else { return nil }
+        return String(core.dropFirst("conditional:".count))
+    }
 }
 
 enum HUDComparison: String, Codable, CaseIterable, Identifiable, Sendable {
@@ -127,27 +160,33 @@ struct HUDLayout: Codable, Equatable, Sendable {
             var row: [String] = []
             for raw in line where row.count < Self.maximumItemsPerLine {
                 guard let kind = HUDMetric.parse(raw), kind != .state else { continue }
+                let core = HUDLayoutToken.core(raw)
                 if kind == .conditional {
-                    guard let id = raw.split(separator: ":").last.map(String.init), rules[id] != nil else { continue }
-                } else if kind != .space && kind.rawValue != raw { continue }
-                let value = kind == .space ? "space:\(Self.spaceWidth(raw))" : raw
+                    guard let id = HUDLayoutToken.conditionalID(raw), rules[id] != nil else { continue }
+                } else if kind != .space && kind.rawValue != core { continue }
+                let value: String
+                if kind == .space { value = "space:\(Self.spaceWidth(core))" }
+                else if let source = HUDLayoutToken.sourceID(raw) { value = HUDLayoutToken.applying(sourceID: source, to: core) }
+                else { value = core }
                 if [.space, .separatorDot].contains(kind) || seen.insert(value).inserted { row.append(value); valid += 1 }
             }
             return row
         }
         // 显式清空右侧是允许的：固定运行状态不会被清空。损坏/未知配置仍回退安全预设。
         if safe.isEmpty || (valid == 0 && lines.joined().contains(where: { $0 != "state" })) { return .compact }
-        let used = Set(safe.joined().compactMap { raw -> String? in raw.hasPrefix("conditional:") ? String(raw.dropFirst(12)) : nil })
+        let used = Set(safe.joined().compactMap(HUDLayoutToken.conditionalID))
         return .init(lines: safe, conditionals: rules.filter { used.contains($0.key) })
     }
     static func spaceWidth(_ raw: String) -> Int {
-        let parts = raw.split(separator: ":")
+        let parts = HUDLayoutToken.core(raw).split(separator: ":")
         return min(48, max(2, parts.count == 2 ? Int(parts[1]) ?? 8 : 8))
     }
     func inserting(_ metric: HUDMetric, row: Int, before: HUDMetric? = nil) -> Self {
         guard metric != .state, metric != .conditional else { return normalized }
         var next = normalized
-        if metric != .space && metric != .separatorDot { next.lines = next.lines.map { $0.filter { HUDMetric.parse($0) != metric } } }
+        if metric != .space && metric != .separatorDot {
+            next.lines = next.lines.map { $0.filter { $0 != metric.rawValue } }
+        }
         let row = min(1, max(0, row)); while next.lines.count <= row { next.lines.append([]) }
         guard next.lines[row].count < Self.maximumItemsPerLine else { return self }
         let index = before.flatMap { wanted in next.lines[row].firstIndex(where: { HUDMetric.parse($0) == wanted }) } ?? next.lines[row].count
@@ -168,6 +207,14 @@ struct HUDLayout: Codable, Equatable, Sendable {
         let raw = next.lines[source.row].remove(at: source.index)
         if source.row == target && source.index < index { index -= 1 }
         next.lines[target].insert(raw, at: index); return next.normalized
+    }
+    func settingSource(_ sourceID: String?, at p: HUDLayoutPosition) -> Self {
+        var next = normalized
+        guard next.contains(p) else { return self }
+        let raw = next.lines[p.row][p.index]
+        guard let metric = HUDMetric.parse(raw), ![.space, .separatorDot, .hidden].contains(metric) else { return self }
+        next.lines[p.row][p.index] = HUDLayoutToken.applying(sourceID: sourceID, to: raw)
+        return next.normalized
     }
     func settingSpace(_ width: Int, at p: HUDLayoutPosition) -> Self {
         var next = normalized; guard next.contains(p), HUDMetric.parse(next.lines[p.row][p.index]) == .space else { return self }

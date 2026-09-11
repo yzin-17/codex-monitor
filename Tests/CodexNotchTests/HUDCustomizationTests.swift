@@ -246,3 +246,38 @@ private final class TestCodexVault: @unchecked Sendable {
     #expect(!containsVisualEffect(host))
     #expect(HUDMetricStrip.measuredWidth(layout: .init(lines: [["space:8", "space:16"]]), data: .init(), remaining: true, menuBar: true) == 29)
 }
+
+@Test func hudControlsCanBindDifferentSourcesWithoutChangingDefaultSource() {
+    let work = "codex-account:11111111-1111-1111-1111-111111111111"
+    let personal = "codex-account:22222222-2222-2222-2222-222222222222"
+    var layout = HUDLayout(lines: [["weekly", "fiveHour"]])
+    layout = layout.settingSource(work, at: .init(row: 0, index: 0))
+    layout = layout.settingSource(personal, at: .init(row: 0, index: 1))
+    #expect(HUDLayoutToken.sourceID(layout.lines[0][0]) == work)
+    #expect(HUDLayoutToken.sourceID(layout.lines[0][1]) == personal)
+    #expect(HUDMetric.parse(layout.lines[0][0]) == .weekly)
+    #expect(HUDMetric.parse(layout.lines[0][1]) == .fiveHour)
+}
+
+@Test func hudCanKeepBoundAndUnboundCopiesOfSameMetric() {
+    let source = "codex-account:33333333-3333-3333-3333-333333333333"
+    var layout = HUDLayout(lines: [["weekly"]])
+    layout = layout.settingSource(source, at: .init(row: 0, index: 0))
+    layout = layout.inserting(.weekly, row: 0)
+    #expect(layout.lines[0].count == 2)
+    #expect(layout.lines[0].contains("weekly"))
+    #expect(layout.lines[0].contains("weekly@@" + source))
+    layout = layout.settingSource(nil, at: .init(row: 0, index: 0))
+    #expect(layout.normalized.lines[0].filter { HUDMetric.parse($0) == .weekly }.count == 1)
+}
+
+@Test @MainActor func hudMetricWidthUsesBoundSourceData() {
+    let source = "codex-account:44444444-4444-4444-4444-444444444444"
+    let layout = HUDLayout(lines: [["account@@" + source]])
+    let fallback = HUDEntityData(account: "A")
+    let width = HUDMetricStrip.measuredWidth(layout: layout, data: fallback, remaining: true, menuBar: true) { raw in
+        HUDLayoutToken.sourceID(raw) == source ? HUDEntityData(account: "一个更长的工作账号") : fallback
+    }
+    let fallbackWidth = HUDMetricStrip.measuredWidth(layout: HUDLayout(lines: [["account"]]), data: fallback, remaining: true, menuBar: true)
+    #expect(width > fallbackWidth)
+}
