@@ -9,12 +9,12 @@ permissions:
 
 jobs:
   patch:
-    if: github.event.head_commit.message != 'chore: apply UI polish patch'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: fix/hud-layout-status-titles
+          persist-credentials: true
       - name: Apply focused SwiftUI fixes
         shell: bash
         run: |
@@ -25,9 +25,12 @@ jobs:
               p = Path(path)
               text = p.read_text()
               count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f"{path}: expected one match, got {count}")
-              p.write_text(text.replace(old, new, 1))
+              if count == 1:
+                  p.write_text(text.replace(old, new, 1))
+                  return
+              if count == 0 and new in text:
+                  return
+              raise SystemExit(f"{path}: expected one old match or an already-applied replacement, got {count}")
 
           replace_once(
               "Sources/CodexNotch/HUDContentView.swift",
@@ -102,12 +105,16 @@ jobs:
 '''
           )
           PY
-      - name: Commit patch
+      - name: Commit patch if needed
         shell: bash
         run: |
           git config user.name "yzin"
           git config user.email "30586807+yzin-17@users.noreply.github.com"
           git add Sources/CodexNotch/HUDContentView.swift Sources/CodexNotch/HUDLayoutEditorView.swift Sources/CodexNotch/NotchIslandView.swift
           git diff --cached --check
-          git commit -m "chore: apply UI polish patch"
+          if git diff --cached --quiet; then
+            echo "Patch already applied"
+            exit 0
+          fi
+          git commit -m "fix: polish HUD and panel presentation"
           git push origin HEAD:fix/hud-layout-status-titles
