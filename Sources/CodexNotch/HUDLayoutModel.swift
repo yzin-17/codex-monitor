@@ -22,7 +22,8 @@ enum HUDMetric: String, Codable, CaseIterable, Identifiable, Sendable {
     case primaryResetTime, weeklyResetTime, scopedResetTime, runsOut, runsOutCompact
     case balance, costToday, cost30d, separatorDot, space, hidden, conditional
     var id: String { rawValue }
-    static let palette = allCases.filter { $0 != .state && $0 != .hidden }
+    var isOrdinalLane: Bool { [.primaryLane, .secondaryLane, .tertiaryLane].contains(self) }
+    static let palette = allCases.filter { $0 != .state && $0 != .hidden && !$0.isOrdinalLane }
     static let groups = ["身份", "用量", "时间", "费用", "布局", "条件"]
     var title: String {
         switch self {
@@ -93,7 +94,7 @@ enum HUDLayoutToken {
         let base = core(raw)
         guard let sourceID = sourceID?.trimmingCharacters(in: .whitespacesAndNewlines),
               !sourceID.isEmpty, sourceID.count <= 150, !sourceID.contains(bindingSeparator),
-              let metric = HUDMetric.parse(base), ![.space, .separatorDot, .hidden].contains(metric) else { return base }
+              let metric = HUDMetric.parse(base), ![.icon, .space, .separatorDot, .hidden].contains(metric) else { return base }
         return base + bindingSeparator + sourceID
     }
 
@@ -213,7 +214,7 @@ struct HUDLayout: Codable, Equatable, Sendable {
         var next = normalized
         guard next.contains(p) else { return self }
         let raw = next.lines[p.row][p.index]
-        guard let metric = HUDMetric.parse(raw), ![.space, .separatorDot, .hidden].contains(metric) else { return self }
+        guard let metric = HUDMetric.parse(raw), ![.icon, .space, .separatorDot, .hidden].contains(metric) else { return self }
         next.lines[p.row][p.index] = HUDLayoutToken.applying(sourceID: sourceID, to: raw)
         return next.normalized
     }
