@@ -4,11 +4,11 @@ import Foundation
 /// 只改变窗口的裁剪区域；展开时内容保持最终尺寸和原字号，不缩放文字。
 enum FloatingHUDGeometry {
     static func frame(screen: CGRect, menuBarHeight: CGFloat, contentSize: CGSize,
-                      maximumWidth: CGFloat, position: Double) -> CGRect {
+                      maximumWidth _: CGFloat, position: Double) -> CGRect {
         let barHeight = menuBarHeight.isFinite && menuBarHeight > 0 ? menuBarHeight : 24
         let height = max(1, min(100, barHeight))
-        let maxWidth = maximumWidth.isFinite ? min(360, max(70, maximumWidth)) : 220
-        let width = min(max(1, screen.width - 24), min(maxWidth, max(70, contentSize.width)))
+        // 浮窗宽度完全跟随 HUD 内容，只在接近屏幕边缘时保留 12 pt 边距。
+        let width = min(max(1, screen.width - 24), max(70, contentSize.width))
         let available = max(0, screen.width - width - 24)
         let fraction = position.isFinite ? min(1, max(0, position)) : 0.5
         return CGRect(x: screen.minX + 12 + available * fraction,
