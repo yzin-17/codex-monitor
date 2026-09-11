@@ -43,11 +43,19 @@ struct HUDEntityData: Equatable {
         [primaryWindow, weeklyWindow].compactMap { $0 }.filter { validPercent($0.remaining) != nil }
             .min { ($0.remaining ?? 100) < ($1.remaining ?? 100) }
     }
+    private var hasFiveHourQuota: Bool {
+        if let lane = lanes.first(where: {
+            $0.label.lowercased().replacingOccurrences(of: " ", with: "") == "5h"
+        }), validPercent(lane.remaining) != nil {
+            return true
+        }
+        if let primaryWindow, validPercent(primaryWindow.remaining) != nil {
+            return true
+        }
+        return validPercent(primary) != nil
+    }
     private var hidesFiveHourQuota: Bool {
-        if CodexPlanKind(planType: planType) == .pro { return true }
-        if planType != nil { return false }
-        guard providerID == "codex", weeklyWindow != nil else { return false }
-        return primaryWindow == nil && !lanes.contains { $0.label.lowercased().replacingOccurrences(of: " ", with: "") == "5h" }
+        CodexPlanKind(planType: planType) == .pro || !hasFiveHourQuota
     }
     private func isFiveHourMetric(_ metric: HUDMetric) -> Bool {
         [.fiveHour, .primary, .primaryPace, .primaryCountdown, .primaryResetTime].contains(metric)
