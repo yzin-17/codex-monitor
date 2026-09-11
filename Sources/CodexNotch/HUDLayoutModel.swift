@@ -181,16 +181,17 @@ struct HUDLayout: Codable, Equatable, Sendable {
         let parts = HUDLayoutToken.core(raw).split(separator: ":")
         return min(48, max(2, parts.count == 2 ? Int(parts[1]) ?? 8 : 8))
     }
-    func inserting(_ metric: HUDMetric, row: Int, before: HUDMetric? = nil) -> Self {
+    func inserting(_ metric: HUDMetric, row: Int, before: HUDMetric? = nil, sourceID: String? = nil) -> Self {
         guard metric != .state, metric != .conditional else { return normalized }
         var next = normalized
+        let raw = metric == .space ? "space:8" : HUDLayoutToken.applying(sourceID: sourceID, to: metric.rawValue)
         if metric != .space && metric != .separatorDot {
-            next.lines = next.lines.map { $0.filter { $0 != metric.rawValue } }
+            next.lines = next.lines.map { $0.filter { $0 != raw } }
         }
         let row = min(1, max(0, row)); while next.lines.count <= row { next.lines.append([]) }
         guard next.lines[row].count < Self.maximumItemsPerLine else { return self }
         let index = before.flatMap { wanted in next.lines[row].firstIndex(where: { HUDMetric.parse($0) == wanted }) } ?? next.lines[row].count
-        next.lines[row].insert(metric == .space ? "space:8" : metric.rawValue, at: index)
+        next.lines[row].insert(raw, at: index)
         return next.normalized
     }
     func removing(_ metric: HUDMetric) -> Self { .init(lines: normalized.lines.map { $0.filter { HUDMetric.parse($0) != metric } }, conditionals: conditionals).normalized }
@@ -220,11 +221,12 @@ struct HUDLayout: Codable, Equatable, Sendable {
         var next = normalized; guard next.contains(p), HUDMetric.parse(next.lines[p.row][p.index]) == .space else { return self }
         next.lines[p.row][p.index] = "space:\(min(48, max(2, width)))"; return next.normalized
     }
-    func addingConditional(_ rule: HUDConditional, id: String = UUID().uuidString) -> Self {
+    func addingConditional(_ rule: HUDConditional, id: String = UUID().uuidString, sourceID: String? = nil) -> Self {
         var next = normalized; guard UUID(uuidString: id) != nil else { return self }
         let row = max(0, next.lines.count - 1)
         guard next.lines[row].count < Self.maximumItemsPerLine else { return self }
-        next.conditionals[id] = rule.normalized; next.lines[row].append("conditional:" + id)
+        next.conditionals[id] = rule.normalized
+        next.lines[row].append(HUDLayoutToken.applying(sourceID: sourceID, to: "conditional:" + id))
         return next.normalized
     }
     private func contains(_ p: HUDLayoutPosition) -> Bool { lines.indices.contains(p.row) && lines[p.row].indices.contains(p.index) }
