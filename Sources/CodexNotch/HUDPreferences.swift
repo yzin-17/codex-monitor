@@ -33,6 +33,7 @@ struct HUDConfiguration: Codable, Equatable, Sendable {
 
     /// 仅作为布局编辑器“新增控件绑定到”的记忆值；不会切换 HUD 的整套数据来源。
     var sourceID = "local"
+    /// 仅为读取旧配置保留。新版本统一显示剩余额度，不再向用户暴露切换入口。
     var showRemaining = true
 
     /// 兼容 0.4.3 及更早配置。运行时不再按来源选择这些布局。
@@ -136,6 +137,7 @@ struct HUDConfiguration: Codable, Equatable, Sendable {
         copy.hudOpacity = hudOpacity.isFinite ? min(1, max(0, hudOpacity)) : 0.90
         copy.panelOpacity = panelOpacity.isFinite ? min(1, max(0.35, panelOpacity)) : 0.90
         copy.hudCornerRadius = cornerRadius
+        copy.showRemaining = true
         copy.layout = layout.normalized
         copy.providerLayouts = providerLayouts.mapValues(\.normalized)
         if copy.sourceID.count > 150 { copy.sourceID = "local" }
@@ -156,9 +158,9 @@ struct HUDConfiguration: Codable, Equatable, Sendable {
         return copy
     }
 
-    /// 旧调用继续保持兼容；新 HUD 运行时直接使用 activeLayout，不再按来源自动换布局。
+    /// 旧调用仅保留签名兼容；新 HUD 运行时始终使用当前命名布局。
     func layout(for provider: String) -> HUDLayout {
-        (providerLayouts[provider] ?? activeLayout).normalized
+        activeLayout
     }
 
     mutating func selectLayout(_ id: String) {
