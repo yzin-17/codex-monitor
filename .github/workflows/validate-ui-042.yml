@@ -26,19 +26,10 @@ jobs:
           from pathlib import Path
           p = Path('Sources/CodexNotch/AppDelegate.swift')
           s = p.read_text()
-          old = '''dataForRaw: { raw in
-                HUDEntityData.resolve(source: HUDLayoutToken.sourceID(raw) ?? settings.hudPreferences.value.sourceID,
-                    usage: viewModel, remote: remoteViewModel, newAPI: newAPIViewModel, subAPI: subAPIViewModel,
-                    accounts: settings.codexAccounts, settings: settings)
-            }'''
-          new = '''dataForRaw: { [self] raw in
-                HUDEntityData.resolve(source: HUDLayoutToken.sourceID(raw) ?? self.settings.hudPreferences.value.sourceID,
-                    usage: self.viewModel, remote: self.remoteViewModel, newAPI: self.newAPIViewModel, subAPI: self.subAPIViewModel,
-                    accounts: self.settings.codexAccounts, settings: self.settings)
-            }'''
-          if s.count(old) != 2:
-              raise SystemExit(f'expected 2 AppDelegate HUD resolver closures, found {s.count(old)}')
-          p.write_text(s.replace(old, new))
+          needle = 'dataForRaw: { raw in'
+          if s.count(needle) != 2:
+              raise SystemExit(f'expected 2 AppDelegate HUD resolver closures, found {s.count(needle)}')
+          p.write_text(s.replace(needle, 'dataForRaw: { [self] raw in'))
           PY
           git rm .github/patches/ui-polish-042.part0 .github/patches/ui-polish-042.part1 .github/patches/ui-polish-042.part2 .github/workflows/validate-ui-042.yml
           git add -A
