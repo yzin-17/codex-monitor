@@ -29,8 +29,8 @@ import Testing
     var configuration = HUDConfiguration(); configuration.hudOpacity = 0.50; configuration.panelOpacity = 0.63
     #expect(abs(configuration.hudTransparency - 0.50) < 0.0001)
     #expect(abs(configuration.panelTransparency - 0.37) < 0.0001)
-    let restored = try JSONDecoder().decode(HUDConfiguration.self, from: JSONEncoder().encode(configuration))
     // 0.4.4 会把旧的未绑定布局控件固定到本机 Codex；透明度往返本身不得改变。
+    let restored = try JSONDecoder().decode(HUDConfiguration.self, from: JSONEncoder().encode(configuration))
     #expect(abs(restored.hudOpacity - configuration.hudOpacity) < 0.0001)
     #expect(abs(restored.panelOpacity - configuration.panelOpacity) < 0.0001)
     #expect(restored.mode == configuration.mode)
@@ -128,7 +128,7 @@ private func makeLoginFixture(in directory: URL, complete: Bool) throws -> URL {
     try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: path.path)
     return path
 }
-private func waitForFixtureStart(_ marker: URL, timeout: Duration = .seconds(2)) async -> Bool {
+private func waitForFixtureStart(_ marker: URL, timeout: Duration = .seconds(10)) async -> Bool {
     let clock = ContinuousClock()
     let deadline = clock.now.advanced(by: timeout)
     while clock.now < deadline {
@@ -155,7 +155,8 @@ private func waitForFixtureStart(_ marker: URL, timeout: Duration = .seconds(2))
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: root) }
     let fixture = try makeLoginFixture(in: root, complete: false)
-    let task = Task { try await CodexBrowserLoginClient(executablePath: fixture.path, timeout: 3).login { _ in true } }
+    // 这个测试验证主动取消，不应把高负载机器上的进程启动延迟误判成登录超时。
+    let task = Task { try await CodexBrowserLoginClient(executablePath: fixture.path, timeout: 30).login { _ in true } }
     let marker = root.appendingPathComponent("used-home")
     guard await waitForFixtureStart(marker) else {
         task.cancel()
