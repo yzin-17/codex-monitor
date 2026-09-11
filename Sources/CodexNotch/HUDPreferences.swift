@@ -50,6 +50,8 @@ struct HUDConfiguration: Codable, Equatable, Sendable {
             if abs(migrated.panelOpacity - 0.78) < 0.0001 { migrated.panelOpacity = 0.985 }
             value = migrated.normalized
             if let data = try? JSONEncoder().encode(value) { defaults.set(data, forKey: Self.key) }
+            // 首次从更早版本迁移时先保留该版本约定的黑底；0.4.2 已完成此迁移的用户再进入新默认迁移。
+            defaults.set(2, forKey: "hudAppearanceDefaultsVersion")
             defaults.set(1, forKey: "hudNeutralPaletteVersion")
         }
     }
