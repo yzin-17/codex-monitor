@@ -86,7 +86,10 @@ struct HUDMetricStrip: View {
     }
 
     private func visible(_ row: [String], at now: Date) -> [String] {
-        row.filter { entity($0).resolvedMetric(raw: $0, layout: layout, now: now) != .hidden }
+        row.filter { raw in
+            guard let metric = entity(raw).resolvedMetric(raw: raw, layout: layout, now: now) else { return false }
+            return metric != .hidden
+        }
     }
 
     @ViewBuilder private func cell(_ raw: String, now: Date) -> some View {
@@ -97,7 +100,7 @@ struct HUDMetricStrip: View {
         } else if metric == .icon {
             OpenAIKnotIcon(size: menuBar ? 11 : 12)
                 .foregroundStyle(MonitorTheme.textPrimary)
-                .accessibilityLabel("OpenAI / ChatGPT")
+                .accessibilityLabel("ChatGPT")
         } else if metric == .usageBar {
             ZStack(alignment: .leading) {
                 Capsule().fill(MonitorTheme.progressTrack)
@@ -127,9 +130,7 @@ struct HUDMetricStrip: View {
     private func helpText(now: Date) -> String {
         let entries = rows.flatMap { $0 }.compactMap { raw -> String? in
             let itemData = entity(raw)
-            guard let metric = itemData.resolvedMetric(raw: raw, layout: layout, now: now) else {
-                return "条件：数据不足（—）"
-            }
+            guard let metric = itemData.resolvedMetric(raw: raw, layout: layout, now: now) else { return nil }
             if [.space, .hidden, .separatorDot].contains(metric) { return nil }
             let source = HUDLayoutToken.sourceID(raw).map { " [\($0)]" } ?? " [本机 Codex]"
             return metric.title + source + "：" + itemData.text(metric, remaining: remaining, now: now)
@@ -153,14 +154,16 @@ struct HUDMetricStrip: View {
         let font = NSFont.monospacedDigitSystemFont(ofSize: size, weight: .semibold)
         let labelFont = NSFont.systemFont(ofSize: max(7, size - 1.5), weight: .semibold)
         return rows.map { row in
-            let visible = row.filter {
-                (dataForRaw?($0) ?? data).resolvedMetric(raw: $0, layout: layout, now: now) != .hidden
+            let visible = row.filter { raw in
+                let itemData = dataForRaw?(raw) ?? data
+                guard let metric = itemData.resolvedMetric(raw: raw, layout: layout, now: now) else { return false }
+                return metric != .hidden
             }
             return visible.reduce(CGFloat(0)) { sum, raw in
                 let itemData = dataForRaw?(raw) ?? data
                 let metric = itemData.resolvedMetric(raw: raw, layout: layout, now: now)
                 if metric == .space { return sum + CGFloat(HUDLayout.spaceWidth(raw)) }
-                if metric == .icon { return sum + 12 }
+                if metric == .icon { return sum + (menuBar ? 13 : 14) }
                 if metric == .usageBar { return sum + 26 }
                 let value = metric.map { itemData.display($0, remaining: remaining, now: now) } ?? .init(value: "—")
                 let label = value.label.isEmpty ? 0 : (value.label as NSString).size(withAttributes: [.font: labelFont]).width + 4
@@ -205,16 +208,16 @@ struct ConfigurableHUDView: View {
         let layout = preferences.value.activeLayout
         let data = localData
         let rightWidth = notch.map {
-            max($0.shoulderWidth, min(
-                preferences.value.normalized.maximumWidth,
+            max(
+                $0.shoulderWidth,
                 HUDMetricStrip.measuredWidth(
                     layout: layout,
                     data: data,
-                    remaining: preferences.value.showRemaining,
+                    remaining: true,
                     menuBar: false,
                     dataForRaw: dataForRaw
                 ) + 12
-            ))
+            )
         } ?? 0
 
         Group {
@@ -233,7 +236,7 @@ struct ConfigurableHUDView: View {
                             HUDMetricStrip(
                                 layout: layout,
                                 data: data,
-                                remaining: preferences.value.showRemaining,
+                                remaining: true,
                                 dataForRaw: dataForRaw
                             )
                             forecastBadge
@@ -257,7 +260,7 @@ struct ConfigurableHUDView: View {
                             HUDMetricStrip(
                                 layout: layout,
                                 data: data,
-                                remaining: preferences.value.showRemaining,
+                                remaining: true,
                                 menuBar: menuBar,
                                 dataForRaw: dataForRaw
                             )
@@ -270,7 +273,7 @@ struct ConfigurableHUDView: View {
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, menuBar ? 0 : 4)
-                .frame(maxWidth: preferences.value.normalized.maximumWidth)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .frame(height: menuBar ? MenuBarMetrics.height() : nil)

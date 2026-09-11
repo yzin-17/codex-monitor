@@ -218,13 +218,39 @@ struct CodexTask: Identifiable, Equatable {
         activeSubagentCount: Int = 0
     ) {
         self.id = id
-        self.title = title
+        self.title = Self.presentationTitle(title)
         self.status = status
         self.detailPrefix = detailPrefix
         self.tokenCount = tokenCount
         self.tokenUsage = tokenUsage ?? .unpriced(totalTokens: tokenCount)
         self.updatedAt = updatedAt
         self.activeSubagentCount = activeSubagentCount
+    }
+
+    private static func presentationTitle(_ raw: String) -> String {
+        var candidate = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let request = candidate.range(of: "## My request for Codex:") {
+            candidate = String(candidate[request.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        let lower = candidate.lowercased()
+        let internalMarkers = [
+            "the following is the codex agent history",
+            ">>> transcript start",
+            "referenced chatgpt conversation",
+            "untrusted chatgpt conversation reference",
+            "priorconversation",
+            "chatgpt-content-reference"
+        ]
+        if internalMarkers.contains(where: { lower.contains($0) }) {
+            return "未命名任务"
+        }
+
+        let firstLine = candidate.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first(where: { !$0.isEmpty }) ?? ""
+        let compact = firstLine.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        return compact.isEmpty ? "未命名任务" : String(compact.prefix(80))
     }
 
     func displayDetail(now: Date = Date()) -> String {
