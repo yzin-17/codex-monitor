@@ -24,7 +24,15 @@ jobs:
           import base64,json,lzma,os,urllib.request
           from pathlib import Path
           chunks=[]
-          for sha in ['ceafba651f19df3dac25e4d5db9af40faaf0a56c','ad1eafb5ab93d13aabfa1dc098a578da1083c20d','a3eabf8811cc45f12b956493483e6a75e6a415c1']:
+          for sha in [
+              'b8499fbd5388b382988dfe76e2debe64978bbe43',
+              'abb8c4957d44fc683b7dda5b0d474a7e0ccf5062',
+              'c8e837295ffdcc9118476cce12462297b5bb77fb',
+              '2e532dfb28dfd109b0d1f294535a7514cad37e59',
+              '1756c6d2632fe625b44a53302ec44fb01043563c',
+              'e2f2d82538c6b919677a996606db59c82c763f5d',
+              '7cf2fca570a3112d4c8bbd16db5dd5c0d6219951',
+          ]:
               req=urllib.request.Request('https://api.github.com/repos/yzin-17/codex-monitor/git/blobs/'+sha,headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
               obj=json.load(urllib.request.urlopen(req,timeout=30))
               chunks.append(base64.b64decode(obj['content']).decode().strip())
