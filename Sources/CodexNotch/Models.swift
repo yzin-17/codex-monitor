@@ -180,7 +180,7 @@ enum CodexPlanKind: Equatable, Sendable {
     }
 
     var showsFiveHourQuota: Bool {
-        true
+        self != .pro
     }
 }
 

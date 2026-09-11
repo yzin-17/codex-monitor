@@ -1,0 +1,67 @@
+name: 发布 main 构建
+
+on:
+  workflow_run:
+    workflows: ["macOS 构建与交互回归"]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: release-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 检出通过 CI 的 main 提交
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+
+      - name: 下载通过 CI 的安装包
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: codex-monitor-native
+          path: release-artifact
+          repository: ${{ github.repository }}
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 校验构建产物
+        run: |
+          set -euo pipefail
+          VERSION="$(tr -d '\r\n' < VERSION)"
+          test -n "$VERSION"
+          test -s "release-artifact/dist/codex-monitor-$VERSION-arm64.dmg"
+          test -s "release-artifact/dist/codex-monitor-$VERSION-amd64.dmg"
+          ls -lh release-artifact/dist
+
+      - name: 发布 GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          VERSION="$(tr -d '\r\n' < VERSION)"
+          TAG="v$VERSION"
+          ARM64="release-artifact/dist/codex-monitor-$VERSION-arm64.dmg"
+          AMD64="release-artifact/dist/codex-monitor-$VERSION-amd64.dmg"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ARM64" "$AMD64" --clobber
+          else
+            gh release create "$TAG" "$ARM64" "$AMD64" \
+              --target "$RELEASE_SHA" \
+              --title "Codex Monitor $VERSION" \
+              --generate-notes
+          fi
