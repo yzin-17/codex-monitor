@@ -23,13 +23,16 @@ jobs:
           python3 - <<'PY'
           import base64,json,lzma,os,urllib.request
           from pathlib import Path
-          sha='0d49c8660a5caec1539ff835883c66e6ad29adff'
-          req=urllib.request.Request('https://api.github.com/repos/yzin-17/codex-monitor/git/blobs/'+sha,headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
-          obj=json.load(urllib.request.urlopen(req,timeout=30))
-          encoded=base64.b64decode(obj['content']).decode().strip()
+          chunks=[]
+          for sha in ['ceafba651f19df3dac25e4d5db9af40faaf0a56c','ad1eafb5ab93d13aabfa1dc098a578da1083c20d','a3eabf8811cc45f12b956493483e6a75e6a415c1']:
+              req=urllib.request.Request('https://api.github.com/repos/yzin-17/codex-monitor/git/blobs/'+sha,headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
+              obj=json.load(urllib.request.urlopen(req,timeout=30))
+              chunks.append(base64.b64decode(obj['content']).decode().strip())
+          encoded=''.join(chunks)
           patch=lzma.decompress(base64.b64decode(encoded))
           assert patch.startswith(b'diff --git ')
           Path(os.environ['RUNNER_TEMP'],'ux-041.patch').write_bytes(patch)
+          print('patch bytes',len(patch))
           PY
           git apply --check --index "$RUNNER_TEMP/ux-041.patch"
           git apply --index "$RUNNER_TEMP/ux-041.patch"
