@@ -55,7 +55,7 @@ struct HUDLayoutEditorView: View {
                 ForEach(MonitorDisplayMode.allCases) { Text($0.title).tag($0) }
             }
             if compactOverlay {
-                Text("覆盖菜单栏的浮窗，无刘海占位；高度填满当前屏幕菜单栏。左侧运行状态固定保留，右侧空间不足时仅裁剪自定义内容。")
+                Text("覆盖菜单栏的浮窗，无刘海占位；高度填满当前屏幕菜单栏。左侧运行状态固定保留，右侧按实际内容自适应宽度。")
                     .font(.caption).foregroundStyle(.secondary)
                 appearanceSlider("HUD 横向位置", value: $preferences.value.horizontalPosition, range: 0...1)
             } else {
@@ -197,8 +197,7 @@ struct HUDLayoutEditorView: View {
                     ForEach(NotchDisplaySource.allCases) { Text($0.label).tag($0) }
                 }
             }
-            Toggle("百分比显示剩余（关闭后显示已用）", isOn: $preferences.value.showRemaining)
-            Text("这里只决定接下来新增的数据控件绑定哪个账号。切换它不会切换 HUD 布局，也不会改变已经放置的控件。已放置的数据控件绑定会直接显示在控件名称下方，并可右键重新选择；图标不绑定账号。左侧 RUN / IDLE 始终只反映本机 Codex。")
+            Text("额度百分比固定显示剩余。这里仅决定接下来新增的数据控件绑定哪个账号；切换它不会切换 HUD 布局，也不会改变已经放置的控件。已放置的数据控件绑定会直接显示在控件名称下方，并可右键重新选择；图标不绑定账号。左侧 RUN / IDLE 始终只反映本机 Codex。")
                 .font(.caption).foregroundStyle(.secondary)
 
             ForEach(HUDMetric.groups, id: \.self) { group in
@@ -211,7 +210,7 @@ struct HUDLayoutEditorView: View {
                             .help(metric == .space
                                   ? "点击添加一个 8 pt 空格；右键已放置的空格可调整宽度。"
                                   : metric == .icon
-                                  ? "点击添加 OpenAI 图标；图标只作标识，不绑定数据源"
+                                  ? "点击添加完整 ChatGPT 图标；图标只作标识，不绑定数据源"
                                   : "点击添加或拖到布局；新控件会绑定到上方选中的数据源")
                     }
                 }
@@ -281,7 +280,7 @@ struct HUDLayoutEditorView: View {
                 HUDMetricStrip(
                     layout: layout,
                     data: previewData,
-                    remaining: preferences.value.showRemaining,
+                    remaining: true,
                     menuBar: true,
                     dataForRaw: { raw in previewData(for: HUDLayoutToken.sourceID(raw) ?? "local") }
                 )
@@ -465,7 +464,7 @@ struct HUDLayoutEditorView: View {
         }
         .dropDestination(for: String.self) { items, _ in drop(items, row: p.row, before: p.index) }
         .accessibilityLabel(metric == .icon
-                            ? "OpenAI 图标，点击移除，拖动排序"
+                            ? "ChatGPT 图标，点击移除，拖动排序"
                             : baseTitle + "，绑定 " + (source ?? "无数据来源") + "，点击移除，拖动排序，右键设置")
     }
 
