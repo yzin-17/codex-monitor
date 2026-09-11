@@ -60,7 +60,7 @@ struct SkillInsightsPanelView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ScrollView(.vertical, showsIndicators: true) {
+                ScrollView(.vertical, showsIndicators: false) {
                     LazyVStack(spacing: 0) {
                         ForEach(snapshot.rows) { row in
                             SkillInsightTableRow(row: row)
