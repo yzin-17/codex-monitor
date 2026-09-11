@@ -1,0 +1,113 @@
+name: Apply UI polish patch
+
+on:
+  push:
+    branches: [fix/hud-layout-status-titles]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message != 'chore: apply UI polish patch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/hud-layout-status-titles
+      - name: Apply focused SwiftUI fixes
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one match, got {count}")
+              p.write_text(text.replace(old, new, 1))
+
+          replace_once(
+              "Sources/CodexNotch/HUDContentView.swift",
+              '''            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                if !value.label.isEmpty {
+                    Text(value.label)
+                        .font(.system(size: max(7, fontSize - 1.5), weight: .semibold))
+                        .foregroundStyle(MonitorTheme.textSecondary)
+                }
+                Text(value.value).foregroundStyle(value.tone.color)
+            }
+            .lineLimit(1)
+''',
+              '''            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                if !value.label.isEmpty {
+                    Text(value.label)
+                        .font(.system(size: max(7, fontSize - 1.5), weight: .semibold))
+                        .foregroundStyle(MonitorTheme.textSecondary)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+                Text(value.value)
+                    .foregroundStyle(value.tone.color)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+            .fixedSize(horizontal: true, vertical: false)
+'''
+          )
+
+          replace_once(
+              "Sources/CodexNotch/HUDLayoutEditorView.swift",
+              '''            Divider()
+
+            Picker("新增控件绑定到", selection: $preferences.value.sourceID) {
+''',
+              '''            Picker("新增控件绑定到", selection: $preferences.value.sourceID) {
+'''
+          )
+
+          replace_once(
+              "Sources/CodexNotch/NotchIslandView.swift",
+              '''                            VStack(spacing: 12) {
+                                    PerformancePanelView(viewModel: performanceViewModel)
+                                    PublicInsightCard(source: .openAIStatus, store: publicInsights)
+                                }
+''',
+              '''                            VStack(spacing: 12) {
+                                    PerformancePanelView(viewModel: performanceViewModel)
+                                    Text("服务器状态")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundStyle(MonitorTheme.textPrimary)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(.top, 2)
+                                    PublicInsightCard(source: .openAIStatus, store: publicInsights)
+                                }
+'''
+          )
+
+          replace_once(
+              "Sources/CodexNotch/NotchIslandView.swift",
+              '''                            Text(task.title)
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(.white.opacity(0.92))
+                                .lineLimit(isExpanded ? 3 : 2).truncationMode(.tail)
+                                .fixedSize(horizontal: false, vertical: true)
+''',
+              '''                            Text(task.title)
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(.white.opacity(0.92))
+                                .lineLimit(nil)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .layoutPriority(1)
+'''
+          )
+          PY
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name "yzin"
+          git config user.email "30586807+yzin-17@users.noreply.github.com"
+          git add Sources/CodexNotch/HUDContentView.swift Sources/CodexNotch/HUDLayoutEditorView.swift Sources/CodexNotch/NotchIslandView.swift
+          git diff --cached --check
+          git commit -m "chore: apply UI polish patch"
+          git push origin HEAD:fix/hud-layout-status-titles
