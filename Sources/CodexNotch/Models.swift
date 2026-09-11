@@ -114,7 +114,7 @@ struct UsageSnapshot: Equatable {
         }
 
         var windows: [UsageQuotaWindow] = []
-        if primaryPercent != nil || primaryResetsAt != nil {
+        if primaryPercent != nil {
             windows.append(
                 UsageQuotaWindow(
                     id: "legacy-primary",
@@ -197,6 +197,60 @@ struct PeriodUsage: Equatable, Sendable {
     static let zero = PeriodUsage(day: 0, week: 0, month: 0)
 }
 
+enum TaskTitleSanitizer {
+    static let fallback = "未命名任务"
+    private static let scanLimit = 16_384
+    private static let displayLimit = 80
+    private static let internalMarkers = [
+        "the following is the codex agent history",
+        ">>> transcript start",
+        "referenced chatgpt conversation",
+        "untrusted chatgpt conversation reference",
+        "priorconversation",
+        "chatgpt-content-reference"
+    ]
+    private static let skippedPrefixes = [
+        "<environment_context",
+        "</environment_context",
+        "<permissions instructions",
+        "<app-context",
+        "# files mentioned",
+        "# in app browser",
+        "## my request for codex:",
+        "- "
+    ]
+
+    static func normalized(_ raw: String) -> String? {
+        // 线程标题属于展示元数据，绝不能对一整段转录做 lowercased/正则/SwiftUI 排版。
+        // 只扫描一个有界前缀；正常标题远小于此值，而内部包装标记都出现在开头。
+        var candidate = String(raw.prefix(scanLimit)).trimmingCharacters(in: .whitespacesAndNewlines)
+        if let request = candidate.range(of: "## My request for Codex:", options: .caseInsensitive) {
+            candidate = String(candidate[request.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        let lower = candidate.lowercased()
+        guard !internalMarkers.contains(where: { lower.contains($0) }) else {
+            return nil
+        }
+
+        for line in candidate.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            let lowerLine = trimmed.lowercased()
+            guard !skippedPrefixes.contains(where: { lowerLine.hasPrefix($0) }) else { continue }
+            guard !internalMarkers.contains(where: { lowerLine.contains($0) }) else { return nil }
+            let compact = trimmed.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            guard !compact.isEmpty else { continue }
+            return String(compact.prefix(displayLimit))
+        }
+        return nil
+    }
+
+    static func display(_ raw: String) -> String {
+        normalized(raw) ?? fallback
+    }
+}
+
 struct CodexTask: Identifiable, Equatable {
     let id: String
     let title: String
@@ -218,39 +272,13 @@ struct CodexTask: Identifiable, Equatable {
         activeSubagentCount: Int = 0
     ) {
         self.id = id
-        self.title = Self.presentationTitle(title)
+        self.title = TaskTitleSanitizer.display(title)
         self.status = status
         self.detailPrefix = detailPrefix
         self.tokenCount = tokenCount
         self.tokenUsage = tokenUsage ?? .unpriced(totalTokens: tokenCount)
         self.updatedAt = updatedAt
         self.activeSubagentCount = activeSubagentCount
-    }
-
-    private static func presentationTitle(_ raw: String) -> String {
-        var candidate = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let request = candidate.range(of: "## My request for Codex:") {
-            candidate = String(candidate[request.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-
-        let lower = candidate.lowercased()
-        let internalMarkers = [
-            "the following is the codex agent history",
-            ">>> transcript start",
-            "referenced chatgpt conversation",
-            "untrusted chatgpt conversation reference",
-            "priorconversation",
-            "chatgpt-content-reference"
-        ]
-        if internalMarkers.contains(where: { lower.contains($0) }) {
-            return "未命名任务"
-        }
-
-        let firstLine = candidate.components(separatedBy: .newlines)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .first(where: { !$0.isEmpty }) ?? ""
-        let compact = firstLine.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-        return compact.isEmpty ? "未命名任务" : String(compact.prefix(80))
     }
 
     func displayDetail(now: Date = Date()) -> String {
@@ -658,7 +686,8 @@ struct ThreadRecord: Decodable {
         tokenUsage: TokenUsageSummary? = nil
     ) {
         self.id = id
-        self.title = title
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.title = trimmedTitle.isEmpty ? "" : TaskTitleSanitizer.display(trimmedTitle)
         self.tokensUsed = tokensUsed
         self.model = model
         self.reasoningEffort = reasoningEffort
@@ -702,6 +731,15 @@ struct SessionIndexRecord: Decodable {
     enum CodingKeys: String, CodingKey {
         case id
         case threadName = "thread_name"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        let rawName = try container.decodeIfPresent(String.self, forKey: .threadName) ?? ""
+        // session_index 的 thread_name 可能是 ChatGPT handoff 的完整内部包装；
+        // 在它覆盖数据库标题并进入快照缓存之前就丢弃，避免污染主页与放大布局成本。
+        threadName = TaskTitleSanitizer.normalized(rawName) ?? ""
     }
 }
 
@@ -809,9 +847,11 @@ struct RateLimitSnapshot: Equatable {
 
     func displayWindows(now: Date = Date()) -> [UsageQuotaWindow] {
         let source = windows.isEmpty ? legacyWindows() : windows
-        let visibleSource = CodexPlanKind(planType: planType).showsFiveHourQuota
-            ? source
-            : source.filter { !$0.isFiveHourWindow }
+        let plan = CodexPlanKind(planType: planType)
+        let visibleSource = source.filter { window in
+            guard window.isFiveHourWindow else { return true }
+            return plan.showsFiveHourQuota && window.remainingPercent != nil
+        }
         return visibleSource.map { window in
             UsageQuotaWindow(
                 id: window.id,
