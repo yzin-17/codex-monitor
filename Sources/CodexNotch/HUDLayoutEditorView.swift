@@ -113,18 +113,9 @@ struct HUDLayoutEditorView: View {
                 ),
                 format: .number.precision(.fractionLength(0))
             )
-            .textFieldStyle(.plain)
+            .textFieldStyle(.roundedBorder)
             .multilineTextAlignment(.trailing)
-            .padding(.horizontal, 7)
             .frame(width: 72, height: 24)
-            .background(
-                Color.primary.opacity(0.07),
-                in: RoundedRectangle(cornerRadius: 5, style: .continuous)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .stroke(Color.primary.opacity(0.14), lineWidth: 1)
-            )
             Text(suffix).foregroundStyle(.secondary)
         }
     }

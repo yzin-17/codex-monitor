@@ -171,7 +171,7 @@ enum SkillInsightsDisplayLabels {
 }
 
 private enum SkillInsightTableLayout {
-    static let skillWidth: CGFloat = 176
+    static let skillWidth: CGFloat = 220
     static let stateWidth: CGFloat = 34
     static let evidenceWidth: CGFloat = 40
     static let shadowWidth: CGFloat = 54
