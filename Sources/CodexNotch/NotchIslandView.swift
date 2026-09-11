@@ -355,11 +355,16 @@ struct DetailPanelView: View {
     @State private var showsRemoteUsageInfo = false
     @State private var expandedTaskID: String?
     @State private var geometryRevision = 0
+    @State private var hideUnnamedTasks: Bool
+    @State private var visibleTaskLimit: Int
     private let previewCosts: [String: ConversationCostDetails]
     @ObservedObject private var publicInsights: PublicInsightsStore
     @ObservedObject private var preferences: HUDPreferences
     @ObservedObject private var codexAccounts: CodexAccountsStore
     @State private var remoteSection = "gateway"
+
+    private static let taskPageSize = 20
+    private static let hideUnnamedTasksKey = "hideUnnamedCodexTasks"
 
     init(viewModel: UsageViewModel, remoteViewModel: RemoteMonitorViewModel,
          newAPIViewModel: BalanceMonitorViewModel, subAPIViewModel: BalanceMonitorViewModel,
@@ -379,12 +384,15 @@ struct DetailPanelView: View {
         self.onSubAPIRefresh = onSubAPIRefresh; self.onCodexRadarRefresh = onCodexRadarRefresh
         _detailPage = State(initialValue: initialPage)
         _expandedTaskID = State(initialValue: initialExpandedTaskID)
+        _hideUnnamedTasks = State(initialValue:
+            settings.preferenceStore.object(forKey: Self.hideUnnamedTasksKey) as? Bool ?? true
+        )
+        _visibleTaskLimit = State(initialValue: Self.taskPageSize)
         self.previewCosts = previewCosts
         self.preferences = settings.hudPreferences
         self.codexAccounts = settings.codexAccounts
         self.publicInsights = viewModel.publicInsights
     }
-
 
     private var snapshot: UsageSnapshot {
         viewModel.snapshot
@@ -424,7 +432,7 @@ struct DetailPanelView: View {
                         case .codex:
                             localContent
                         case .performance:
-                            ScrollView {
+                            ScrollView(.vertical, showsIndicators: false) {
                                 VStack(spacing: 12) {
                                     PerformancePanelView(viewModel: performanceViewModel)
                                     Text("服务器状态")
@@ -498,13 +506,22 @@ struct DetailPanelView: View {
             geometryRevision += 1
         }
         .onAppear { migrateRemotePage(); synchronizeExtensionVisibility() }
+        .onChange(of: hideUnnamedTasks) { _, value in
+            settings.preferenceStore.set(value, forKey: Self.hideUnnamedTasksKey)
+            visibleTaskLimit = Self.taskPageSize
+            expandedTaskID = nil
+        }
         .onChange(of: detailPage) { _, _ in
             migrateRemotePage()
             expandedTaskID = nil
+            visibleTaskLimit = Self.taskPageSize
             synchronizeExtensionVisibility()
         }
         .onChange(of: overlayState.detailPresentationPhase) { _, phase in
-            if !phase.showsContent { expandedTaskID = nil }
+            if !phase.showsContent {
+                expandedTaskID = nil
+                visibleTaskLimit = Self.taskPageSize
+            }
             synchronizeExtensionVisibility()
         }
         .onDisappear { performanceViewModel.setDetailVisible(false) }
@@ -529,8 +546,21 @@ struct DetailPanelView: View {
             : .easeOut(duration: DetailAnimationTiming.contentDuration)
     }
 
+    private var filteredTasks: [CodexTask] {
+        guard hideUnnamedTasks else { return snapshot.tasks }
+        return snapshot.tasks.filter { $0.title != TaskTitleSanitizer.fallback }
+    }
+
     private var displayedTasks: [CodexTask] {
-        snapshot.tasks
+        Array(filteredTasks.prefix(visibleTaskLimit))
+    }
+
+    private var hasMoreTasks: Bool {
+        visibleTaskLimit < filteredTasks.count
+    }
+
+    private func loadMoreTasks() {
+        visibleTaskLimit = min(visibleTaskLimit + Self.taskPageSize, filteredTasks.count)
     }
 
     private var expandedLayout: ExpandedPanelLayout {
@@ -860,6 +890,17 @@ struct DetailPanelView: View {
             if settings.showSparkQuota {
                 sparkQuotaRow
             }
+
+            HStack {
+                Spacer(minLength: 0)
+                Toggle("过滤未命名任务", isOn: $hideUnnamedTasks)
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .font(.system(size: 9.5, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.58))
+            }
+            .frame(height: 20)
+
             TimelineView(.periodic(from: .now, by: 60)) { context in
                 ScrollView(.vertical, showsIndicators: false) {
                     LazyVStack(spacing: 7) {
@@ -872,6 +913,13 @@ struct DetailPanelView: View {
                                 resumeStore: viewModel.cliResume,
                                 codexAccounts: codexAccounts.accounts,
                                 onToggle: { expandedTaskID = expandedTaskID == task.id ? nil : task.id })
+                        }
+
+                        if hasMoreTasks {
+                            Color.clear
+                                .frame(height: 1)
+                                .onAppear(perform: loadMoreTasks)
+                                .accessibilityHidden(true)
                         }
 
                         if displayedTasks.isEmpty {
@@ -1348,7 +1396,7 @@ struct DetailPanelView: View {
 
     private var emptyState: some View {
         HStack {
-            Text(snapshot.errorMessage ?? "暂无 Codex 活动")
+            Text(taskEmptyMessage)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.58))
                 .lineLimit(1)
@@ -1361,6 +1409,13 @@ struct DetailPanelView: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .stroke(Color.white.opacity(0.08), lineWidth: 1)
         )
+    }
+
+    private var taskEmptyMessage: String {
+        if hideUnnamedTasks, !snapshot.tasks.isEmpty, filteredTasks.isEmpty {
+            return "暂无可显示的已命名任务"
+        }
+        return snapshot.errorMessage ?? "暂无 Codex 活动"
     }
 
     private var periodUsage: some View {
@@ -1528,9 +1583,10 @@ private struct TaskRow: View {
                             Text(task.title)
                                 .font(.system(size: 11, weight: .bold))
                                 .foregroundStyle(.white.opacity(0.92))
-                                .lineLimit(nil)
-                                .fixedSize(horizontal: false, vertical: true)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
                                 .layoutPriority(1)
+                                .help(task.title)
                             Spacer(minLength: 4)
                             Text(task.status.label)
                                 .font(.system(size: 10, weight: .bold)).foregroundStyle(statusColor)
