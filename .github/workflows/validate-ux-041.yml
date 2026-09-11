@@ -24,15 +24,7 @@ jobs:
           import base64,json,lzma,os,urllib.request
           from pathlib import Path
           chunks=[]
-          for sha in [
-              'b8499fbd5388b382988dfe76e2debe64978bbe43',
-              'abb8c4957d44fc683b7dda5b0d474a7e0ccf5062',
-              'c8e837295ffdcc9118476cce12462297b5bb77fb',
-              '2e532dfb28dfd109b0d1f294535a7514cad37e59',
-              '1756c6d2632fe625b44a53302ec44fb01043563c',
-              'e2f2d82538c6b919677a996606db59c82c763f5d',
-              '7cf2fca570a3112d4c8bbd16db5dd5c0d6219951',
-          ]:
+          for sha in ['ceafba651f19df3dac25e4d5db9af40faaf0a56c','ad1eafb5ab93d13aabfa1dc098a578da1083c20d','a3eabf8811cc45f12b956493483e6a75e6a415c1']:
               req=urllib.request.Request('https://api.github.com/repos/yzin-17/codex-monitor/git/blobs/'+sha,headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
               obj=json.load(urllib.request.urlopen(req,timeout=30))
               chunks.append(base64.b64decode(obj['content']).decode().strip())
@@ -44,6 +36,28 @@ jobs:
           PY
           git apply --check --index "$RUNNER_TEMP/ux-041.patch"
           git apply --index "$RUNNER_TEMP/ux-041.patch"
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('Sources/CodexNotch/AppDelegate.swift')
+          s=p.read_text()
+          needle='final class NotchOverlayController {'
+          if '@MainActor\n'+needle not in s:
+              s=s.replace(needle,'@MainActor\n'+needle,1)
+          p.write_text(s)
+          p=Path('Sources/CodexNotch/HUDDisplayData.swift')
+          s=p.read_text()
+          replacements={
+              'case .weekly, .weeklyPace, .weeklyCountdown, .weeklyResetTime: weeklyWindow ?? .init(remaining: weekly, label: "7d")':'case .weekly, .weeklyPace, .weeklyCountdown, .weeklyResetTime: return weeklyWindow ?? .init(remaining: weekly, label: "7d")',
+              'case .scopedWeekly, .scopedPace, .scopedCountdown, .scopedResetTime: scopedWindow':'case .scopedWeekly, .scopedPace, .scopedCountdown, .scopedResetTime: return scopedWindow',
+              'case .primaryLane: lanes.first':'case .primaryLane: return lanes.first',
+              'case .secondaryLane: lanes.count > 1 ? lanes[1] : nil':'case .secondaryLane: return lanes.count > 1 ? lanes[1] : nil',
+              'case .tertiaryLane: lanes.count > 2 ? lanes[2] : nil':'case .tertiaryLane: return lanes.count > 2 ? lanes[2] : nil',
+              'default: automaticWindow ?? .init(remaining: automatic, resetsAt: resetsAt, label: "自动")':'default: return automaticWindow ?? .init(remaining: automatic, resetsAt: resetsAt, label: "自动")',
+          }
+          for a,b in replacements.items(): s=s.replace(a,b)
+          p.write_text(s)
+          PY
+          git add -A
           git diff --cached --check
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
