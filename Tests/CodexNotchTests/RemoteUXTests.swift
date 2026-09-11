@@ -13,6 +13,18 @@ import Testing
         #expect(frame.minY == screen.maxY - height)
     }
 }
+@Test func floatingHUDWidthFollowsContentInsteadOfLegacyMaximumWidth() {
+    let screen = CGRect(x: 0, y: 0, width: 1440, height: 900)
+    let compact = FloatingHUDGeometry.frame(screen: screen, menuBarHeight: 24,
+        contentSize: .init(width: 148, height: 20), maximumWidth: 90, position: 0.5)
+    let detailed = FloatingHUDGeometry.frame(screen: screen, menuBarHeight: 24,
+        contentSize: .init(width: 428, height: 20), maximumWidth: 90, position: 0.5)
+    let oversized = FloatingHUDGeometry.frame(screen: screen, menuBarHeight: 24,
+        contentSize: .init(width: 5_000, height: 20), maximumWidth: 90, position: 0.5)
+    #expect(compact.width == 148)
+    #expect(detailed.width == 428)
+    #expect(oversized.width == screen.width - 24)
+}
 @Test func transparencyUsesInverseOfExistingOpacityWithoutChangingStoredAppearance() throws {
     var configuration = HUDConfiguration(); configuration.hudOpacity = 0.50; configuration.panelOpacity = 0.63
     #expect(abs(configuration.hudTransparency - 0.50) < 0.0001)
@@ -116,6 +128,15 @@ private func makeLoginFixture(in directory: URL, complete: Bool) throws -> URL {
     try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: path.path)
     return path
 }
+private func waitForFixtureStart(_ marker: URL, timeout: Duration = .seconds(2)) async -> Bool {
+    let clock = ContinuousClock()
+    let deadline = clock.now.advanced(by: timeout)
+    while clock.now < deadline {
+        if FileManager.default.fileExists(atPath: marker.path) { return true }
+        try? await Task.sleep(for: .milliseconds(20))
+    }
+    return FileManager.default.fileExists(atPath: marker.path)
+}
 @Test @MainActor func browserLoginUsesRealProcessProtocolAndCleansTemporaryCredentials() async throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -135,9 +156,16 @@ private func makeLoginFixture(in directory: URL, complete: Bool) throws -> URL {
     defer { try? FileManager.default.removeItem(at: root) }
     let fixture = try makeLoginFixture(in: root, complete: false)
     let task = Task { try await CodexBrowserLoginClient(executablePath: fixture.path, timeout: 3).login { _ in true } }
-    try await Task.sleep(for: .milliseconds(250)); task.cancel()
+    let marker = root.appendingPathComponent("used-home")
+    guard await waitForFixtureStart(marker) else {
+        task.cancel()
+        _ = try? await task.value
+        Issue.record("登录替身未启动，无法验证取消后的清理")
+        return
+    }
+    task.cancel()
     do { _ = try await task.value; Issue.record("已取消登录不得成功") } catch is CancellationError {} catch { Issue.record("取消应报告 CancellationError") }
-    let usedHome = try String(contentsOf: root.appendingPathComponent("used-home"), encoding: .utf8)
+    let usedHome = try String(contentsOf: marker, encoding: .utf8)
     #expect(!FileManager.default.fileExists(atPath: usedHome))
 }
 @Test @MainActor func browserFailureDoesNotReturnCredentials() async throws {
