@@ -17,6 +17,7 @@ struct HUDEntityData: Equatable {
     var providerID = "codex"
     var provider = "Codex"
     var account = "本机"
+    var planType: String?
     var state = "IDLE" // 数据源状态，仅用于说明；HUD 左侧运行状态始终取自本机 UsageSnapshot。
     var primary: Double?
     var weekly: Double?
@@ -41,6 +42,15 @@ struct HUDEntityData: Equatable {
     private var automaticWindow: HUDQuotaSample? {
         [primaryWindow, weeklyWindow].compactMap { $0 }.filter { validPercent($0.remaining) != nil }
             .min { ($0.remaining ?? 100) < ($1.remaining ?? 100) }
+    }
+    private var hidesFiveHourQuota: Bool {
+        if CodexPlanKind(planType: planType) == .pro { return true }
+        if planType != nil { return false }
+        guard providerID == "codex", weeklyWindow != nil else { return false }
+        return primaryWindow == nil && !lanes.contains { $0.label.lowercased().replacingOccurrences(of: " ", with: "") == "5h" }
+    }
+    private func isFiveHourMetric(_ metric: HUDMetric) -> Bool {
+        [.fiveHour, .primary, .primaryPace, .primaryCountdown, .primaryResetTime].contains(metric)
     }
     func window(for metric: HUDMetric) -> HUDQuotaSample? {
         switch metric {
@@ -86,7 +96,9 @@ struct HUDEntityData: Equatable {
     }
     func resolvedMetric(raw: String, layout: HUDLayout, now: Date = Date()) -> HUDMetric? {
         guard let kind = HUDMetric.parse(raw) else { return nil }
-        guard kind == .conditional else { return kind }
+        if kind != .conditional {
+            return hidesFiveHourQuota && isFiveHourMetric(kind) ? nil : kind
+        }
         guard let id = HUDLayoutToken.conditionalID(raw), let stored = layout.conditionals[id], warning == nil else { return nil }
         if let capturedAt, now.timeIntervalSince(capturedAt) > 600 { return nil }
         let rule = stored.normalized
@@ -95,7 +107,8 @@ struct HUDEntityData: Equatable {
             guard let value = numeric(p.metric, remaining: p.remaining, now: now) else { return nil }
             results.append(p.comparison.evaluate(value, p.threshold))
         }
-        return (rule.matchAll ? results.allSatisfy { $0 } : results.contains(true)) ? rule.thenMetric : rule.elseMetric
+        let resolved = (rule.matchAll ? results.allSatisfy { $0 } : results.contains(true)) ? rule.thenMetric : rule.elseMetric
+        return hidesFiveHourQuota && isFiveHourMetric(resolved) ? nil : resolved
     }
     func display(_ metric: HUDMetric, remaining: Bool, now: Date = Date()) -> HUDDisplayValue {
         if metric.isQuota && metric != .usageBar {
