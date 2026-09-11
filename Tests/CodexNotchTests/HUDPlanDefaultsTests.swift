@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import CodexNotch
 
-@Test func hudPlanAwareDefaultQuotaVisibility() {
+@Test func hudSessionAndWeeklyVisibilityIsDrivenByAvailableDataNotPlanName() {
     var data = HUDEntityData()
     data.providerID = "codex"
     data.primary = 46
@@ -16,9 +16,20 @@ import Testing
     #expect(data.resolvedMetric(raw: "weekly", layout: .compact) == .weekly)
 
     data.planType = "pro"
-    #expect(data.resolvedMetric(raw: "primary", layout: .compact) == nil)
-    #expect(data.resolvedMetric(raw: "fiveHour", layout: .compact) == nil)
+    #expect(data.resolvedMetric(raw: "primary", layout: .compact) == .primary)
+    #expect(data.resolvedMetric(raw: "fiveHour", layout: .compact) == .fiveHour)
     #expect(data.resolvedMetric(raw: "weekly", layout: .compact) == .weekly)
+
+    var rateLimits = RateLimitSnapshot(
+        primaryPercent: 46,
+        secondaryPercent: 79,
+        primaryResetsAt: nil,
+        secondaryResetsAt: nil,
+        capturedAt: Date(),
+        isPrimaryCodexLimit: true
+    )
+    rateLimits.planType = "pro"
+    #expect(rateLimits.displayWindows().map(\.shortLabel) == ["5h", "7d"])
 }
 
 @Test func hudLocalWeeklyOnlySourceDoesNotRenderEmptyFiveHourQuota() {
