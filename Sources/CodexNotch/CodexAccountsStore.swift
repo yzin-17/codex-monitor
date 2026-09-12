@@ -139,6 +139,11 @@ struct CodexAccountState {
         try Task.checkCancellation()
         guard verifications[next.id] == ticket, accounts.first(where: { $0.id == next.id })?.revision == old?.revision,
               old != nil || accounts.count < 30 else { throw CodexAccountError.superseded }
+        if next.workspaceID.isEmpty,
+           let returned = usage.returnedWorkspaceID?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !returned.isEmpty {
+            next.workspaceID = returned
+        }
         // 保存失败保留旧元数据、旧快照；只有验证通过的新凭据进入本应用 Keychain。
         if !replacement.isEmpty { try vault.write(next, replacement) }
         if let old, old.workspaceID != next.workspaceID { next.boundLocalAccountID = nil }
@@ -168,6 +173,15 @@ struct CodexAccountState {
             return
         }
         guard let index = accounts.firstIndex(where: { $0.id == id }) else { return }
+        let account = accounts[index]
+        guard let remoteAccountID = verifiedRemoteAccountID(for: account) else {
+            lastError = "“\(account.label)”缺少可验证的 Account ID，请先重新验证。"
+            return
+        }
+        guard remoteAccountID == currentLocalAccountID else {
+            lastError = "当前本机 Codex 账号与“\(account.label)”不是同一账号，无法绑定。"
+            return
+        }
         if let conflict = accounts.first(where: { $0.id != id && $0.boundLocalAccountID == currentLocalAccountID }) {
             lastError = "当前本机账号已绑定到“\(conflict.label)”，请先解绑。"
             return
@@ -185,6 +199,7 @@ struct CodexAccountState {
               let bound = account.boundLocalAccountID,
               !bound.isEmpty,
               bound == currentLocalAccountID,
+              verifiedRemoteAccountID(for: account) == bound,
               let localCapturedAt else { return false }
         if let localIdentityChangedAt, localCapturedAt < localIdentityChangedAt { return false }
         return true
@@ -233,6 +248,12 @@ struct CodexAccountState {
         }
     }
     private func persist() { defaults.set(try? JSONEncoder().encode(accounts), forKey: "codexAccounts.v1") }
+    private func verifiedRemoteAccountID(for account: CodexAccount) -> String? {
+        let configured = account.workspaceID.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !configured.isEmpty { return configured }
+        let returned = states[account.id]?.usage?.returnedWorkspaceID?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return returned?.isEmpty == false ? returned : nil
+    }
     private func reconfigure() {
         stop()
         if monitoringEnabled && automaticStart { refreshAll() }
