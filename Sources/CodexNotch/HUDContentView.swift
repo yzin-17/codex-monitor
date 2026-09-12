@@ -244,11 +244,11 @@ struct ConfigurableHUDView: View {
                             forecastBadge
                         }
                         .fixedSize(horizontal: true, vertical: false)
+                        .padding(.leading, 4)
+                        .padding(.trailing, 8)
                     }
-                    // 12pt 预留必须真实分到两侧：左 4pt、右 8pt，不能只缩 frame 后再单侧 padding。
-                    .frame(width: rightWidth - 12, alignment: .leading)
-                    .padding(.leading, 4)
-                    .padding(.trailing, 8)
+                    // 安全留白必须在 ScrollView 的可滚动内容内部；放在 ScrollView 外部无法避免 viewport 裁切字形尾部。
+                    .frame(width: rightWidth, alignment: .leading)
                 }
                 .frame(width: notch.shoulderWidth + notch.notchWidth + rightWidth, height: notch.collapsedHeight)
             } else {
@@ -271,11 +271,13 @@ struct ConfigurableHUDView: View {
                             forecastBadge
                         }
                         .fixedSize(horizontal: true, vertical: false)
+                        .padding(.trailing, 8)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .layoutPriority(0)
                 }
-                .padding(.horizontal, 8)
+                // 左侧仍保留 8pt；原来的右侧 8pt 移进 ScrollView 内容，避免紧凑 HUD 同样裁掉最后一个字形。
+                .padding(.leading, 8)
                 .padding(.vertical, menuBar ? 0 : 4)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
