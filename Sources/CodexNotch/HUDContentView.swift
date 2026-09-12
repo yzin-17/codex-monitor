@@ -207,16 +207,18 @@ struct ConfigurableHUDView: View {
     var body: some View {
         let layout = preferences.value.activeLayout
         let data = localData
+        let forecastWidth: CGFloat = forecastAlert == nil ? 0 : 66
         let rightWidth = notch.map {
-            max(
+            let needed = HUDMetricStrip.measuredWidth(
+                layout: layout,
+                data: data,
+                remaining: true,
+                menuBar: false,
+                dataForRaw: dataForRaw
+            ) + 12 + forecastWidth
+            return max(
                 $0.shoulderWidth,
-                HUDMetricStrip.measuredWidth(
-                    layout: layout,
-                    data: data,
-                    remaining: true,
-                    menuBar: false,
-                    dataForRaw: dataForRaw
-                ) + 12
+                min(preferences.value.normalized.maximumWidth, needed)
             )
         } ?? 0
 
