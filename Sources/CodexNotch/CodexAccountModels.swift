@@ -53,9 +53,14 @@ enum CodexLocalAccountIdentity {
               (properties.fileSize ?? Int.max) <= maximumBytes,
               let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
-        guard let data = try? handle.read(upToCount: maximumBytes + 1),
-              let data,
-              data.count <= maximumBytes else { return nil }
+        let data: Data
+        do {
+            guard let value = try handle.read(upToCount: maximumBytes + 1) else { return nil }
+            data = value
+        } catch {
+            return nil
+        }
+        guard data.count <= maximumBytes else { return nil }
         return accountID(from: data)
     }
 
