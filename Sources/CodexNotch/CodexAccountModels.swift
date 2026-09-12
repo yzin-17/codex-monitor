@@ -8,6 +8,7 @@ struct CodexAccount: Codable, Equatable, Identifiable, Sendable {
     var enabled = true
     var revision = UUID()
     var verifiedAt: Date?
+    var boundLocalAccountID: String?
     var hudID: String { "codex-account:\(id.uuidString)" }
 }
 struct AccountQuota: Equatable, Sendable, Identifiable {
@@ -40,6 +41,33 @@ enum CodexAccountError: Error, LocalizedError, Sendable, Equatable {
         case .accountMismatch: "返回的工作区与所选 Account ID 不一致，结果未保存。"
         case .superseded: "账户已被修改或验证已取消，请重新操作。"
         }
+    }
+}
+
+enum CodexLocalAccountIdentity {
+    static let maximumBytes = 256 * 1024
+
+    static func readAccountID(from url: URL) -> String? {
+        guard let properties = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+              properties.isRegularFile == true,
+              (properties.fileSize ?? Int.max) <= maximumBytes,
+              let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        guard let data = try? handle.read(upToCount: maximumBytes + 1),
+              let data,
+              data.count <= maximumBytes else { return nil }
+        return accountID(from: data)
+    }
+
+    static func accountID(from data: Data) -> String? {
+        guard data.count <= maximumBytes,
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let tokens = root["tokens"] as? [String: Any],
+              let raw = tokens["account_id"] as? String else { return nil }
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty,
+              (try? CodexCredentialImport.validateWorkspace(value)) != nil else { return nil }
+        return value
     }
 }
 
