@@ -1,5 +1,35 @@
 import Foundation
 
+enum CodexAccountQuotaFallbackPolicy {
+    static func remoteHasWeekly(_ usage: CodexAccountUsage?) -> Bool {
+        usage?.quotas.contains(where: {
+            ($0.id == "secondary_window" || $0.label == "7d") && (0...100).contains($0.remainingPercent)
+        }) == true
+    }
+
+    static func remoteIsStale(_ usage: CodexAccountUsage?, interval: Double, now: Date) -> Bool {
+        guard let usage else { return true }
+        return now.timeIntervalSince(usage.capturedAt) > max(interval * 2, 600)
+    }
+
+    static func shouldUseLocal(
+        remoteUsage: CodexAccountUsage?,
+        remoteError: String?,
+        monitoringEnabled: Bool,
+        interval: Double,
+        bindingMatches: Bool,
+        localHasWeekly: Bool,
+        now: Date
+    ) -> Bool {
+        guard bindingMatches, localHasWeekly else { return false }
+        return !monitoringEnabled
+            || remoteError != nil
+            || remoteUsage == nil
+            || remoteIsStale(remoteUsage, interval: interval, now: now)
+            || !remoteHasWeekly(remoteUsage)
+    }
+}
+
 extension HUDEntityData {
     @MainActor static func resolve(source: String, usage: UsageViewModel, remote: RemoteMonitorViewModel,
                                    newAPI: BalanceMonitorViewModel, subAPI: BalanceMonitorViewModel,
@@ -56,27 +86,20 @@ extension HUDEntityData {
             }
 
             let now = Date()
-            let remoteIsStale = remoteUsage.map {
-                now.timeIntervalSince($0.capturedAt) > max(accounts.interval * 2, 600)
-            } ?? true
-            let remoteHasWeekly = remoteUsage?.quotas.contains(where: {
-                ($0.id == "secondary_window" || $0.label == "7d") && (0...100).contains($0.remainingPercent)
-            }) == true
-            let remoteQuotaHealthy = accounts.monitoringEnabled
-                && state?.error == nil
-                && remoteUsage != nil
-                && !remoteIsStale
-                && remoteHasWeekly
-
-            if remoteQuotaHealthy, let remoteUsage {
-                applyRemoteQuota(remoteUsage, to: &d)
-                d.state = state?.isRefreshing == true ? "…" : "OK"
-                return d
-            }
-
             let local = resolve(source: "local", usage: usage, remote: remote, newAPI: newAPI, subAPI: subAPI, accounts: accounts, settings: settings)
             let localHasWeekly = local.weeklyWindow?.remaining != nil || local.weekly != nil
-            if localHasWeekly, accounts.canUseLocalFallback(for: a, localCapturedAt: local.capturedAt) {
+            let bindingMatches = accounts.canUseLocalFallback(for: a, localCapturedAt: local.capturedAt)
+            let shouldUseLocal = CodexAccountQuotaFallbackPolicy.shouldUseLocal(
+                remoteUsage: remoteUsage,
+                remoteError: state?.error,
+                monitoringEnabled: accounts.monitoringEnabled,
+                interval: accounts.interval,
+                bindingMatches: bindingMatches,
+                localHasWeekly: localHasWeekly,
+                now: now
+            )
+
+            if shouldUseLocal {
                 applyLocalQuota(local, to: &d)
                 d.state = "LOCAL"
                 d.warning = nil
@@ -87,8 +110,8 @@ extension HUDEntityData {
                 applyRemoteQuota(remoteUsage, to: &d)
                 d.state = state?.isRefreshing == true ? "…" : state?.error != nil ? "!" : "OK"
                 if let error = state?.error { d.warning = error }
-                else if remoteIsStale { d.warning = "数据已过期，等待刷新" }
-                else if !remoteHasWeekly { d.warning = "每周额度暂不可用" }
+                else if CodexAccountQuotaFallbackPolicy.remoteIsStale(remoteUsage, interval: accounts.interval, now: now) { d.warning = "数据已过期，等待刷新" }
+                else if !CodexAccountQuotaFallbackPolicy.remoteHasWeekly(remoteUsage) { d.warning = "每周额度暂不可用" }
                 else if !accounts.monitoringEnabled { d.warning = "账户监测已关闭" }
                 return d
             }
