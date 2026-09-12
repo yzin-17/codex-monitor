@@ -411,11 +411,7 @@ struct DetailPanelView: View {
     }
 
     private var detailTopPadding: CGFloat {
-        if preferences.value.mode.usesCompactOverlay(hasNotch: (currentScreen?.safeAreaInsets.top ?? 0) > 0) { return selectedPage == .codex ? 38 : 16 }
-        return IslandMetrics.detailContentTopPadding(
-            safeAreaTop: ScreenNotchGeometry.topSafeInset(for: currentScreen),
-            collapsedHeight: islandLayout.collapsedHeight
-        )
+        selectedPage == .codex ? 38 : 16
     }
 
     var body: some View {
@@ -819,13 +815,7 @@ struct DetailPanelView: View {
                     )
                 }
             }
-            .padding(
-                .top,
-                preferences.value.mode.usesCompactOverlay(hasNotch: (currentScreen?.safeAreaInsets.top ?? 0) > 0) ? 8 : IslandMetrics.quotaResetTopPadding(
-                    safeAreaTop: ScreenNotchGeometry.topSafeInset(for: currentScreen),
-                    collapsedHeight: islandLayout.collapsedHeight
-                )
-            )
+            .padding(.top, 8)
             .padding(.horizontal, 18)
             .frame(maxWidth: .infinity, alignment: .center)
         }

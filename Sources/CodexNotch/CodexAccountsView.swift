@@ -18,11 +18,11 @@ struct CodexAccountsSettingsView: View {
     @State private var operation: Task<Void, Never>?
     var body: some View {
         Section("Codex 账号 · 官方额度验证") {
-            Toggle("启用多 Codex 账号监测", isOn: $store.monitoringEnabled)
+            Toggle("启用 Codex 账号额度监测", isOn: $store.monitoringEnabled)
             Picker("刷新间隔", selection: $store.interval) {
                 Text("1 分钟").tag(60.0); Text("5 分钟").tag(300.0); Text("15 分钟").tag(900.0); Text("30 分钟").tag(1800.0)
             }
-            Text("点击添加后使用系统浏览器登录 Codex，授权完成后自动验证额度并保存。使用独立临时登录目录，不切换桌面端当前账号；长期凭据仅存本应用钥匙串。高级导入仍保留。")
+            Text("开启后才会按刷新间隔自动读取已启用账号的官方额度；关闭后停止后台和手动刷新。添加账号时仍会调用一次官方额度接口验证凭据。点击添加后使用系统浏览器登录 Codex，授权完成后自动验证额度并保存；使用独立临时登录目录，不切换桌面端当前账号。")
                 .font(.caption).foregroundStyle(.secondary)
             ForEach(store.accounts) { account in
                 HStack {
@@ -172,7 +172,7 @@ struct CodexAccountsPanel: View {
                 Button("刷新") { store.refreshAll(interactive: true) }.disabled(!store.monitoringEnabled)
                 Button("管理", action: onSettings)
             }
-            if !store.monitoringEnabled { Text("Codex 账号监测未启用；原网关账号不受影响。").font(.caption).foregroundStyle(.secondary) }
+            if !store.monitoringEnabled { Text("Codex 账号额度监测未启用；原网关账号不受影响。").font(.caption).foregroundStyle(.secondary) }
             if store.accounts.isEmpty { Text("在设置 → 远程账号中添加并验证 Codex 账号。未配置时不请求任何额度接口。").font(.caption).foregroundStyle(.secondary) }
             ForEach(store.accounts.filter { selected == "all" || $0.id.uuidString == selected }) { account in
                 card(account)
