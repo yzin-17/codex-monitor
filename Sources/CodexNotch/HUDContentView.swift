@@ -244,10 +244,10 @@ struct ConfigurableHUDView: View {
                             forecastBadge
                         }
                         .fixedSize(horizontal: true, vertical: false)
-                        .padding(.leading, 4)
-                        .padding(.trailing, 8)
+                        .padding(.leading, 6)
+                        .padding(.trailing, 6)
                     }
-                    // 安全留白必须在 ScrollView 的可滚动内容内部；放在 ScrollView 外部无法避免 viewport 裁切字形尾部。
+                    // 刘海 HUD 左右各保留 6pt，继续在 ScrollView 内容内部保护尾部字形，同时减少右侧视觉空白。
                     .frame(width: rightWidth, alignment: .leading)
                 }
                 .frame(width: notch.shoulderWidth + notch.notchWidth + rightWidth, height: notch.collapsedHeight)
