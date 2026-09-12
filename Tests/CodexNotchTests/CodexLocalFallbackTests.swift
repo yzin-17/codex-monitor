@@ -140,6 +140,15 @@ import Testing
     #expect(CodexAccountQuotaFallbackPolicy.localIdentityIsSettled(changedAt: settledAt, now: now))
 }
 
+@Test func singleRemotePrimaryWindowWithoutDurationDefaultsToWeekly() throws {
+    let data = Data(#"{"plan_type":"pro","rate_limit":{"primary_window":{"used_percent":20}}}"#.utf8)
+    let usage = try CodexAccountUsageParser.parse(data)
+    let primary = try #require(usage.quotas.first(where: { $0.id == "primary_window" }))
+    #expect(primary.label == "7d")
+    #expect(CodexAccountQuotaFallbackPolicy.isWeeklyQuota(primary))
+    #expect(!CodexAccountQuotaFallbackPolicy.isFiveHourQuota(primary))
+}
+
 @Test func sevenDayPrimaryWindowIsNotMistakenForFiveHourQuota() {
     let weeklyOnly = AccountQuota(
         id: "primary_window",
