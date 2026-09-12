@@ -608,8 +608,6 @@ struct SettingsView: View {
                 ForEach(RemoteSourceCategory.allCases) { Text($0.title).tag($0) }
             }
             Text(remoteCategory.detail).font(.caption).foregroundStyle(.secondary)
-            Text("统一入口不合并凭据和数值：各来源独立启停、认证、刷新。已有配置原位保留，无需重新输入密钥。新增网关/余额来源先保存配置，再按需启用监测。")
-                .font(.caption).foregroundStyle(.secondary)
         }
         switch remoteCategory {
         case .codex:
