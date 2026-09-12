@@ -245,8 +245,9 @@ struct ConfigurableHUDView: View {
                         }
                         .fixedSize(horizontal: true, vertical: false)
                     }
-                    .frame(width: max(1, rightWidth - 8), alignment: .leading)
-                    .padding(.leading, 8)
+                    // 总预留仍为 12pt；把更多空间留给右侧圆角，避免 100% 等尾部字符贴边被裁。
+                    .frame(width: max(1, rightWidth - 4), alignment: .leading)
+                    .padding(.leading, 4)
                 }
                 .frame(width: notch.shoulderWidth + notch.notchWidth + rightWidth, height: notch.collapsedHeight)
             } else {
