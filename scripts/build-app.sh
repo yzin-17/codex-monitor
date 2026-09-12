@@ -4,12 +4,17 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd -P)"
 APP_NAME="CodexMonitor"
 PACKAGE_NAME="codex-monitor"
-APP_VERSION="0.4.3"
+APP_VERSION="$(tr -d '\r\n' < "$ROOT_DIR/VERSION")"
 BUNDLE_ID="dev.yzin.codexmonitor"
 DIST_DIR="$ROOT_DIR/dist"
 APP_DIR="$DIST_DIR/$APP_NAME.app"
 DMG_STAGE_DIR="$DIST_DIR/dmg-stage"
 PACKAGE_STAGE_DIR="$DIST_DIR/package-stage"
+
+if [[ -z "$APP_VERSION" ]]; then
+  echo "VERSION is empty" >&2
+  exit 1
+fi
 
 prepare_swiftpm_module_cache() {
   local build_root="$ROOT_DIR/.build"
