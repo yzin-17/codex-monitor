@@ -3,10 +3,10 @@ import Testing
 @testable import CodexNotch
 
 @Test func localCodexIdentityReadsOnlyValidAccountIDShape() throws {
-    let valid = Data(#"{"tokens":{"account_id":"acct_local-1","access_token":"ignored"}}"#.utf8)
+    let valid = Data(#"{"auth_mode":"chatgpt","tokens":{"account_id":"acct_local-1","access_token":"ignored"}}"#.utf8)
     #expect(CodexLocalAccountIdentity.accountID(from: valid) == "acct_local-1")
 
-    let invalid = Data(#"{"tokens":{"account_id":"bad id with spaces"}}"#.utf8)
+    let invalid = Data(#"{"auth_mode":"chatgpt","tokens":{"account_id":"bad id with spaces"}}"#.utf8)
     #expect(CodexLocalAccountIdentity.accountID(from: invalid) == nil)
 }
 
@@ -87,6 +87,27 @@ import Testing
         localHasWeekly: false,
         now: now
     ))
+}
+
+@Test func switchedLocalAccountWaitsForOldQuotaCachesToExpire() {
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+    let changedAt = now.addingTimeInterval(-30)
+    #expect(!CodexAccountQuotaFallbackPolicy.localIdentityIsSettled(changedAt: changedAt, now: now))
+
+    let settledAt = now.addingTimeInterval(-CodexAccountQuotaFallbackPolicy.localIdentitySettleDelay - 1)
+    #expect(CodexAccountQuotaFallbackPolicy.localIdentityIsSettled(changedAt: settledAt, now: now))
+}
+
+@Test func sevenDayPrimaryWindowIsNotMistakenForFiveHourQuota() {
+    let weeklyOnly = AccountQuota(
+        id: "primary_window",
+        label: "7d",
+        usedPercent: 20,
+        resetsAt: nil,
+        durationSeconds: 604_800
+    )
+    #expect(!CodexAccountQuotaFallbackPolicy.isFiveHourQuota(weeklyOnly))
+    #expect(CodexAccountQuotaFallbackPolicy.isWeeklyQuota(weeklyOnly))
 }
 
 @Test func fallbackPresentationHidesOnlyMissingFiveHourQuota() {
