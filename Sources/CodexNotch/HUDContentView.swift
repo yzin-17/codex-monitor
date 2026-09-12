@@ -246,7 +246,7 @@ struct ConfigurableHUDView: View {
                         .fixedSize(horizontal: true, vertical: false)
                     }
                     // 12pt 预留必须真实分到两侧：左 4pt、右 8pt，不能只缩 frame 后再单侧 padding。
-                    .frame(width: max(1, rightWidth - 12), alignment: .leading)
+                    .frame(width: rightWidth - 12, alignment: .leading)
                     .padding(.leading, 4)
                     .padding(.trailing, 8)
                 }
