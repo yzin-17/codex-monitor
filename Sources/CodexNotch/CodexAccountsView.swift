@@ -25,15 +25,34 @@ struct CodexAccountsSettingsView: View {
             Text("开启后才会按刷新间隔自动读取已启用账号的官方额度；关闭后停止后台和手动刷新。添加账号时仍会调用一次官方额度接口验证凭据。点击添加后使用系统浏览器登录 Codex，授权完成后自动验证额度并保存；使用独立临时登录目录，不切换桌面端当前账号。")
                 .font(.caption).foregroundStyle(.secondary)
             ForEach(store.accounts) { account in
-                HStack {
-                    Toggle(account.label, isOn: Binding(get: { account.enabled }, set: { store.setEnabled($0, id: account.id) }))
-                    if account.verifiedAt != nil { Text("官方额度接口").font(.caption).foregroundStyle(.secondary) }
-                    Button("重新验证") { store.refresh(id: account.id, interactive: true) }
-                        .disabled(!store.monitoringEnabled || !account.enabled)
-                    Button("编辑") { draft = account; token = ""; error = nil; editing = true }
-                    Button("删除", role: .destructive) { deleting = account }
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Toggle(account.label, isOn: Binding(get: { account.enabled }, set: { store.setEnabled($0, id: account.id) }))
+                        if account.verifiedAt != nil { Text("官方额度接口").font(.caption).foregroundStyle(.secondary) }
+                        Button("重新验证") { store.refresh(id: account.id, interactive: true) }
+                            .disabled(!store.monitoringEnabled || !account.enabled)
+                        Button("编辑") { draft = account; token = ""; error = nil; editing = true }
+                        Button("删除", role: .destructive) { deleting = account }
+                    }
+                    HStack(spacing: 8) {
+                        Text("本机账号")
+                        Text(bindingStatus(account)).foregroundStyle(.secondary)
+                        Spacer()
+                        if account.boundLocalAccountID == nil {
+                            Button("绑定当前本机账号") { store.bindCurrentLocalAccount(to: account.id) }
+                                .disabled(store.currentLocalAccountID == nil)
+                                .help(store.currentLocalAccountID == nil ? "未检测到当前本机 Codex 登录账号" : "将当前本机 Codex 账号绑定到此远程账户")
+                        } else {
+                            Button("重新绑定") { store.bindCurrentLocalAccount(to: account.id) }
+                                .disabled(store.currentLocalAccountID == nil)
+                            Button("解绑") { store.unbindLocalAccount(id: account.id) }
+                        }
+                    }
+                    .font(.caption)
                 }
             }
+            Text("绑定关系只保存在对应远程账户下。官方额度不可用、过期或缺少 7d 时，已绑定且当前匹配的本机账号可补充额度；5h 无数据时隐藏，7d 无数据时保留为 —。")
+                .font(.caption).foregroundStyle(.secondary)
             Button("添加 Codex 账号", action: beginAdding)
             if let error = store.lastError { Text(error).font(.caption).foregroundStyle(.red) }
         }
@@ -79,6 +98,10 @@ struct CodexAccountsSettingsView: View {
                 deleting = nil
             }
         }
+    }
+    private func bindingStatus(_ account: CodexAccount) -> String {
+        guard let bound = account.boundLocalAccountID, !bound.isEmpty else { return "未绑定" }
+        return bound == store.currentLocalAccountID ? "已绑定 · 当前账号" : "已绑定"
     }
     private func beginAdding() {
         cancelOperation()
