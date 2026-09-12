@@ -1,15 +1,39 @@
 import Foundation
 
 enum CodexAccountQuotaFallbackPolicy {
+    static let localIdentitySettleDelay: TimeInterval = 65
+
     static func remoteHasWeekly(_ usage: CodexAccountUsage?) -> Bool {
         usage?.quotas.contains(where: {
-            ($0.id == "secondary_window" || $0.label == "7d") && (0...100).contains($0.remainingPercent)
+            ($0.id == "secondary_window" || isWeeklyQuota($0)) && (0...100).contains($0.remainingPercent)
         }) == true
     }
 
     static func remoteIsStale(_ usage: CodexAccountUsage?, interval: Double, now: Date) -> Bool {
         guard let usage else { return true }
         return now.timeIntervalSince(usage.capturedAt) > max(interval * 2, 600)
+    }
+
+    static func localIdentityIsSettled(changedAt: Date?, now: Date) -> Bool {
+        guard let changedAt else { return true }
+        return now.timeIntervalSince(changedAt) >= localIdentitySettleDelay
+    }
+
+    static func isFiveHourQuota(_ quota: AccountQuota) -> Bool {
+        if quota.durationSeconds == 18_000 { return true }
+        let label = quota.label
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: " ", with: "")
+            .lowercased()
+        return ["5h", "5小时", "5hr", "5hrs"].contains(label)
+    }
+
+    static func isWeeklyQuota(_ quota: AccountQuota) -> Bool {
+        if quota.durationSeconds == 604_800 { return true }
+        return quota.label
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: " ", with: "")
+            .lowercased() == "7d"
     }
 
     static func shouldUseLocal(
@@ -88,7 +112,11 @@ extension HUDEntityData {
             let now = Date()
             let local = resolve(source: "local", usage: usage, remote: remote, newAPI: newAPI, subAPI: subAPI, accounts: accounts, settings: settings)
             let localHasWeekly = local.weeklyWindow?.remaining != nil || local.weekly != nil
-            let bindingMatches = accounts.canUseLocalFallback(for: a, localCapturedAt: local.capturedAt)
+            let bindingMatches = CodexAccountQuotaFallbackPolicy.localIdentityIsSettled(
+                    changedAt: accounts.localIdentityChangedAt,
+                    now: now
+                )
+                && accounts.canUseLocalFallback(for: a, localCapturedAt: local.capturedAt)
             let shouldUseLocal = CodexAccountQuotaFallbackPolicy.shouldUseLocal(
                 remoteUsage: remoteUsage,
                 remoteError: state?.error,
@@ -106,18 +134,24 @@ extension HUDEntityData {
                 return d
             }
 
+            // 关闭监测时不继续展示之前验证留下的远程额度；只有上面的显式绑定 local fallback 可以继续提供额度。
+            guard accounts.monitoringEnabled else {
+                d.state = "OFF"
+                d.warning = "账户监测已关闭"
+                return d
+            }
+
             if let remoteUsage {
                 applyRemoteQuota(remoteUsage, to: &d)
                 d.state = state?.isRefreshing == true ? "…" : state?.error != nil ? "!" : "OK"
                 if let error = state?.error { d.warning = error }
                 else if CodexAccountQuotaFallbackPolicy.remoteIsStale(remoteUsage, interval: accounts.interval, now: now) { d.warning = "数据已过期，等待刷新" }
                 else if !CodexAccountQuotaFallbackPolicy.remoteHasWeekly(remoteUsage) { d.warning = "每周额度暂不可用" }
-                else if !accounts.monitoringEnabled { d.warning = "账户监测已关闭" }
                 return d
             }
 
-            d.state = accounts.monitoringEnabled ? (state?.isRefreshing == true ? "…" : state?.error != nil ? "!" : "—") : "OFF"
-            d.warning = state?.error ?? (accounts.monitoringEnabled ? "每周额度暂不可用" : "账户监测已关闭")
+            d.state = state?.isRefreshing == true ? "…" : state?.error != nil ? "!" : "—"
+            d.warning = state?.error ?? "每周额度暂不可用"
             // 5h 没有有效数据时由 HUDEntityData 自动隐藏；7d 不隐藏，因此会明确显示 “7d —”。
             return d
         }
@@ -146,8 +180,13 @@ extension HUDEntityData {
         func sample(_ w: AccountQuota) -> HUDQuotaSample {
             .init(remaining: w.remainingPercent, resetsAt: w.resetsAt, duration: w.durationSeconds, label: w.label)
         }
-        let primary = usage.quotas.first(where: { $0.id == "primary_window" })
-        let weekly = usage.quotas.first(where: { $0.id == "secondary_window" || $0.label == "7d" })
+        // primary_window 在部分套餐里本身就是 7d；不能仅凭字段名把它误当成 5h。
+        let primary = usage.quotas.first(where: {
+            $0.id == "primary_window" && CodexAccountQuotaFallbackPolicy.isFiveHourQuota($0)
+        })
+        let weekly = usage.quotas.first(where: {
+            $0.id == "secondary_window" || CodexAccountQuotaFallbackPolicy.isWeeklyQuota($0)
+        })
         data.primary = primary?.remainingPercent
         data.primaryLabel = primary?.label ?? "会话"
         data.weekly = weekly?.remainingPercent
