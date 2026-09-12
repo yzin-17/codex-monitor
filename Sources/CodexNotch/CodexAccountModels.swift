@@ -66,8 +66,12 @@ enum CodexLocalAccountIdentity {
 
     static func accountID(from data: Data) -> String? {
         guard data.count <= maximumBytes,
-              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let tokens = root["tokens"] as? [String: Any],
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        if let mode = root["auth_mode"] as? String,
+           mode != "chatgpt" && mode != "chatgptAuthTokens" {
+            return nil
+        }
+        guard let tokens = root["tokens"] as? [String: Any],
               let raw = tokens["account_id"] as? String else { return nil }
         let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty,
