@@ -22,6 +22,45 @@ import Testing
     #expect(decoded.boundLocalAccountID == nil)
 }
 
+@Test @MainActor func explicitLocalBindingRequiresTheSameVerifiedAccountID() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let authURL = root.appendingPathComponent("auth.json")
+    try Data(#"{"auth_mode":"chatgpt","tokens":{"account_id":"acct-a","access_token":"ignored"}}"#.utf8).write(to: authURL)
+
+    let suite = "CodexLocalFallbackTests.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let vault = CodexAccountVault(
+        read: { _, _ in "synthetic-token" },
+        write: { _, _ in },
+        delete: { _ in }
+    )
+    let client = CodexAccountHTTPClient(fetch: { request in
+        let accountID = request.value(forHTTPHeaderField: "ChatGPT-Account-Id") ?? "acct-a"
+        return Data("{\"account_id\":\"\(accountID)\",\"rate_limit\":{\"secondary_window\":{\"used_percent\":20,\"limit_window_seconds\":604800}}}".utf8)
+    })
+    let store = CodexAccountsStore(
+        defaults: defaults,
+        vault: vault,
+        client: client,
+        automaticStart: false,
+        localAuthURL: authURL
+    )
+
+    try await store.verifyAndSave(.init(label: "远程 A", workspaceID: "acct-a"), token: "synthetic-token")
+    let accountA = try #require(store.accounts.first(where: { $0.label == "远程 A" }))
+    store.bindCurrentLocalAccount(to: accountA.id)
+    #expect(store.accounts.first(where: { $0.id == accountA.id })?.boundLocalAccountID == "acct-a")
+
+    try await store.verifyAndSave(.init(label: "远程 B", workspaceID: "acct-b"), token: "synthetic-token")
+    let accountB = try #require(store.accounts.first(where: { $0.label == "远程 B" }))
+    store.bindCurrentLocalAccount(to: accountB.id)
+    #expect(store.accounts.first(where: { $0.id == accountB.id })?.boundLocalAccountID == nil)
+    #expect(store.lastError?.contains("不是同一账号") == true)
+}
+
 @Test func freshRemoteWeeklyQuotaDoesNotFallbackToLocal() {
     let now = Date(timeIntervalSince1970: 1_800_000_000)
     var remote = CodexAccountUsage(capturedAt: now)
