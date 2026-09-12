@@ -8,6 +8,9 @@ import Testing
 
     let invalid = Data(#"{"auth_mode":"chatgpt","tokens":{"account_id":"bad id with spaces"}}"#.utf8)
     #expect(CodexLocalAccountIdentity.accountID(from: invalid) == nil)
+
+    let wrongMode = Data(#"{"auth_mode":"apikey","tokens":{"account_id":"acct_local-1"}}"#.utf8)
+    #expect(CodexLocalAccountIdentity.accountID(from: wrongMode) == nil)
 }
 
 @Test func codexAccountBindingFieldRemainsBackwardCompatibleWhenAbsent() throws {
