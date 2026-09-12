@@ -62,11 +62,11 @@ struct HUDLayoutEditorView: View {
                 Picker("刘海两侧布局", selection: notchDisplaySize) {
                     ForEach(NotchDisplaySize.allCases) { Text($0.label).tag($0) }
                 }.pickerStyle(.segmented)
-                Stepper(
-                    "物理刘海微调：\(Int(notchAdjustment.wrappedValue)) pt",
+                numberField(
+                    "物理刘海微调",
                     value: notchAdjustment,
-                    in: -NotchPointAdjustment(IslandMetrics.notchAdjustmentLimit)...NotchPointAdjustment(IslandMetrics.notchAdjustmentLimit),
-                    step: 1
+                    range: -NotchPointAdjustment(IslandMetrics.notchAdjustmentLimit)...NotchPointAdjustment(IslandMetrics.notchAdjustmentLimit),
+                    suffix: "pt"
                 )
                 Text("物理遮挡区自动识别；仅在识别偏差时微调。左侧保留状态，右侧按自定义内容分配空间。")
                     .font(.caption).foregroundStyle(.secondary)
