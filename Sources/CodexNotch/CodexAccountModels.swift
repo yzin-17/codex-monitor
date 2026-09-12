@@ -130,7 +130,9 @@ enum CodexAccountUsageParser {
         var result = CodexAccountUsage(returnedWorkspaceID: returnedWorkspaceID?.isEmpty == false ? returnedWorkspaceID : nil,
             capturedAt: now)
         func windows(_ limits: [String: Any], prefix: String = "", title: String = "") -> [AccountQuota] {
-            [("primary_window", "5h"), ("secondary_window", "7d")].compactMap { key, fallback in
+            let hasSecondary = limits["secondary_window"] as? [String: Any] != nil
+            let keys = [("primary_window", hasSecondary ? "5h" : "7d"), ("secondary_window", "7d")]
+            return keys.compactMap { key, fallback in
                 guard let item = limits[key] as? [String: Any], let used = number(item["used_percent"]), (0...100).contains(used) else { return nil }
                 let duration = number(item["limit_window_seconds"]).flatMap { (1...315_360_000).contains($0) ? $0 : nil }
                 let label = duration.map { $0 == 604800 ? "7d" : $0 == 18000 ? "5h" : "\(Int($0 / 60))m" } ?? fallback
