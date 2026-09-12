@@ -101,6 +101,7 @@ struct CodexAccountState {
     private var localIdentityWatcher: CodexFileWatcher?
     private var localIdentityPollTimer: Timer?
     private var lastLocalAuthModificationDate: Date?
+    private var localIdentityInitialized = false
     private let automaticStart: Bool
     init(defaults: UserDefaults = .standard, vault: CodexAccountVault = .keychain,
          client: CodexAccountHTTPClient = .init(), automaticStart: Bool = true,
@@ -266,8 +267,9 @@ struct CodexAccountState {
         let next = values?.isRegularFile == true ? CodexLocalAccountIdentity.readAccountID(from: localAuthURL) : nil
         if next != currentLocalAccountID {
             currentLocalAccountID = next
-            localIdentityChangedAt = Date()
+            localIdentityChangedAt = localIdentityInitialized ? Date() : nil
         }
+        localIdentityInitialized = true
         installLocalIdentityWatcher()
     }
     private func installLocalIdentityWatcher() {
