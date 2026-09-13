@@ -84,27 +84,42 @@ struct CodexAccountState {
 @MainActor final class CodexAccountsStore: ObservableObject {
     @Published private(set) var accounts: [CodexAccount]
     @Published private(set) var states: [UUID: CodexAccountState] = [:]
+    @Published private(set) var currentLocalAccountID: String?
+    @Published private(set) var localIdentityChangedAt: Date?
     @Published var monitoringEnabled: Bool { didSet { defaults.set(monitoringEnabled, forKey: "codexAccounts.enabled"); reconfigure() } }
     @Published var interval: Double { didSet { defaults.set(min(1800, max(60, interval)), forKey: "codexAccounts.interval"); schedule() } }
     @Published var lastError: String?
     private let defaults: UserDefaults
     private let vault: CodexAccountVault
     private let client: CodexAccountHTTPClient
+    private let localAuthURL: URL
     private var tasks: [UUID: Task<Void, Never>] = [:]
     private var generations: [UUID: UUID] = [:]
     private var verifications: [UUID: UUID] = [:]
     private var queue: [(UUID, Bool)] = []
     private var timer: Timer?
+    private var localIdentityWatcher: CodexFileWatcher?
+    private var localIdentityPollTimer: Timer?
+    private var lastLocalAuthModificationDate: Date?
+    private var localIdentityInitialized = false
     private let automaticStart: Bool
     init(defaults: UserDefaults = .standard, vault: CodexAccountVault = .keychain,
-         client: CodexAccountHTTPClient = .init(), automaticStart: Bool = true) {
+         client: CodexAccountHTTPClient = .init(), automaticStart: Bool = true,
+         localAuthURL: URL = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".codex/auth.json")) {
         self.defaults = defaults; self.vault = vault; self.client = client; self.automaticStart = automaticStart
+        self.localAuthURL = localAuthURL
+        currentLocalAccountID = nil
+        localIdentityChangedAt = nil
         let loadedAccounts = defaults.data(forKey: "codexAccounts.v1").flatMap { try? JSONDecoder().decode([CodexAccount].self, from: $0) } ?? []
         var ids = Set<UUID>(); accounts = Array(loadedAccounts.filter { ids.insert($0.id).inserted }.prefix(30))
         monitoringEnabled = defaults.bool(forKey: "codexAccounts.enabled")
         let stored = defaults.double(forKey: "codexAccounts.interval")
         interval = stored.isFinite && stored >= 60 ? min(1800, stored) : 300
-        if automaticStart { reconfigure() }
+        if automaticStart {
+            startLocalIdentityMonitoring()
+            reconfigure()
+        }
     }
     /// HTTP 额度请求成功之后才保存。JWT 解码或文件存在本身不算验证。
     func verifyAndSave(_ draft: CodexAccount, token: String) async throws {
@@ -124,8 +139,14 @@ struct CodexAccountState {
         try Task.checkCancellation()
         guard verifications[next.id] == ticket, accounts.first(where: { $0.id == next.id })?.revision == old?.revision,
               old != nil || accounts.count < 30 else { throw CodexAccountError.superseded }
+        if next.workspaceID.isEmpty,
+           let returned = usage.returnedWorkspaceID?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !returned.isEmpty {
+            next.workspaceID = returned
+        }
         // 保存失败保留旧元数据、旧快照；只有验证通过的新凭据进入本应用 Keychain。
         if !replacement.isEmpty { try vault.write(next, replacement) }
+        if let old, old.workspaceID != next.workspaceID { next.boundLocalAccountID = nil }
         next.revision = UUID(); next.verifiedAt = usage.capturedAt
         cancel(id: next.id)
         if let index = accounts.firstIndex(where: { $0.id == next.id }) { accounts[index] = next } else { accounts.append(next) }
@@ -145,7 +166,46 @@ struct CodexAccountState {
         accounts[index].enabled = enabled; accounts[index].revision = UUID(); persist()
         if enabled { refresh(id: id) }; pump()
     }
+    func bindCurrentLocalAccount(to id: UUID) {
+        refreshLocalIdentity(force: true)
+        guard let currentLocalAccountID, !currentLocalAccountID.isEmpty else {
+            lastError = "未检测到当前本机 Codex 账号，无法绑定。"
+            return
+        }
+        guard let index = accounts.firstIndex(where: { $0.id == id }) else { return }
+        let account = accounts[index]
+        guard let remoteAccountID = verifiedRemoteAccountID(for: account) else {
+            lastError = "“\(account.label)”缺少可验证的 Account ID，请先重新验证。"
+            return
+        }
+        guard remoteAccountID == currentLocalAccountID else {
+            lastError = "当前本机 Codex 账号与“\(account.label)”不是同一账号，无法绑定。"
+            return
+        }
+        if let conflict = accounts.first(where: { $0.id != id && $0.boundLocalAccountID == currentLocalAccountID }) {
+            lastError = "当前本机账号已绑定到“\(conflict.label)”，请先解绑。"
+            return
+        }
+        accounts[index].boundLocalAccountID = currentLocalAccountID
+        persist(); lastError = nil
+    }
+    func unbindLocalAccount(id: UUID) {
+        guard let index = accounts.firstIndex(where: { $0.id == id }) else { return }
+        accounts[index].boundLocalAccountID = nil
+        persist(); lastError = nil
+    }
+    func canUseLocalFallback(for account: CodexAccount, localCapturedAt: Date?) -> Bool {
+        guard account.enabled,
+              let bound = account.boundLocalAccountID,
+              !bound.isEmpty,
+              bound == currentLocalAccountID,
+              verifiedRemoteAccountID(for: account) == bound,
+              let localCapturedAt else { return false }
+        if let localIdentityChangedAt, localCapturedAt < localIdentityChangedAt { return false }
+        return true
+    }
     func refreshAll(interactive: Bool = false) {
+        refreshLocalIdentity()
         guard monitoringEnabled else { return }
         for account in accounts where account.enabled { refresh(id: account.id, interactive: interactive) }
         schedule()
@@ -188,6 +248,12 @@ struct CodexAccountState {
         }
     }
     private func persist() { defaults.set(try? JSONEncoder().encode(accounts), forKey: "codexAccounts.v1") }
+    private func verifiedRemoteAccountID(for account: CodexAccount) -> String? {
+        let configured = account.workspaceID.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !configured.isEmpty { return configured }
+        let returned = states[account.id]?.usage?.returnedWorkspaceID?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return returned?.isEmpty == false ? returned : nil
+    }
     private func reconfigure() {
         stop()
         if monitoringEnabled && automaticStart { refreshAll() }
@@ -201,5 +267,36 @@ struct CodexAccountState {
             Task { @MainActor in self?.refreshAll() }
         }
         timer.tolerance = min(30, seconds * 0.1); self.timer = timer
+    }
+    private func startLocalIdentityMonitoring() {
+        refreshLocalIdentity(force: true)
+        scheduleLocalIdentityPoll()
+    }
+    private func scheduleLocalIdentityPoll() {
+        localIdentityPollTimer?.invalidate()
+        let timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.refreshLocalIdentity() }
+        }
+        timer.tolerance = 1
+        localIdentityPollTimer = timer
+    }
+    private func refreshLocalIdentity(force: Bool = false) {
+        let values = try? localAuthURL.resourceValues(forKeys: [.isRegularFileKey, .contentModificationDateKey])
+        let modificationDate = values?.contentModificationDate
+        if !force, modificationDate == lastLocalAuthModificationDate { return }
+        lastLocalAuthModificationDate = modificationDate
+        let next = values?.isRegularFile == true ? CodexLocalAccountIdentity.readAccountID(from: localAuthURL) : nil
+        if next != currentLocalAccountID {
+            currentLocalAccountID = next
+            localIdentityChangedAt = localIdentityInitialized ? Date() : nil
+        }
+        localIdentityInitialized = true
+        installLocalIdentityWatcher()
+    }
+    private func installLocalIdentityWatcher() {
+        localIdentityWatcher?.cancel()
+        localIdentityWatcher = CodexFileWatcher(path: localAuthURL.path) { [weak self] in
+            Task { @MainActor in self?.refreshLocalIdentity(force: true) }
+        }
     }
 }

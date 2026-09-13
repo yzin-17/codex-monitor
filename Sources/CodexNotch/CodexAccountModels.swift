@@ -8,6 +8,7 @@ struct CodexAccount: Codable, Equatable, Identifiable, Sendable {
     var enabled = true
     var revision = UUID()
     var verifiedAt: Date?
+    var boundLocalAccountID: String?
     var hudID: String { "codex-account:\(id.uuidString)" }
 }
 struct AccountQuota: Equatable, Sendable, Identifiable {
@@ -40,6 +41,42 @@ enum CodexAccountError: Error, LocalizedError, Sendable, Equatable {
         case .accountMismatch: "返回的工作区与所选 Account ID 不一致，结果未保存。"
         case .superseded: "账户已被修改或验证已取消，请重新操作。"
         }
+    }
+}
+
+enum CodexLocalAccountIdentity {
+    static let maximumBytes = 256 * 1024
+
+    static func readAccountID(from url: URL) -> String? {
+        guard let properties = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+              properties.isRegularFile == true,
+              (properties.fileSize ?? Int.max) <= maximumBytes,
+              let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        let data: Data
+        do {
+            guard let value = try handle.read(upToCount: maximumBytes + 1) else { return nil }
+            data = value
+        } catch {
+            return nil
+        }
+        guard data.count <= maximumBytes else { return nil }
+        return accountID(from: data)
+    }
+
+    static func accountID(from data: Data) -> String? {
+        guard data.count <= maximumBytes,
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        if let mode = root["auth_mode"] as? String,
+           mode != "chatgpt" && mode != "chatgptAuthTokens" {
+            return nil
+        }
+        guard let tokens = root["tokens"] as? [String: Any],
+              let raw = tokens["account_id"] as? String else { return nil }
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty,
+              (try? CodexCredentialImport.validateWorkspace(value)) != nil else { return nil }
+        return value
     }
 }
 
@@ -93,7 +130,9 @@ enum CodexAccountUsageParser {
         var result = CodexAccountUsage(returnedWorkspaceID: returnedWorkspaceID?.isEmpty == false ? returnedWorkspaceID : nil,
             capturedAt: now)
         func windows(_ limits: [String: Any], prefix: String = "", title: String = "") -> [AccountQuota] {
-            [("primary_window", "5h"), ("secondary_window", "7d")].compactMap { key, fallback in
+            let hasSecondary = limits["secondary_window"] as? [String: Any] != nil
+            let keys = [("primary_window", hasSecondary ? "5h" : "7d"), ("secondary_window", "7d")]
+            return keys.compactMap { key, fallback in
                 guard let item = limits[key] as? [String: Any], let used = number(item["used_percent"]), (0...100).contains(used) else { return nil }
                 let duration = number(item["limit_window_seconds"]).flatMap { (1...315_360_000).contains($0) ? $0 : nil }
                 let label = duration.map { $0 == 604800 ? "7d" : $0 == 18000 ? "5h" : "\(Int($0 / 60))m" } ?? fallback
