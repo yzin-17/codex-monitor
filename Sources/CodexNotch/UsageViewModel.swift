@@ -49,6 +49,11 @@ final class UsageViewModel: ObservableObject {
     private var usageLoadState = PeriodUsageLoadState()
     private var watcherRefreshGeneration = 0
     private var observedSettings: LocalUsageSettingsSnapshot?
+    private struct ConversationCostLoaderCacheEntry {
+        let loader: ConversationCostLoader
+        var lastUsed: Date
+    }
+    private var conversationCostLoaders: [String: ConversationCostLoaderCacheEntry] = [:]
 
     init(
         store: CodexUsageStore = CodexUsageStore(),
@@ -75,9 +80,24 @@ final class UsageViewModel: ObservableObject {
         _ = cliResume
     }
 
-    func makeConversationCostLoader() -> ConversationCostLoader? {
+    func makeConversationCostLoader(taskID: String? = nil, skillsEnabled: Bool = true) -> ConversationCostLoader? {
         guard !isPreviewMode else { return nil }
-        return ConversationCostLoader(codexHome: store.conversationDataDirectory)
+        guard let taskID else {
+            return ConversationCostLoader(codexHome: store.conversationDataDirectory)
+        }
+        let key = taskID.lowercased() + "|" + (skillsEnabled ? "skills" : "plain")
+        if var entry = conversationCostLoaders[key] {
+            entry.lastUsed = Date()
+            conversationCostLoaders[key] = entry
+            return entry.loader
+        }
+        let loader = ConversationCostLoader(codexHome: store.conversationDataDirectory)
+        conversationCostLoaders[key] = ConversationCostLoaderCacheEntry(loader: loader, lastUsed: Date())
+        if conversationCostLoaders.count > 8,
+           let oldest = conversationCostLoaders.min(by: { $0.value.lastUsed < $1.value.lastUsed })?.key {
+            conversationCostLoaders.removeValue(forKey: oldest)
+        }
+        return loader
     }
 
     func refresh(bypassFastCache: Bool = false) {

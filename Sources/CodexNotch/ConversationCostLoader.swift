@@ -1,7 +1,7 @@
 import Foundation
 
 /// 只在展开对话时使用；保留当前对话的内存游标，不新增持久化日志副本。
-/// 每轮最多 32 MiB / 4 秒；超限通过“继续扫描”恢复，不循环全量重扫。
+/// 每次调用只处理一个有界协作切片；调用方可在后台连续调用直到追平。
 final class ConversationCostLoader: @unchecked Sendable {
     private struct Node {
         let id: String
@@ -18,8 +18,15 @@ final class ConversationCostLoader: @unchecked Sendable {
         var modified = Date.distantPast
         var discarding = false
         var complete = false
+        var waitingForAppend = false
+        var unavailable = false
         var skillEvidenceGap = false
+        var oversizedRowClassification: SkillJSONLRowClassification?
         var cwd: String?
+        var sawWorldState = false
+        var sawForeignSessionMeta = false
+        var childTransitionConfirmed = false
+        var candidateTurnID: String?
     }
     private let home: URL
     private let byteBudget: UInt64
@@ -34,6 +41,7 @@ final class ConversationCostLoader: @unchecked Sendable {
     private var discoveryDone = false
     private var seenFiles = 0
     private var discoveryWarnings: Set<String> = []
+    private var scanCursor = 0
     private let decoder = CodexSessionEventDecoder()
     private var roots: [URL] { [home.appendingPathComponent("sessions"), home.appendingPathComponent("archived_sessions")] }
 
@@ -49,7 +57,7 @@ final class ConversationCostLoader: @unchecked Sendable {
         try checkCancellation(shouldCancel)
         let id = rootID.lowercased()
         if selectedID != id || skillsEnabled != includeSkills {
-            nodes = [:]; progress = [:]; directoryIndex = 0; enumerator = nil
+            nodes = [:]; progress = [:]; directoryIndex = 0; enumerator = nil; scanCursor = 0
             discoveryDone = false; seenFiles = 0; discoveryWarnings = []
             selectedID = id; skillsEnabled = includeSkills
         } else if discoveryDone && progress.values.allSatisfy(\.complete) {
@@ -62,51 +70,109 @@ final class ConversationCostLoader: @unchecked Sendable {
         try discover(deadline: deadline, remaining: &remaining, shouldCancel: shouldCancel)
         guard discoveryDone else {
             return ConversationCostDetails(rootID: id, agents: [], skills: [], pending: true,
-                diagnostics: ["正在发现对话与子代理关系，请继续扫描。"] + discoveryWarnings.sorted(), observedAt: Date())
+                diagnostics: ["正在发现对话与子代理关系。"] + discoveryWarnings.sorted(), observedAt: Date(),
+                scanState: .discovering)
         }
         let participants = family(rootID: id)
         var warnings = discoveryWarnings
+
+        // 以轮转顺序处理尚未追平的代理。已完成代理不占用本轮 I/O
+        // 预算；实际未用完的切片回收到下一个候选代理。
+        let rotated = participants.indices.map { (scanCursor + $0) % max(1, participants.count) }
+        var queue = rotated.filter { participantIndex in
+            let (agentID, _) = participants[participantIndex]
+            guard let node = nodes[agentID] else { return false }
+            let state = progress[agentID] ?? Progress(
+                accumulator: .init(isChild: node.parentID != nil, skillsEnabled: includeSkills)
+            )
+            return !state.unavailable && (!state.complete || node.size != state.size ||
+                node.modified != state.modified || state.inode == 0) &&
+                (!state.waitingForAppend || fileSignatureChanged(node, state: state))
+        }
+        var scannedCount = 0
+        var queueOffset = 0
+        while queueOffset < queue.count {
+            let participantIndex = queue[queueOffset]
+            queueOffset += 1
+            let (agentID, _) = participants[participantIndex]
+            try checkCancellation(shouldCancel)
+            guard let node = nodes[agentID] else { continue }
+            var state = progress[agentID] ?? Progress(accumulator: .init(isChild: node.parentID != nil, skillsEnabled: includeSkills))
+            let needsScan = !state.unavailable && (!state.complete || node.size != state.size ||
+                node.modified != state.modified || state.inode == 0) &&
+                (!state.waitingForAppend || fileSignatureChanged(node, state: state))
+            guard needsScan, remaining > 0, ProcessInfo.processInfo.systemUptime < deadline else {
+                progress[agentID] = state
+                continue
+            }
+
+            let agentsLeft = max(1, queue[queueOffset...].reduce(into: 0) { count, index in
+                let id = participants[index].0
+                if let current = progress[id], !current.complete && !current.unavailable { count += 1 }
+                else if progress[id] == nil { count += 1 }
+            })
+            let minimumSlice: UInt64 = 256 * 1024
+            let byteSlice = min(remaining, max(minimumSlice, remaining / UInt64(agentsLeft)))
+            var localRemaining = byteSlice
+            let now = ProcessInfo.processInfo.systemUptime
+            let timeSlice = max(0.05, (deadline - now) / Double(agentsLeft))
+            let localDeadline = min(deadline, now + timeSlice)
+            do {
+                try scan(node, state: &state, deadline: localDeadline, remaining: &localRemaining, shouldCancel: shouldCancel)
+            } catch is CancellationError { throw CancellationError() }
+            catch {
+                state.complete = false; state.unavailable = true
+                warnings.insert("部分日志读取失败，当前金额仅包含已读取记录。")
+            }
+            let consumed = min(remaining, byteSlice - localRemaining)
+            remaining -= consumed
+            progress[agentID] = state
+            scannedCount += 1
+            if !state.complete && !state.unavailable {
+                queue.append(participantIndex)
+                // A partial row can make a scan consume zero bytes. Do not
+                // spin on it; the next load call will resume after an append.
+                if consumed == 0 { break }
+            }
+            if remaining == 0 || ProcessInfo.processInfo.systemUptime >= deadline { break }
+        }
+        if !participants.isEmpty {
+            scanCursor = queue.dropFirst(queueOffset).first
+                ?? (scanCursor + max(1, scannedCount)) % participants.count
+        }
+
         var agents: [AgentCostDetail] = []
         var skillRows: [String: SkillTurnCost] = [:]
         var pending = false
-        for (index, participant) in participants.enumerated() {
-            let (agentID, depth) = participant
-            try checkCancellation(shouldCancel)
+        for (agentID, depth) in participants {
             guard let node = nodes[agentID] else {
                 agents.append(.init(id: agentID, parentID: nil, depth: depth, model: "模型未知",
-                    usage: .zero, hasUsage: false, complete: false))
+                    usage: .zero, hasUsage: false, complete: false,
+                    unavailableReason: .unreadable))
                 warnings.insert("主对话日志不可用；不将缺失费用显示为零。")
                 continue
             }
-            var state = progress[agentID] ?? Progress(accumulator: .init(isChild: depth > 0, skillsEnabled: includeSkills))
-            if remaining > 0 && ProcessInfo.processInfo.systemUptime < deadline {
-                // 为尚未扫描的每个代理预留自己的 I/O 与时间片，避免超大的主代理日志
-                // 把整轮预算耗尽，导致子代理长期停留在“模型未知”。未用完的预算会自然
-                // 留给后续代理，下一次“继续扫描”再从各自游标续读。
-                let agentsLeft = max(1, participants.count - index)
-                let minimumSlice: UInt64 = 256 * 1024
-                let byteSlice = min(remaining, max(minimumSlice, remaining / UInt64(agentsLeft)))
-                var localRemaining = byteSlice
-                let now = ProcessInfo.processInfo.systemUptime
-                let timeSlice = max(0.05, (deadline - now) / Double(agentsLeft))
-                let localDeadline = min(deadline, now + timeSlice)
-                do { try scan(node, state: &state, deadline: localDeadline, remaining: &localRemaining, shouldCancel: shouldCancel) }
-                catch is CancellationError { throw CancellationError() }
-                catch { state.complete = false; warnings.insert("部分日志读取失败，当前金额仅包含已读取记录。") }
-                remaining -= min(remaining, byteSlice - localRemaining)
+        let state = progress[agentID] ?? Progress(accumulator: .init(isChild: depth > 0, skillsEnabled: includeSkills))
+            pending = pending || (!state.complete && !state.unavailable)
+            if state.accumulator.hasGap { warnings.insert("存在计数或日志缺口：缺失部分不猜价。") }
+            let ownershipUnconfirmed = depth > 0 && state.sawForeignSessionMeta && !state.childTransitionConfirmed
+            if ownershipUnconfirmed {
+                warnings.insert("子代理继承边界未确认；该代理费用保持未知，不将父历史计入。")
             }
-            progress[agentID] = state
-            pending = pending || !state.complete
-            if state.accumulator.hasGap { warnings.insert("存在计数或日志缺口：缺失部分不猜价，也不分摊给 Skill。") }
-            if state.skillEvidenceGap { warnings.insert("部分行过长或损坏，对应代理的 Skill 关联费用暂不可归属。") }
             // 未读完整个子日志前，后部可能还有 world_state 继承分界，不能先展示父历史。
-            let canShowUsage = depth == 0 || state.complete
-            if !canShowUsage { warnings.insert("子代理日志仍在扫描，尚未确认继承边界；暂不计入该代理费用。") }
+            let canShowUsage = depth == 0 || (state.complete && !ownershipUnconfirmed)
+            if !canShowUsage && !ownershipUnconfirmed {
+                warnings.insert("子代理日志仍在扫描，尚未确认继承边界；暂不计入该代理费用。")
+            }
             agents.append(.init(id: node.id, parentID: node.parentID, depth: depth,
                 model: state.accumulator.models.isEmpty ? state.accumulator.model : state.accumulator.models.sorted().joined(separator: " / "),
                 usage: canShowUsage ? state.accumulator.usage : .zero,
                 hasUsage: canShowUsage && state.accumulator.hasUsage,
-                complete: state.complete && !state.accumulator.hasGap))
+                complete: state.complete && !state.accumulator.hasGap && !ownershipUnconfirmed,
+                hasGap: state.accumulator.hasGap,
+                processedBytes: min(state.offset, state.size == 0 ? node.size : state.size),
+                targetBytes: max(node.size, state.size),
+                unavailableReason: ownershipUnconfirmed ? .ownershipUnconfirmed : (state.unavailable ? .unreadable : nil)))
             if canShowUsage && !state.skillEvidenceGap {
                 for value in state.accumulator.displaySkills {
                     var combined = skillRows[value.id] ?? SkillTurnCost(id: value.id, name: value.name)
@@ -116,10 +182,42 @@ final class ConversationCostLoader: @unchecked Sendable {
             }
         }
         if participants.count >= 256 { warnings.insert("单次明细最多展开 256 个代理，超出部分未计入。") }
-        if !includeSkills { warnings.insert("Skills 已关闭，本次不提取 Skill 读取证据。") }
+        let hasSkillEvidenceGap = !skillRows.isEmpty && participants.contains { agentID, _ in
+            progress[agentID]?.skillEvidenceGap == true
+        }
+        let processedBytes = agents.reduce(UInt64(0)) { $0 + min($1.processedBytes, $1.targetBytes) }
+        let targetBytes = agents.reduce(UInt64(0)) { $0 + $1.targetBytes }
+        let scanState: ConversationCostScanState
+        let nextQueuedAgentID = queue.dropFirst(queueOffset).map { participants[$0].0 }.first
+        if pending && nextQueuedAgentID != nil {
+            let current = queue.dropFirst(queueOffset).map { participants[$0].0 }.first
+                ?? agents.first(where: { $0.complete == false })?.id
+            scanState = .scanning(processedBytes: processedBytes, targetBytes: targetBytes, currentAgentID: current)
+        } else if let waitingID = participants.first(where: { agentID, _ in
+            progress[agentID]?.waitingForAppend == true
+        })?.0 {
+            scanState = .waitingForAppend(processedBytes: processedBytes,
+                targetBytes: targetBytes, currentAgentID: waitingID)
+        } else if let ownershipUnconfirmed = participants.first(where: { agentID, depth in
+            depth > 0 && progress[agentID].map { $0.sawForeignSessionMeta && !$0.childTransitionConfirmed } == true
+        }) {
+            scanState = .unavailable(agentID: ownershipUnconfirmed.0, reason: .ownershipUnconfirmed)
+        } else if pending {
+            let current = agents.first(where: { $0.complete == false })?.id
+            scanState = .scanning(processedBytes: processedBytes, targetBytes: targetBytes, currentAgentID: current)
+        } else if agents.contains(where: { $0.hasGap || $0.usage.unpricedTokens > 0 }) {
+            scanState = .gap
+        } else if let unavailable = agents.first(where: { !$0.complete }) {
+            scanState = .unavailable(agentID: unavailable.id, reason: .unreadable)
+        } else if agents.allSatisfy({ !$0.hasUsage }) {
+            scanState = .noToken
+        } else {
+            scanState = .caughtUp
+        }
         return ConversationCostDetails(rootID: id, agents: agents,
             skills: skillRows.values.sorted { $0.name == $1.name ? $0.id < $1.id : $0.name < $1.name },
-            pending: pending, diagnostics: warnings.sorted(), observedAt: Date())
+            pending: pending, diagnostics: warnings.sorted(), observedAt: Date(), scanState: scanState,
+            hasSkillEvidenceGap: hasSkillEvidenceGap)
     }
 
     private func discover(deadline: TimeInterval, remaining: inout UInt64,
@@ -212,6 +310,15 @@ final class ConversationCostLoader: @unchecked Sendable {
         let size = (attributes[.size] as? NSNumber)?.uint64Value ?? 0
         let inode = (attributes[.systemFileNumber] as? NSNumber)?.uint64Value ?? 0
         let modified = attributes[.modificationDate] as? Date ?? .distantPast
+        let previousSize = state.size
+        let previousInode = state.inode
+        let previousModified = state.modified
+        if state.waitingForAppend && inode == previousInode && size == previousSize && modified == previousModified {
+            // EOF + partial row is a stable observation point. Keep the cursor
+            // at the row start so an append can complete it, but do not reread
+            // the same bytes on every automatic progress turn.
+            return
+        }
         if state.inode != 0 && (inode != state.inode || size < state.size ||
             (size == state.size && modified != state.modified)) {
             state = Progress(accumulator: .init(isChild: node.parentID != nil, skillsEnabled: skillsEnabled))
@@ -221,35 +328,92 @@ final class ConversationCostLoader: @unchecked Sendable {
         let handle = try FileHandle(forReadingFrom: url); defer { try? handle.close() }
         let result = try SkillJSONLReader.read(handle: handle, startOffset: state.offset, fileSize: size,
             byteBudget: remaining, maxRowBytes: 512 * 1024, initialDiscardingOversizedRow: state.discarding,
+            initialOversizedRowClassification: state.oversizedRowClassification,
             wallDeadlineUptime: deadline, cpuDeadlineNanoseconds: .max,
-            shouldCancel: shouldCancel, classify: { _ in .parse }) { data, offset in
-                consume(data, offset: offset, state: &state)
+            shouldCancel: shouldCancel, classify: Self.classifyCostRow) { data, offset in
+                consume(data, offset: offset, agentID: node.id, state: &state)
             }
         remaining -= min(remaining, result.analyzedBytes)
         state.offset = result.processedOffset; state.discarding = result.discardingOversizedRow
+        state.oversizedRowClassification = result.oversizedRowClassification
         state.complete = result.stopReason == .endOfFile && !result.hasIncompleteRow
+        state.waitingForAppend = result.stopReason == .endOfFile && result.hasIncompleteRow
         if result.skippedOversizedRows > 0 { state.accumulator.markGap(); state.skillEvidenceGap = true }
         try checkCancellation(shouldCancel)
     }
 
-    private func consume(_ data: Data, offset: UInt64, state: inout Progress) {
+    /// `compacted` only carries replacement history. It does not carry fresh
+    /// token_count or ownership evidence, so a large row can be skipped without
+    /// lowering cost completeness when its outer type is visible before payload.
+    private static func classifyCostRow(_ row: Data) -> SkillJSONLRowClassification {
+        let prefix = row.prefix(8 * 1024)
+        let compacted = Data("\"type\":\"compacted\"".utf8)
+        let payload = Data("\"payload\":".utf8)
+        guard let typeRange = prefix.range(of: compacted) else { return .parse }
+        if let payloadRange = prefix.range(of: payload), payloadRange.lowerBound < typeRange.lowerBound {
+            return .parse
+        }
+        return .irrelevant
+    }
+
+    private func fileSignatureChanged(_ node: Node, state: Progress) -> Bool {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: node.path) else { return true }
+        let size = (attributes[.size] as? NSNumber)?.uint64Value ?? 0
+        let inode = (attributes[.systemFileNumber] as? NSNumber)?.uint64Value ?? 0
+        let modified = attributes[.modificationDate] as? Date ?? .distantPast
+        return inode != state.inode || size != state.size || modified != state.modified
+    }
+
+    private func consume(_ data: Data, offset: UInt64, agentID: String, state: inout Progress) {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             state.accumulator.markGap(); state.skillEvidenceGap = true; return
         }
         let type = object["type"] as? String
         let payload = object["payload"] as? [String: Any] ?? [:]
         let subtype = payload["type"] as? String
+        if type == "inter_agent_communication_metadata" {
+            // 目前通常位于 payload；兼容少数版本把标记放在事件根对象的形状。
+            let triggerValue = payload["trigger_turn"] ?? object["trigger_turn"]
+            let triggerTurn = triggerValue as? Bool == true
+                || (triggerValue as? String)?.lowercased() == "true"
+            if state.accumulator.isChild && triggerTurn && !state.childTransitionConfirmed {
+                state.accumulator.resetInheritedHistory(
+                    preservingModel: state.accumulator.model,
+                    preservingTurnID: state.candidateTurnID
+                )
+                state.childTransitionConfirmed = true
+            }
+            return
+        }
         if type == "world_state" {
             if state.accumulator.isChild {
-                state.accumulator.resetInheritedHistory(); state.skillEvidenceGap = false
+                state.sawWorldState = true
+                // Older rollout versions do not emit inter-agent metadata. Their
+                // single world_state is the bounded fallback boundary, unless
+                // the copied parent session_meta proves the newer shape.
+                let kind = payload["kind"] as? String
+                if kind == "child_start" || !state.sawForeignSessionMeta {
+                    state.accumulator.resetInheritedHistory(
+                        preservingModel: state.accumulator.model,
+                        preservingTurnID: state.candidateTurnID
+                    )
+                    state.childTransitionConfirmed = true
+                    state.skillEvidenceGap = false
+                }
             }
             return
         }
         if type == "session_meta" {
-            state.cwd = payload["cwd"] as? String
+            let isOwnSessionMeta = (payload["id"] as? String)?.lowercased() == agentID.lowercased()
+            if isOwnSessionMeta {
+                state.cwd = payload["cwd"] as? String ?? state.cwd
+            } else if payload["id"] != nil {
+                state.sawForeignSessionMeta = true
+            }
             // 某些 Codex 版本会把实际模型直接写进子代理 session_meta。只接受明确字段，
             // 不从父代理、文件名或角色猜测模型。
             if let model = (payload["model"] as? String) ?? (payload["model_name"] as? String),
+               isOwnSessionMeta,
                !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 state.accumulator.setModel(model)
             }
@@ -259,11 +423,21 @@ final class ConversationCostLoader: @unchecked Sendable {
             state.cwd = payload["cwd"] as? String ?? state.cwd
             let line = String(decoding: data, as: UTF8.self)
             state.accumulator.setModel(decoder.turnContextModel(from: line))
-            if let turn = payload["turn_id"] as? String { state.accumulator.beginTurn(turn) }
+            if let turn = payload["turn_id"] as? String {
+                state.accumulator.beginTurn(turn)
+                if state.accumulator.isChild && state.sawWorldState && !state.childTransitionConfirmed {
+                    state.candidateTurnID = turn
+                }
+            }
             return
         }
         if type == "event_msg" && subtype == "task_started" {
-            state.accumulator.beginTurn(payload["turn_id"] as? String ?? "offset-\(offset)"); return
+            let turn = payload["turn_id"] as? String ?? "offset-\(offset)"
+            state.accumulator.beginTurn(turn)
+            if state.accumulator.isChild && state.sawWorldState && !state.childTransitionConfirmed {
+                state.candidateTurnID = turn
+            }
+            return
         }
         if type == "event_msg" && ["task_complete", "turn_aborted"].contains(subtype ?? "") {
             state.accumulator.finishTurn(); return

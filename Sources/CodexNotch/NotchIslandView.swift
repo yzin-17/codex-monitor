@@ -898,7 +898,7 @@ struct DetailPanelView: View {
                             TaskRow(task: task, now: context.date,
                                 isExpanded: expandedTaskID == task.id,
                                 skillsEnabled: settings.skillInsightsEnabled,
-                                makeLoader: { viewModel.makeConversationCostLoader() },
+                                makeLoader: { viewModel.makeConversationCostLoader(taskID: task.id, skillsEnabled: settings.skillInsightsEnabled) },
                                 preview: previewCosts[task.id],
                                 resumeStore: viewModel.cliResume,
                                 codexAccounts: codexAccounts.accounts,
@@ -1596,7 +1596,7 @@ private struct TaskRow: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("\(isExpanded ? "收起" : "展开")对话费用：\(task.title)")
-                .help("查看主代理、子代理及 Skill 关联回合费用")
+                .help("查看主代理与子代理费用明细")
                 TokenUsageTrigger(title: "\(task.title) Token 构成",
                     tokenText: Formatters.compactTokens(task.tokenCount), summary: task.tokenUsage, style: .task)
                     .frame(width: 94, height: 36)

@@ -8,6 +8,40 @@ struct AgentCostDetail: Equatable, Identifiable, Sendable {
     let usage: TokenUsageSummary
     let hasUsage: Bool
     let complete: Bool
+    let hasGap: Bool
+    let processedBytes: UInt64
+    let targetBytes: UInt64
+    let unavailableReason: ConversationCostUnavailableReason?
+
+    init(id: String, parentID: String?, depth: Int, model: String, usage: TokenUsageSummary,
+         hasUsage: Bool, complete: Bool, hasGap: Bool = false,
+         processedBytes: UInt64 = 0, targetBytes: UInt64 = 0,
+         unavailableReason: ConversationCostUnavailableReason? = nil) {
+        self.id = id; self.parentID = parentID; self.depth = depth; self.model = model
+        self.usage = usage; self.hasUsage = hasUsage; self.complete = complete; self.hasGap = hasGap
+        self.processedBytes = processedBytes; self.targetBytes = targetBytes
+        self.unavailableReason = unavailableReason
+    }
+}
+
+enum ConversationCostUnavailableReason: Equatable, Sendable {
+    case unreadable
+    case ownershipUnconfirmed
+}
+
+enum ConversationCostScanState: Equatable, Sendable {
+    case discovering
+    case scanning(processedBytes: UInt64, targetBytes: UInt64, currentAgentID: String?)
+    case waitingForAppend(processedBytes: UInt64, targetBytes: UInt64, currentAgentID: String?)
+    case caughtUp
+    case noToken
+    case gap
+    case unavailable(agentID: String?, reason: ConversationCostUnavailableReason)
+
+    var isWaitingForAppend: Bool {
+        if case .waitingForAppend = self { return true }
+        return false
+    }
 }
 
 struct SkillTurnCost: Equatable, Identifiable, Sendable {
@@ -25,6 +59,17 @@ struct ConversationCostDetails: Equatable, Sendable {
     let pending: Bool
     let diagnostics: [String]
     let observedAt: Date
+    let scanState: ConversationCostScanState
+    let hasSkillEvidenceGap: Bool
+
+    init(rootID: String, agents: [AgentCostDetail], skills: [SkillTurnCost], pending: Bool,
+         diagnostics: [String], observedAt: Date, scanState: ConversationCostScanState = .caughtUp,
+         hasSkillEvidenceGap: Bool = false) {
+        self.rootID = rootID; self.agents = agents; self.skills = skills; self.pending = pending
+        self.diagnostics = diagnostics; self.observedAt = observedAt; self.scanState = scanState
+        self.hasSkillEvidenceGap = hasSkillEvidenceGap
+    }
+    var hasDisplayableSkillCosts: Bool { !skills.isEmpty }
     var usage: TokenUsageSummary {
         agents.reduce(into: .zero) { $0.add($1.usage) }
     }
@@ -42,6 +87,9 @@ struct ConversationCostAccumulator: Sendable {
     private(set) var hasGap = false
     private(set) var skills: [String: SkillTurnCost] = [:]
     private var highWater: Int?
+    // 只有明确的 child transition（或旧格式的有界回退）才是继承历史与
+    // 自有执行的边界；确认后 world_state 只表示压缩检查点。
+    private var inheritedHistoryDiscarded = false
     private var lastFingerprint: String?
     private var turnID: String?
     private var turnUsage = TokenUsageSummary.zero
@@ -52,9 +100,18 @@ struct ConversationCostAccumulator: Sendable {
     init(isChild: Bool, skillsEnabled: Bool) {
         self.isChild = isChild; self.skillsEnabled = skillsEnabled
     }
-    mutating func resetInheritedHistory() {
-        guard isChild else { return }
-        self = Self(isChild: isChild, skillsEnabled: skillsEnabled)
+    var currentTurnID: String? { turnID }
+    mutating func resetInheritedHistory(preservingModel: String? = nil, preservingTurnID: String? = nil) {
+        guard isChild, !inheritedHistoryDiscarded else { return }
+        let candidateSkills = preservingTurnID != nil && turnID == preservingTurnID ? turnSkills : [:]
+        let child = Self(isChild: isChild, skillsEnabled: skillsEnabled)
+        self = child
+        inheritedHistoryDiscarded = true
+        if let preservingModel, !preservingModel.isEmpty { setModel(preservingModel) }
+        if let preservingTurnID {
+            turnID = preservingTurnID
+            turnSkills = candidateSkills
+        }
     }
     mutating func setModel(_ value: String?) {
         model = value.flatMap { $0.isEmpty ? nil : $0 } ?? "模型未知"

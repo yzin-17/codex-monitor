@@ -1,6 +1,10 @@
 import Foundation
 
 enum Formatters {
+    static func compactBytes(_ value: UInt64) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(min(value, UInt64(Int64.max))), countStyle: .file)
+    }
+
     static func compactTokens(_ value: Int) -> String {
         let absolute = abs(value)
         if absolute >= 100_000_000 {
