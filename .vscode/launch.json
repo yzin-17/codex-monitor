@@ -1,0 +1,24 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:codex-monitor}",
+            "name": "Debug CodexNotch",
+            "target": "CodexNotch",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug CodexNotch"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:codex-monitor}",
+            "name": "Release CodexNotch",
+            "target": "CodexNotch",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release CodexNotch"
+        }
+    ]
+}
