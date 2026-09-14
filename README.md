@@ -2,7 +2,7 @@
 
 原生 macOS 刘海屏 / 菜单栏监测工具：贴着 MacBook 刘海（或菜单栏）常驻显示 Codex 运行状态与额度，点击展开成灵动岛式详情面板，把本机用量、性能、Skills、公开评分、社区预测和远程账号放在一个窗口里。
 
-![版本](https://img.shields.io/badge/版本-0.4.3-blue) ![平台](https://img.shields.io/badge/macOS-14%2B-lightgrey) ![Swift](https://img.shields.io/badge/Swift-6-orange) ![许可](https://img.shields.io/badge/License-MIT-green) ![架构](https://img.shields.io/badge/Arch-arm64%20%2F%20x86__64-lightgrey)
+![版本](https://img.shields.io/badge/版本-0.4.5-blue) ![平台](https://img.shields.io/badge/macOS-14%2B-lightgrey) ![Swift](https://img.shields.io/badge/Swift-6-orange) ![许可](https://img.shields.io/badge/License-MIT-green) ![架构](https://img.shields.io/badge/Arch-arm64%20%2F%20x86__64-lightgrey)
 
 项目以 [ALight777/codex-monitor](https://github.com/ALight777/codex-monitor) 原始源码为基线，在此基础上移植 [jackiemingnew/codex-monitor-macos](https://github.com/jackiemingnew/codex-monitor-macos) 的性能与 Skills 模块，并参考 [steipete/CodexBar](https://github.com/steipete/CodexBar) 的 HUD 控件思路与 [JiaYang-BUAA/Codex-Desktop-Usage-Monitor-Windows](https://github.com/JiaYang-BUAA/Codex-Desktop-Usage-Monitor-Windows) 的续跑状态机。**本项目不是从零原创**，来源与许可边界见 [NOTICE.md](NOTICE.md)。
 
@@ -104,9 +104,9 @@
 - 独立标签，两个来源**分别展示、分别启停、默认不联网**：
   - Codex Reset Observatory 的 12 / 24 / 48 / 72 小时社区预测；
   - Will Codex Reset 的 48 小时参考评分。
-- 不做平均，不把社区事件当作个人额度恢复。来源过期或请求失败时保留上次结果并标记。
+- 不做平均，不把社区事件当作个人额度恢复。本地缓存过期、来源声明数据异常或请求失败时保留已有结果并标记；来源生成时间仅作参考信息展示。
 - Will 卡片只提供「前往网站订阅」入口，由系统浏览器打开。**本工具不读取邮箱、不申请邮箱权限、不接收或处理邮件。**
-- 启用某个预测来源后，只要该来源仍有结果、无新的请求错误，且最高概率**超过 70%**，HUD 右侧就会出现橙色「预测 NN%」胶囊；即使结果被来源标记为过期，也会继续保留这项提醒。这只是提醒，**不会触发续跑或任何执行**。
+- 启用某个预测来源后，只要该来源仍有结果、无新的请求错误，且最高概率**超过 70%**，HUD 右侧就会出现橙色「预测 NN%」胶囊；即使结果被来源标记为数据质量异常，也会继续保留这项提醒。这只是提醒，**不会触发续跑或任何执行**。
 
 ![重置预测页：两个独立来源分别展示](docs/screenshots/prediction-tab.png)
 

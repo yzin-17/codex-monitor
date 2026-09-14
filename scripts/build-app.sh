@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd -P)"
 APP_NAME="CodexMonitor"
 PACKAGE_NAME="codex-monitor"
 APP_VERSION="$(tr -d '\r\n' < "$ROOT_DIR/VERSION")"
+APP_BUILD_VERSION="$APP_VERSION"
 BUNDLE_ID="dev.yzin.codexmonitor"
 DIST_DIR="$ROOT_DIR/dist"
 APP_DIR="$DIST_DIR/$APP_NAME.app"
@@ -82,7 +83,7 @@ create_app_bundle() {
   <key>CFBundleShortVersionString</key>
   <string>$APP_VERSION</string>
   <key>CFBundleVersion</key>
-  <string>1</string>
+  <string>$APP_BUILD_VERSION</string>
   <key>LSMinimumSystemVersion</key>
   <string>14.0</string>
   <key>LSUIElement</key>

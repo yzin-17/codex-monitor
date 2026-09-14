@@ -77,11 +77,12 @@ struct PublicInsightSnapshot: Codable, Equatable, Sendable {
 
     var isForecast: Bool { source != .openAIStatus }
 
-    func isStale(now: Date = Date()) -> Bool {
-        upstreamStale
-            || now.timeIntervalSince(fetchedAt) > max(source.refreshInterval * 3, 15 * 60)
+    func isExpired(now: Date = Date()) -> Bool {
+        now.timeIntervalSince(fetchedAt) > max(source.refreshInterval * 3, 15 * 60)
             || fetchedAt > now.addingTimeInterval(60)
     }
+
+    var hasSourceWarning: Bool { upstreamStale }
 }
 
 enum PublicInsightError: Error, LocalizedError {
@@ -145,11 +146,12 @@ enum PublicInsightParser {
                 throw PublicInsightError.invalidResponse
             }
             let health = root["dataHealth"] as? [String: Any]
+            let generatedAt = date(health?["generatedAt"]) ?? checked
             let window = model["activeWindow"] as? [String: Any]
             var snapshot = PublicInsightSnapshot(
                 source: source,
                 fetchedAt: fetchedAt,
-                updatedAt: checked,
+                updatedAt: generatedAt,
                 upstreamStale: (health?["stale"] as? Bool == true)
                     || checked < fetchedAt.addingTimeInterval(-1800)
                     || checked > fetchedAt.addingTimeInterval(60),

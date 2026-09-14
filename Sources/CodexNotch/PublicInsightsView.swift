@@ -75,8 +75,8 @@ struct PublicInsightCard: View {
 
     @ViewBuilder
     private func forecastContent(_ snapshot: PublicInsightSnapshot, now: Date) -> some View {
-        if snapshot.isStale(now: now) || store.errors[source] != nil {
-            Text("数据过期或来源部分不可用 · 以下为上次结果")
+        if let warning = forecastWarning(snapshot, now: now) {
+            Text(warning)
                 .font(.system(size: 10))
                 .foregroundStyle(MonitorTheme.warning)
         }
@@ -143,6 +143,22 @@ struct PublicInsightCard: View {
         }
     }
 
+    private func forecastWarning(_ snapshot: PublicInsightSnapshot, now: Date) -> String? {
+        let expired = snapshot.isExpired(now: now)
+        let requestFailed = store.errors[source] != nil
+        guard expired || snapshot.hasSourceWarning || requestFailed else { return nil }
+        if expired || requestFailed {
+            if snapshot.hasSourceWarning {
+                return "数据过期或来源部分不可用 · 以下为上次结果"
+            }
+            if requestFailed {
+                return "来源请求失败 · 以下为上次结果"
+            }
+            return "数据过期 · 以下为上次结果"
+        }
+        return "来源标记数据质量异常 · 以下为当前结果"
+    }
+
     /// 性能页直接展示 CodexBar 的“状态页”二级菜单内容，不再增加额外入口层。
     private var openAIStatusMenu: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -169,7 +185,7 @@ struct PublicInsightCard: View {
                         .padding(.vertical, 8)
                 }
 
-                if snapshot.isStale() || store.errors[.openAIStatus] != nil {
+                if snapshot.isExpired() || snapshot.hasSourceWarning || store.errors[.openAIStatus] != nil {
                     Text("状态来源暂不可用，显示上次成功结果")
                         .font(.system(size: 10))
                         .foregroundStyle(MonitorTheme.warning)

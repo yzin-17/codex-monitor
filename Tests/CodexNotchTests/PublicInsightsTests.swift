@@ -24,7 +24,7 @@ private var insightISO: String { ISO8601DateFormatter().string(from: insightNow)
     #expect(value.components.count == 3)
     #expect(value.components[0].label == "正常")
     #expect(value.overallIndicator == "minor")
-    #expect(!value.isStale(now: insightNow)) // 状态最后变更时间较早不等于本次读取失败。
+    #expect(!value.isExpired(now: insightNow)) // 状态最后变更时间较早不等于本次读取失败。
     #expect(value.probabilities.isEmpty)
 }
 @Test func observatoryConvertsOnlyDocumentedFractionProbabilities() throws {
@@ -37,10 +37,11 @@ private var insightISO: String { ISO8601DateFormatter().string(from: insightNow)
     let data = try publicJSON(["checkedAt": insightISO, "viewModel": ["probability12h":true, "probability24h": -0.2, "probability48h":70]])
     #expect(throws: Error.self) { try PublicInsightParser.parse(data, source: .observatory, fetchedAt: insightNow) }
 }
-@Test func forecastStalenessAndFailureDoNotBecomeZeroProbability() throws {
+@Test func sourceStaleMarkerDoesNotMeanLocalCacheExpired() throws {
     let data = try publicJSON(["checkedAt": insightISO, "dataHealth": ["stale": true], "viewModel": ["probability48h":0.7]])
     let value = try PublicInsightParser.parse(data, source: .observatory, fetchedAt: insightNow)
-    #expect(value.isStale(now: insightNow))
+    #expect(value.hasSourceWarning)
+    #expect(!value.isExpired(now: insightNow))
     #expect(value.probabilities[48] == 70)
     #expect(throws: Error.self) { try PublicInsightParser.parse(Data("{}".utf8), source: .observatory) }
 }
@@ -59,14 +60,45 @@ private var insightISO: String { ISO8601DateFormatter().string(from: insightNow)
 }
 @Test func publicCacheUsesPerSourceRefreshWindowsAndRejectsFutureData() {
     let forecast = PublicInsightSnapshot(source: .willReset, fetchedAt: insightNow, summary: "test")
-    #expect(!forecast.isStale(now: insightNow.addingTimeInterval(1801)))
-    #expect(forecast.isStale(now: insightNow.addingTimeInterval(5401)))
+    #expect(!forecast.isExpired(now: insightNow.addingTimeInterval(1801)))
+    #expect(forecast.isExpired(now: insightNow.addingTimeInterval(5401)))
     let status = PublicInsightSnapshot(source: .openAIStatus, fetchedAt: insightNow, summary: "test")
-    #expect(status.isStale(now: insightNow.addingTimeInterval(1501)))
-    #expect(forecast.isStale(now: insightNow.addingTimeInterval(-61)))
+    #expect(status.isExpired(now: insightNow.addingTimeInterval(1501)))
+    #expect(forecast.isExpired(now: insightNow.addingTimeInterval(-61)))
     #expect(PublicInsightSource.openAIStatus.refreshInterval == 300)
     #expect(PublicInsightSource.observatory.refreshInterval == 1800)
     #expect(PublicInsightSource.willReset.refreshInterval == 1800)
+}
+
+@Test func localCacheExpiryUsesFetchTimeNotSourceTimestamp() {
+    let sourceGeneratedEarlier = PublicInsightSnapshot(
+        source: .observatory,
+        fetchedAt: insightNow,
+        updatedAt: insightNow.addingTimeInterval(-86_400),
+        summary: "test"
+    )
+    #expect(!sourceGeneratedEarlier.isExpired(now: insightNow))
+
+    let localCacheOlder = PublicInsightSnapshot(
+        source: .observatory,
+        fetchedAt: insightNow.addingTimeInterval(-5401),
+        updatedAt: insightNow,
+        summary: "test"
+    )
+    #expect(localCacheOlder.isExpired(now: insightNow))
+}
+
+@Test func observatoryUsesDataHealthGenerationTimeForSourceTimestamp() throws {
+    let generatedAt = insightNow.addingTimeInterval(-3600)
+    let generatedISO = ISO8601DateFormatter().string(from: generatedAt)
+    let data = try publicJSON([
+        "checkedAt": insightISO,
+        "dataHealth": ["stale": false, "generatedAt": generatedISO],
+        "viewModel": ["probability48h": 0.7]
+    ])
+    let value = try PublicInsightParser.parse(data, source: .observatory, fetchedAt: insightNow)
+    #expect(value.updatedAt == generatedAt)
+    #expect(!value.isExpired(now: insightNow))
 }
 
 
