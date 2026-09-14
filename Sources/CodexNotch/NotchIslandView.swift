@@ -361,7 +361,7 @@ struct DetailPanelView: View {
     @ObservedObject private var publicInsights: PublicInsightsStore
     @ObservedObject private var preferences: HUDPreferences
     @ObservedObject private var codexAccounts: CodexAccountsStore
-    @State private var remoteSection = "gateway"
+    @State private var remoteSection = "codex"
 
     private static let taskPageSize = 20
     private static let hideUnnamedTasksKey = "hideUnnamedCodexTasks"
