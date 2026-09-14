@@ -78,11 +78,12 @@ private var insightISO: String { ISO8601DateFormatter().string(from: insightNow)
     #expect(value.latestTiboText == "Codex reset update")
     #expect(value.latestTiboURL?.host == "x.com")
 }
-@Test @MainActor func forecastAlertNeedsFreshEnabledProbabilityStrictlyAboveSeventy() async throws {
+@Test @MainActor func forecastAlertKeepsStaleHighProbabilityForHUD() async throws {
     let suite = "public-alert-\(UUID())", defaults = try #require(UserDefaults(suiteName: suite))
     defer { defaults.removePersistentDomain(forName: suite) }
     let store = PublicInsightsStore(defaults: defaults, automatic: false, fetcher: { source in
-        PublicInsightSnapshot(source: source, fetchedAt: Date(), summary: "fixture", probabilities: [48: source == .observatory ? 71 : 70])
+        PublicInsightSnapshot(source: source, fetchedAt: Date(), upstreamStale: source == .observatory,
+                              summary: "fixture", probabilities: [48: source == .observatory ? 71 : 70])
     })
     store.setEnabled(.observatory, true); store.setEnabled(.willReset, true)
     let deadline = ProcessInfo.processInfo.systemUptime + 3

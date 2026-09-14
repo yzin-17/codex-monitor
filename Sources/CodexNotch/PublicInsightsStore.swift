@@ -187,12 +187,10 @@ final class PublicInsightsStore: ObservableObject {
     }
 
     var forecastAlert: (source: PublicInsightSource, probability: Double)? {
-        let now = Date()
         return [PublicInsightSource.observatory, .willReset].compactMap { source -> (PublicInsightSource, Double)? in
             guard enabled.contains(source),
                   errors[source] == nil,
                   let snapshot = snapshots[source],
-                  !snapshot.isStale(now: now),
                   let highest = snapshot.probabilities.values.max(),
                   highest > 70 else { return nil }
             return (source, highest)

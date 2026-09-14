@@ -454,6 +454,14 @@ final class NotchOverlayController {
             }
             .store(in: &cancellables)
 
+        viewModel.publicInsights.objectWillChange
+            .sink { [weak self] _ in
+                DispatchQueue.main.async {
+                    self?.updateFrames()
+                }
+            }
+            .store(in: &cancellables)
+
         remoteViewModel.objectWillChange
             .sink { [weak self] _ in
                 DispatchQueue.main.async {
