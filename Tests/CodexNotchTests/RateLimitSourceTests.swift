@@ -57,10 +57,18 @@ func rateLimitSourceRejectsEmptyServerQuotaAndAcceptsSpacedJSON() {
     #expect(store.parseAppServerRateLimits(
         output: #"{"id":2,"result":{"rateLimits":{"limitId":"codex"}}}"#, now: Date()
     ) == nil)
-    #expect(store.parseAppServerRateLimits(
+    let parsed = store.parseAppServerRateLimits(
         output: #"{"id": 2, "result": {"rateLimits": {"limitId": "codex", "primary": {"usedPercent": 22, "windowDurationMins": 10080}}}}"#,
         now: Date()
-    )?.secondaryPercent == 78)
+    )
+    #expect(parsed?.secondaryPercent == 78)
+    #expect(parsed?.origin == .appServer)
+}
+
+@Test func rateLimitSourcePreferenceKeepsLegacyRawValuesAndThreeLabels() {
+    #expect(RateLimitSourcePreference(rawValue: "appServerFirst") == .localFirst)
+    #expect(RateLimitSourcePreference(rawValue: "localFilesOnly") == .localOnly)
+    #expect(RateLimitSourcePreference.allCases.map(\.label) == ["本机优先", "仅本机", "仅远程"])
 }
 
 @Test
@@ -133,7 +141,7 @@ func rateLimitSourceRetainsLastSuccessDuringFailedRefreshAndRetryBackoff() throw
         try (#"{"jsonrpc":"2.0","id":2,"result":{"rateLimits":{"limitId":"codex","planType":"pro","primary":{"usedPercent":\#(100 - remaining),"windowDurationMins":10080,"resetsAt":\#(reset)}}}}"# + "\n")
             .write(to: response, atomically: true, encoding: .utf8)
     }
-    func read(at offset: TimeInterval, source: RateLimitSourcePreference = .appServerFirst) throws -> UsageSnapshot {
+    func read(at offset: TimeInterval, source: RateLimitSourcePreference = .localFirst) throws -> UsageSnapshot {
         let result = store.loadSnapshot(includePeriodUsage: false, bypassFastCache: true,
                                         rateLimitSource: source, now: now.addingTimeInterval(offset))
         #expect(result.errorMessage == nil)
@@ -141,11 +149,21 @@ func rateLimitSourceRetainsLastSuccessDuringFailedRefreshAndRetryBackoff() throw
     }
 
     try writeResponse(remaining: 78, reset: reset)
-    #expect(try read(at: 0).secondaryPercent == 78)
+    let first = try read(at: 0)
+    #expect(first.secondaryPercent == 78)
+    #expect(first.rateLimitCapturedAt == now)
+    #expect(first.rateLimitOrigin == .appServer)
     try "".write(to: response, atomically: true, encoding: .utf8)
-    #expect(try read(at: 31).secondaryPercent == 78)
+    let failedRefresh = try read(at: 31)
+    #expect(failedRefresh.secondaryPercent == 78)
+    #expect(failedRefresh.rateLimitCapturedAt == first.rateLimitCapturedAt)
+    #expect(failedRefresh.rateLimitOrigin == .appServer)
+    #expect(failedRefresh.lastUpdated == now.addingTimeInterval(31))
     #expect(try read(at: 40).secondaryPercent == 78)
-    #expect(try read(at: 40, source: .localFilesOnly).secondaryPercent == 80)
+    #expect(try read(at: 40, source: .localOnly).secondaryPercent == 78)
+    let localRecord = try read(at: 40, source: .remoteOnly)
+    #expect(localRecord.secondaryPercent == 80)
+    #expect(localRecord.rateLimitOrigin == .localRecords)
     #expect(try String(contentsOf: calls, encoding: .utf8).split(separator: "\n").count == 2)
     try writeResponse(remaining: 77, reset: reset)
     #expect(try read(at: 77).secondaryPercent == 77)

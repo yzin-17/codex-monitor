@@ -19,20 +19,21 @@ enum Formatters {
         return "\(value)"
     }
 
-    static func estimatedCostUSD(_ value: Double?) -> String {
+    static func estimatedCostUSD(_ value: Double?, lowerBound: Bool = false) -> String {
+        let prefix = lowerBound ? "≥" : "≈"
         guard let value, value.isFinite, value >= 0 else {
-            return "≈--"
+            return "\(prefix)--"
         }
         if value == 0 {
-            return "≈$0.00"
+            return "\(prefix)$0.00"
         }
         if value < 0.01 {
-            return String(format: "≈$%.4f", value)
+            return String(format: "\(prefix)$%.4f", value)
         }
         if value < 100 {
-            return String(format: "≈$%.2f", value)
+            return String(format: "\(prefix)$%.2f", value)
         }
-        return String(format: "≈$%.0f", value)
+        return String(format: "\(prefix)$%.0f", value)
     }
 
     static func percent(_ value: Int?) -> String {

@@ -122,7 +122,7 @@ private struct SettingsDraft: Equatable {
     var usageRefreshInterval: TimeInterval = 300
     var watcherRefreshInterval: TimeInterval = 12
     var fileChangeRefreshMinimumGap: TimeInterval = 3
-    var rateLimitSource: RateLimitSourcePreference = .appServerFirst
+    var rateLimitSource: RateLimitSourcePreference = .localFirst
     var pricing = TokenPricingSettings()
     var showPeriodUsage = true
     var showSparkQuota = false
@@ -217,6 +217,21 @@ private struct SettingsDraft: Equatable {
 
     mutating func resetRefreshDefaults() {
         applyPreset(.balanced)
+    }
+}
+
+struct RateLimitSourcePicker: View {
+    @Binding var selection: RateLimitSourcePreference
+
+    var body: some View {
+        Picker(selection: $selection) {
+            ForEach(RateLimitSourcePreference.allCases) { source in
+                Text(source.label).tag(source)
+            }
+        } label: {
+            HelpLabel(title: "额度来源", help: "本机通过 Codex app-server 实时读取，失败时回退本地记录；远程使用已绑定账号的官方额度接口。仅远程需要启用账号额度监测并精确绑定当前账号。手动刷新仍请求所有启用账号。")
+        }
+        .pickerStyle(.segmented)
     }
 }
 
@@ -498,14 +513,7 @@ struct SettingsView: View {
         }
 
         Section("Codex 数据") {
-            Picker(selection: $draft.rateLimitSource) {
-                ForEach(RateLimitSourcePreference.allCases) { source in
-                    Text(source.label).tag(source)
-                }
-            } label: {
-                HelpLabel(title: "额度来源", help: "决定 Codex 5小时和7天剩余额度优先从实时接口读取，还是只使用本地记录。")
-            }
-            .pickerStyle(.segmented)
+            RateLimitSourcePicker(selection: $draft.rateLimitSource)
 
             Toggle(isOn: $draft.skillInsightsEnabled) {
                 HelpLabel(title: "启用 Skills 分析", help: "移植自 Jackie：本地证据、目录与周报。关闭后取消分析和定时任务；不调用模型。")

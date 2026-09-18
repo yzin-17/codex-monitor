@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import SwiftUI
 
+/// 保留既有费用解析回归测试；生产展开路径由 UsageViewModel 统一调度。
 @MainActor final class ConversationCostDetailModel: ObservableObject {
     @Published private(set) var detail: ConversationCostDetails?
     @Published private(set) var loading = false
@@ -25,11 +26,11 @@ import SwiftUI
                     let slice = Task.detached(priority: .utility) {
                         try loader.load(rootID: id, includeSkills: skillsEnabled, shouldCancel: { Task.isCancelled })
                     }
-                    let next = try await withTaskCancellationHandler(operation: { try await slice.value }, onCancel: { slice.cancel() })
+                    let next = try await withTaskCancellationHandler(
+                        operation: { try await slice.value }, onCancel: { slice.cancel() }
+                    )
                     latest = next
-                    if let self {
-                        self.publish(next, generation: current)
-                    }
+                    if let self { self.publish(next, generation: current) }
                     if !next.pending { break }
                     if next.scanState.isWaitingForAppend {
                         try await Task.sleep(for: .milliseconds(300))
@@ -61,11 +62,20 @@ import SwiftUI
 @MainActor struct ConversationCostExpansion: View {
     let task: CodexTask
     let skillsEnabled: Bool
-    @StateObject private var model: ConversationCostDetailModel
-    init(task: CodexTask, skillsEnabled: Bool, makeLoader: @escaping () -> ConversationCostLoader?,
-         preview: ConversationCostDetails? = nil) {
-        self.task = task; self.skillsEnabled = skillsEnabled
-        _model = StateObject(wrappedValue: ConversationCostDetailModel(loader: makeLoader(), preview: preview))
+    let detail: ConversationCostDetails?
+    let displayedSummary: ConversationCostDisplaySummary
+    let loading: Bool
+    let error: String?
+    let onLoad: () -> Void
+    let onRefresh: () -> Void
+
+    init(task: CodexTask, skillsEnabled: Bool, detail: ConversationCostDetails?,
+         displayedSummary: ConversationCostDisplaySummary,
+         loading: Bool, error: String?, onLoad: @escaping () -> Void,
+         onRefresh: @escaping () -> Void) {
+        self.task = task; self.skillsEnabled = skillsEnabled; self.detail = detail
+        self.displayedSummary = displayedSummary
+        self.loading = loading; self.error = error; self.onLoad = onLoad; self.onRefresh = onRefresh
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
@@ -73,23 +83,27 @@ import SwiftUI
             HStack {
                 Text("代理费用明细").font(.system(size: 11, weight: .bold))
                 Spacer()
-                if model.loading { ProgressView().controlSize(.mini) }
-                Button(model.loading ? "正在扫描" : "刷新明细") {
-                    Task { await model.load(id: task.id, skillsEnabled: skillsEnabled) }
-                }.buttonStyle(.plain).foregroundStyle(.secondary).disabled(model.loading)
+                if loading { ProgressView().controlSize(.mini) }
+                Button(loading ? "正在扫描" : "刷新明细", action: onRefresh)
+                    .buttonStyle(.plain).foregroundStyle(.secondary).disabled(loading)
             }
-            if let error = model.error { note(error) }
-            if let detail = model.detail {
+            if let error { note(error) }
+            if let detail {
                 ForEach(detail.agents) { agent in agentRow(agent, scanState: detail.scanState) }
                 if !detail.agents.isEmpty {
                     HStack {
                         Text("已观察任务合计").fontWeight(.semibold)
                         Spacer()
-                        Text(Formatters.compactTokens(detail.usage.totalTokens))
-                        Text(Formatters.estimatedCostUSD(detail.usage.costUSD)).foregroundStyle(.cyan)
+                        Text(totalTokenText(detail))
+                        Text(Formatters.estimatedCostUSD(detail.usage.costUSD,
+                            lowerBound: detail.reconciledDisplayConfidence == .lowerBound))
+                            .foregroundStyle(.cyan)
                     }.monospacedDigit()
-                    if detail.usage.totalTokens != task.tokenCount {
-                        note("列表快照 \(Formatters.compactTokens(task.tokenCount))，明细 \(Formatters.compactTokens(detail.usage.totalTokens))。扫描范围或记录时间不同，尚未完全对齐。")
+                    if displayedSummary.confidence == .lowerBound {
+                        note("顶部与明细已统一为可确认下限；缺失部分未猜价。")
+                    } else if displayedSummary.confidence == .provisional,
+                              detail.usage.totalTokens != task.tokenCount {
+                        note("顶部仍为临时快速快照 \(Formatters.compactTokens(task.tokenCount))；明细尚未满足统一条件。")
                     }
                 }
                 ForEach(detail.diagnostics, id: \.self) { note($0) }
@@ -115,14 +129,16 @@ import SwiftUI
                     note("Skill 金额包含该回合所有模型请求，不代表 Skill 额外收费。多个 Skill 可重叠，不相加、不计入上方任务合计。")
                     Text("API 等价估算 · \(TokenCostCatalog.priceVersion)").foregroundStyle(.secondary)
                 }
-            } else if !model.loading {
+            } else if !loading {
                 note("费用明细尚未读取。")
             }
         }
         .font(.system(size: 9.5)).foregroundStyle(.white.opacity(0.88))
-        .task(id: skillsEnabled) { model.cancel(); await model.load(id: task.id, skillsEnabled: skillsEnabled) }
-        .onDisappear { model.cancel() }
-        .onReceive(NotificationCenter.default.publisher(for: .tokenPricingDidChange)) { _ in model.objectWillChange.send() }
+        .task(id: "\(task.id)|\(skillsEnabled)") { onLoad() }
+    }
+    private func totalTokenText(_ detail: ConversationCostDetails) -> String {
+        let prefix = detail.reconciledDisplayConfidence == .lowerBound ? "≥" : ""
+        return prefix + Formatters.compactTokens(detail.usage.totalTokens)
     }
     private func agentRow(_ agent: AgentCostDetail, scanState: ConversationCostScanState) -> some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -131,8 +147,9 @@ import SwiftUI
                     .fontWeight(.semibold).help(agent.id)
                 Text(agent.model).lineLimit(1).foregroundStyle(.secondary)
                 Spacer(minLength: 4)
-                Text(agent.hasUsage ? Formatters.compactTokens(agent.usage.totalTokens) : "—")
-                Text(agent.hasUsage ? Formatters.estimatedCostUSD(agent.usage.costUSD) : unavailableLabel(agent, scanState))
+                Text(agent.hasUsage ? (agent.hasGap ? "≥" : "") + Formatters.compactTokens(agent.usage.totalTokens) : "—")
+                Text(agent.hasUsage ? Formatters.estimatedCostUSD(agent.usage.costUSD,
+                    lowerBound: agent.hasGap || agent.usage.unpricedTokens > 0) : unavailableLabel(agent, scanState))
                     .foregroundStyle(agent.hasUsage ? .cyan : .secondary)
                     .help(agent.hasUsage ? "API 等价费用估算" : "已识别该代理，但当前扫描范围内没有读到可独立归属给它的 token_count 记录；不会按 $0 处理。")
             }.monospacedDigit()

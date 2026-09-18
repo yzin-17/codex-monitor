@@ -133,7 +133,7 @@ final class CodexUsageStore: @unchecked Sendable {
         includePeriodUsage: Bool = true,
         fallbackUsage: PeriodUsage? = nil,
         bypassFastCache: Bool = false,
-        rateLimitSource: RateLimitSourcePreference = .appServerFirst,
+        rateLimitSource: RateLimitSourcePreference = .localFirst,
         taskHistoryRange: TaskHistoryRange = .threeDays,
         now: Date = Date()
     ) -> UsageSnapshot {
@@ -196,6 +196,8 @@ final class CodexUsageStore: @unchecked Sendable {
                 primaryResetsAt: rateLimits.primaryDisplayResetDate(now: now),
                 secondaryResetsAt: rateLimits.secondaryDisplayResetDate(now: now),
                 rateLimitWindows: rateLimits.displayWindows(now: now),
+                rateLimitCapturedAt: rateLimits.capturedAt,
+                rateLimitOrigin: rateLimits.origin,
                 resetCredits: rateLimits.resetCredits,
                 usage24h: usage.day,
                 usage7d: usage.week,
@@ -317,6 +319,8 @@ final class CodexUsageStore: @unchecked Sendable {
             primaryResetsAt: cache.rateLimits.primaryDisplayResetDate(now: now),
             secondaryResetsAt: cache.rateLimits.secondaryDisplayResetDate(now: now),
             rateLimitWindows: cache.rateLimits.displayWindows(now: now),
+            rateLimitCapturedAt: cache.rateLimits.capturedAt,
+            rateLimitOrigin: cache.rateLimits.origin,
             resetCredits: cache.rateLimits.resetCredits,
             usage24h: usage.day,
             usage7d: usage.week,
@@ -2433,12 +2437,12 @@ final class CodexUsageStore: @unchecked Sendable {
 
     private func loadRateLimits(from paths: [String], source: RateLimitSourcePreference, now: Date) -> RateLimitSnapshot {
         switch source {
-        case .appServerFirst:
+        case .localFirst, .localOnly:
             RateLimitSnapshot.preferringAppServer(
                 appServer: loadAppServerRateLimits(now: now),
                 localFiles: loadLatestRateLimits(from: paths)
             )
-        case .localFilesOnly:
+        case .remoteOnly:
             loadLatestRateLimits(from: paths)
         }
     }
@@ -2454,6 +2458,7 @@ final class CodexUsageStore: @unchecked Sendable {
             .max(by: { ($0.capturedAt ?? .distantPast) < ($1.capturedAt ?? .distantPast) }) {
             var result = codexSnapshot
             result.sparkWindows = sparkWindows
+            result.origin = .localRecords
             return result
         }
 
@@ -2466,6 +2471,7 @@ final class CodexUsageStore: @unchecked Sendable {
             .max(by: { ($0.capturedAt ?? .distantPast) < ($1.capturedAt ?? .distantPast) })
         if var latestSnapshot = latestNonSparkSnapshot {
             latestSnapshot.sparkWindows = sparkWindows
+            latestSnapshot.origin = .localRecords
             return latestSnapshot
         }
 
@@ -2476,7 +2482,8 @@ final class CodexUsageStore: @unchecked Sendable {
             secondaryResetsAt: nil,
             capturedAt: nil,
             isPrimaryCodexLimit: false,
-            sparkWindows: sparkWindows
+            sparkWindows: sparkWindows,
+            origin: .localRecords
         )
     }
 
@@ -2608,7 +2615,8 @@ final class CodexUsageStore: @unchecked Sendable {
                 windows: windows,
                 sparkWindows: sparkWindows,
                 resetCredits: resetCredits,
-                planType: snapshot.planType
+                planType: snapshot.planType,
+                origin: .appServer
             )
         }
 

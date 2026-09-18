@@ -250,23 +250,51 @@ private func referenceCatalog(at now: Date) throws -> SkillCatalogSnapshot {
     }
 
     // 自定义布局与提供商页也走同一生产 View；仅注入合成数据及内存凭据库。
+    let syntheticAuthRoot = FileManager.default.temporaryDirectory.appendingPathComponent("ReferenceAuth-\(UUID())")
+    try FileManager.default.createDirectory(at: syntheticAuthRoot, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: syntheticAuthRoot) }
+    let syntheticAuthURL = syntheticAuthRoot.appendingPathComponent("auth.json")
+    try Data(#"{"auth_mode":"chatgpt","tokens":{"account_id":"synthetic-work"}}"#.utf8)
+        .write(to: syntheticAuthURL)
     let previewStore = CodexAccountsStore(defaults: defaults,
         vault: .init(read: { _, _ in "synthetic-only" }, write: { _, _ in }, delete: { _ in }),
-        client: .init(fetch: { _ in
-            Data(#"{"plan_type":"pro","rate_limit":{"primary_window":{"used_percent":54,"limit_window_seconds":18000},"secondary_window":{"used_percent":21,"limit_window_seconds":604800}}}"#.utf8)
-        }), automaticStart: false)
-    try await previewStore.verifyAndSave(.init(label: "合成示例 · 工作账号"), token: "synthetic-only")
-    try await previewStore.verifyAndSave(.init(label: "合成示例 · 个人账号"), token: "synthetic-only")
+        client: .init(fetch: { request in
+            let accountID = request.value(forHTTPHeaderField: "ChatGPT-Account-Id") ?? "synthetic-work"
+            return Data("""
+            {"account_id":"\(accountID)","plan_type":"pro","credits":{"balance":12.5},
+             "rate_limit":{"primary_window":{"used_percent":54,"limit_window_seconds":18000},
+             "secondary_window":{"used_percent":21,"limit_window_seconds":604800}}}
+            """.utf8)
+        }), automaticStart: false, localAuthURL: syntheticAuthURL)
+    try await previewStore.verifyAndSave(
+        .init(label: "合成示例 · 工作账号", workspaceID: "synthetic-work"),
+        token: "synthetic-only"
+    )
+    try await previewStore.verifyAndSave(
+        .init(label: "合成示例 · 个人账号", workspaceID: "synthetic-personal"),
+        token: "synthetic-only"
+    )
+    previewStore.bindCurrentLocalAccount(to: previewStore.accounts[0].id)
+    previewStore.updateLocalQuota(
+        snapshot: usage.snapshot,
+        idleRefreshInterval: settings.idleRefreshInterval,
+        now: usage.snapshot.rateLimitCapturedAt ?? Date()
+    )
     #expect(previewStore.states.values.filter { $0.usage != nil }.count == 2)
+    #expect(previewStore.displayData(for: previewStore.accounts[0]).usesLocalQuota)
     let prefs = settings.hudPreferences
     prefs.value.mode = .menuBar
-    prefs.value.layout = .detailed
+    let localFirstSource = previewStore.accounts[0].hudID
+    prefs.value.sourceID = localFirstSource
+    prefs.value.updateActiveLayout(.init(lines: [[
+        HUDLayoutToken.applying(sourceID: localFirstSource, to: "provider"),
+        HUDLayoutToken.applying(sourceID: localFirstSource, to: "weekly")
+    ]]))
     let hud = ConfigurableHUDView(preferences: prefs, accounts: previewStore, usage: usage,
         remote: remote, newAPI: newAPI, subAPI: subAPI, settings: settings, publicInsights: usage.publicInsights, menuBar: true)
     try await captureCustomization(AnyView(hud), size: .init(width: 220, height: MenuBarMetrics.height()), name: "hud-menu-bar", output: output)
     // 切换右侧来源后，本机运行指示不被账户状态替换；清空布局也只清空右侧。
-    prefs.value.sourceID = previewStore.accounts[0].hudID
-    #expect(hud.data.state == "OFF")
+    #expect(hud.data.state == "本机·实时")
     #expect(usage.snapshot.isRunning)
     prefs.value.maximumWidth = 360
     prefs.value.layout = .init(lines: [["primary", "space:8", "weekly", "tokensToday"]])
@@ -296,6 +324,12 @@ private func referenceCatalog(at now: Date) throws -> SkillCatalogSnapshot {
         Spacer()
     }.padding(18).background(Color.black)
     try await captureCustomization(AnyView(providerPanel), size: .init(width: 680, height: 520), name: "codex-accounts", output: output)
+    let sourcePicker = Form {
+        Section("Codex 数据") {
+            RateLimitSourcePicker(selection: .constant(.localFirst))
+        }
+    }.formStyle(.grouped)
+    try await captureCustomization(AnyView(sourcePicker), size: .init(width: 680, height: 180), name: "quota-source-settings", output: output)
     let resumeID = "11111111-1111-4111-8111-111111111111"
     let resume = CLIResumeStore(home: URL(fileURLWithPath: "/synthetic/codex"), defaults: defaults, automatic: false,
         inspector: { _, _, _ in .init(context: .init(threadID: resumeID, path: "/synthetic/log", cwd: "/synthetic/project", model: "gpt-test", effort: "high", sandbox: "workspace-write", approval: "on-request", fileSize: 0, modifiedAt: Date()), identity: .init(workspaceID: "synthetic-workspace", subject: "synthetic-user", label: "合成示例账号"), lastTurnID: "synthetic-turn", quotaPaused: true, lastTurnStatus: "failed", usage: .init(quotas: [.init(id: "primary_window", label: "5h", usedPercent: 100, resetsAt: Date().addingTimeInterval(3600), durationSeconds: 18000)]), checkedAt: Date()) },

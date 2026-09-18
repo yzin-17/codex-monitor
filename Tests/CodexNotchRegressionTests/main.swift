@@ -149,8 +149,8 @@ runner.check(
     "expanded detail frame height should equal detail height"
 )
 
-runner.check(AppInfo.version == "0.4.5", "app info should expose version 0.4.5")
-runner.check(AppInfo.displayVersion == "0.4.5", "app info should fall back to source version when bundle version is unavailable")
+runner.check(AppInfo.version == "0.4.6", "app info should expose version 0.4.6")
+runner.check(AppInfo.displayVersion == "0.4.6", "app info should fall back to source version when bundle version is unavailable")
 
 let resetCreditsNow = Date(timeIntervalSince1970: 1_784_500_000)
 let appServerResetCreditsJSON = Data(#"""
@@ -3746,7 +3746,7 @@ let localStore = CodexUsageStore(codexDirectory: tempRoot)
 let localSnapshot = localStore.loadSnapshot(
     includePeriodUsage: false,
     bypassFastCache: true,
-    rateLimitSource: .localFilesOnly,
+    rateLimitSource: .remoteOnly,
     taskHistoryRange: .day,
     now: now
 )
@@ -3794,7 +3794,7 @@ try FileManager.default.setAttributes(
 let updatedRateLimitSnapshot = localStore.loadSnapshot(
     includePeriodUsage: false,
     bypassFastCache: true,
-    rateLimitSource: .localFilesOnly,
+    rateLimitSource: .remoteOnly,
     taskHistoryRange: .day,
     now: now.addingTimeInterval(1)
 )
@@ -3814,7 +3814,7 @@ try FileManager.default.setAttributes(
 let retainedRateLimitSnapshot = localStore.loadSnapshot(
     includePeriodUsage: false,
     bypassFastCache: true,
-    rateLimitSource: .localFilesOnly,
+    rateLimitSource: .remoteOnly,
     taskHistoryRange: .day,
     now: now.addingTimeInterval(2)
 )
@@ -3954,7 +3954,7 @@ runner.check(logCacheStore.loadUsageTotals(now: now.addingTimeInterval(1))?.day 
 let cachedLocalSnapshot = localStore.loadSnapshot(
     includePeriodUsage: false,
     bypassFastCache: false,
-    rateLimitSource: .localFilesOnly,
+    rateLimitSource: .remoteOnly,
     taskHistoryRange: .day,
     now: now
 )
@@ -4016,7 +4016,7 @@ let snapshotLogStore = CodexUsageStore(codexDirectory: snapshotLogRoot, ripgrepC
 let idleSnapshotBeforeLog = snapshotLogStore.loadSnapshot(
     includePeriodUsage: false,
     bypassFastCache: false,
-    rateLimitSource: .localFilesOnly,
+    rateLimitSource: .remoteOnly,
     taskHistoryRange: .day,
     now: now
 )
@@ -4031,7 +4031,7 @@ _ = try Shell.run("/usr/bin/sqlite3", [
 let runningSnapshotAfterLog = snapshotLogStore.loadSnapshot(
     includePeriodUsage: false,
     bypassFastCache: false,
-    rateLimitSource: .localFilesOnly,
+    rateLimitSource: .remoteOnly,
     taskHistoryRange: .day,
     now: now.addingTimeInterval(1)
 )
@@ -4154,7 +4154,7 @@ let tokenCacheStore = CodexUsageStore(codexDirectory: tokenCacheRoot)
 let firstTokenSnapshot = tokenCacheStore.loadSnapshot(
     includePeriodUsage: false,
     bypassFastCache: true,
-    rateLimitSource: .localFilesOnly,
+    rateLimitSource: .remoteOnly,
     taskHistoryRange: .day,
     now: now
 )
@@ -4169,7 +4169,7 @@ try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval
 let secondTokenSnapshot = tokenCacheStore.loadSnapshot(
     includePeriodUsage: false,
     bypassFastCache: true,
-    rateLimitSource: .localFilesOnly,
+    rateLimitSource: .remoteOnly,
     taskHistoryRange: .day,
     now: now.addingTimeInterval(1)
 )

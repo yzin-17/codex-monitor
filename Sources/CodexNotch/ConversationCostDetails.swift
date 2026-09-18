@@ -44,6 +44,17 @@ enum ConversationCostScanState: Equatable, Sendable {
     }
 }
 
+enum ConversationCostDisplayConfidence: Equatable, Sendable {
+    case provisional
+    case complete
+    case lowerBound
+}
+
+struct ConversationCostDisplaySummary: Equatable, Sendable {
+    let usage: TokenUsageSummary
+    let confidence: ConversationCostDisplayConfidence
+}
+
 struct SkillTurnCost: Equatable, Identifiable, Sendable {
     let id: String // 规范化 Skill 文件路径，不能按同名目录合并。
     let name: String
@@ -72,6 +83,25 @@ struct ConversationCostDetails: Equatable, Sendable {
     var hasDisplayableSkillCosts: Bool { !skills.isEmpty }
     var usage: TokenUsageSummary {
         agents.reduce(into: .zero) { $0.add($1.usage) }
+    }
+    var canReplaceFastSnapshot: Bool {
+        guard !pending, scanState == .caughtUp else { return false }
+        guard agents.allSatisfy({ $0.complete && !$0.hasGap && $0.unavailableReason == nil }) else {
+            return false
+        }
+        let combined = usage
+        return combined.costUSD != nil && combined.unpricedTokens == 0
+    }
+    var reconciledDisplayConfidence: ConversationCostDisplayConfidence? {
+        if canReplaceFastSnapshot { return .complete }
+        guard !pending, usage.totalTokens > 0,
+              agents.allSatisfy({ agent in
+                  agent.unavailableReason == nil && agent.processedBytes >= agent.targetBytes
+              }),
+              scanState == .gap else {
+            return nil
+        }
+        return .lowerBound
     }
 }
 

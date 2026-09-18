@@ -221,6 +221,8 @@ final class NotchOverlayController {
             secondaryPercent: 64,
             primaryResetsAt: now.addingTimeInterval(2 * 60 * 60),
             secondaryResetsAt: now.addingTimeInterval(3 * 24 * 60 * 60),
+            rateLimitCapturedAt: now,
+            rateLimitOrigin: .appServer,
             usage24h: today.totalTokens,
             usage7d: week.totalTokens,
             usage30d: month.totalTokens,
@@ -381,6 +383,17 @@ final class NotchOverlayController {
     }
 
     private func observeState() {
+        viewModel.$snapshot
+            .dropFirst()
+            .combineLatest(settings.$idleRefreshInterval, settings.$rateLimitSource)
+            .sink { [weak self] snapshot, idleRefreshInterval, rateLimitSource in
+                self?.settings.codexAccounts.updateLocalQuota(
+                    snapshot: snapshot,
+                    idleRefreshInterval: idleRefreshInterval,
+                    sourcePreference: rateLimitSource
+                )
+            }
+            .store(in: &cancellables)
         settings.hudPreferences.objectWillChange
             .sink { [weak self] _ in
                 DispatchQueue.main.async { self?.applyPresentationMode(); self?.updateFrames() }

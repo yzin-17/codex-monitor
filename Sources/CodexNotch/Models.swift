@@ -44,6 +44,10 @@ struct UsageSnapshot: Equatable {
     var primaryResetsAt: Date? = nil
     var secondaryResetsAt: Date? = nil
     var rateLimitWindows: [UsageQuotaWindow] = []
+    /// 额度本身的真实采集时间；不能用界面快照的 `lastUpdated` 代替。
+    var rateLimitCapturedAt: Date? = nil
+    /// 本机额度最终采用的实际读取渠道；仅用于进程内调度与展示。
+    var rateLimitOrigin: LocalRateLimitOrigin? = nil
     var resetCredits: RateLimitResetCredits? = nil
     var usage24h: Int
     var usage7d: Int
@@ -87,13 +91,28 @@ struct UsageSnapshot: Equatable {
         }
 
         if previous.rateLimitWindows.isEmpty {
+            var retainedPreviousRateLimit = false
             if copy.primaryPercent == nil {
                 copy.primaryPercent = previous.primaryPercent
                 copy.primaryResetsAt = previous.primaryResetsAt
+                retainedPreviousRateLimit = previous.primaryPercent != nil || previous.primaryResetsAt != nil
             }
             if copy.secondaryPercent == nil {
                 copy.secondaryPercent = previous.secondaryPercent
                 copy.secondaryResetsAt = previous.secondaryResetsAt
+                retainedPreviousRateLimit = retainedPreviousRateLimit
+                    || previous.secondaryPercent != nil
+                    || previous.secondaryResetsAt != nil
+            }
+            if retainedPreviousRateLimit {
+                switch (copy.rateLimitCapturedAt, previous.rateLimitCapturedAt) {
+                case let (current?, previous?): copy.rateLimitCapturedAt = min(current, previous)
+                case (nil, let previous?): copy.rateLimitCapturedAt = previous
+                default: break
+                }
+                if copy.rateLimitOrigin == nil {
+                    copy.rateLimitOrigin = previous.rateLimitOrigin
+                }
             }
             return copy
         }
@@ -104,6 +123,8 @@ struct UsageSnapshot: Equatable {
             copy.primaryResetsAt = previous.primaryResetsAt
             copy.secondaryPercent = previous.secondaryPercent
             copy.secondaryResetsAt = previous.secondaryResetsAt
+            copy.rateLimitCapturedAt = previous.rateLimitCapturedAt
+            copy.rateLimitOrigin = previous.rateLimitOrigin
         }
         return copy
     }
@@ -303,20 +324,30 @@ enum TaskStatus: String, Equatable {
     }
 }
 
+enum LocalRateLimitOrigin: Equatable, Sendable {
+    case appServer
+    case localRecords
+}
+
 enum RateLimitSourcePreference: String, CaseIterable, Identifiable {
-    case appServerFirst
-    case localFilesOnly
+    case localFirst = "appServerFirst"
+    case localOnly = "localFilesOnly"
+    case remoteOnly
 
     var id: String { rawValue }
 
     var label: String {
         switch self {
-        case .appServerFirst:
-            "实时接口优先"
-        case .localFilesOnly:
-            "仅本地记录"
+        case .localFirst:
+            "本机优先"
+        case .localOnly:
+            "仅本机"
+        case .remoteOnly:
+            "仅远程"
         }
     }
+
+    var readsAppServer: Bool { self != .remoteOnly }
 }
 
 enum TaskHistoryRange: String, CaseIterable, Identifiable {
@@ -786,6 +817,7 @@ struct RateLimitSnapshot: Equatable {
     var sparkWindows: [UsageQuotaWindow] = []
     var resetCredits: RateLimitResetCredits? = nil
     var planType: String? = nil
+    var origin: LocalRateLimitOrigin? = nil
 
     static func preferringAppServer(
         appServer: RateLimitSnapshot?,

@@ -236,7 +236,7 @@ func suffixedRolloutsAndDatabasePathsKeepActiveTasksLinkedToTheirThreadIDs() thr
     let snapshot = store.loadSnapshot(
         includePeriodUsage: false,
         bypassFastCache: true,
-        rateLimitSource: .localFilesOnly,
+        rateLimitSource: .remoteOnly,
         taskHistoryRange: .day,
         now: now
     )

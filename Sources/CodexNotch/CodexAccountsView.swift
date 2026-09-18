@@ -205,18 +205,20 @@ struct CodexAccountsPanel: View {
         }.foregroundStyle(MonitorTheme.textPrimary).environment(\.colorScheme, .dark)
     }
     @ViewBuilder private func card(_ account: CodexAccount) -> some View {
-        let state = store.states[account.id]
+        let display = store.displayData(for: account)
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text(account.label).fontWeight(.semibold)
-                if let plan = state?.usage?.plan { Text(plan).foregroundStyle(.secondary) }
-                if state?.isRefreshing == true { ProgressView().controlSize(.small) }
+                if let plan = display.remotePlan { Text(plan).foregroundStyle(.secondary) }
+                if display.isRefreshing { ProgressView().controlSize(.small) }
                 if !account.enabled { Text("已关闭").foregroundStyle(.secondary) }
                 Spacer()
                 Button("验证") { store.refresh(id: account.id, interactive: true) }.disabled(!store.monitoringEnabled || !account.enabled)
             }
-            if let usage = state?.usage {
-                if let error = state?.error { Text("旧数据 · \(error)").foregroundStyle(.orange).font(.caption) }
+            if let usage = display.quotaUsage {
+                if let error = display.remoteError, !display.usesLocalQuota {
+                    Text("旧数据 · \(error)").foregroundStyle(.orange).font(.caption)
+                }
                 ForEach(usage.quotas) { quota in
                     HStack {
                         Text(quota.label).frame(width: 110, alignment: .leading)
@@ -225,11 +227,20 @@ struct CodexAccountsPanel: View {
                         if let date = quota.resetsAt { Text(date, style: .relative).font(.caption).foregroundStyle(.secondary).frame(width: 95) }
                     }
                 }
-                if let credits = usage.credits { Text("Credits：\(credits)").monospacedDigit() }
-                Text("数据源：Codex 官方额度接口 · 读取于 \(usage.capturedAt.formatted(date: .abbreviated, time: .shortened))")
+                Text("额度数据源：\(display.quotaSource?.displayLabel ?? "未知") · \(display.usesLocalQuota ? "采集" : "读取")于 \(usage.capturedAt.formatted(date: .abbreviated, time: .shortened))")
                     .font(.system(size: 10)).foregroundStyle(.secondary)
-            } else if let error = state?.error { Text(error).foregroundStyle(.orange).font(.caption) }
+            } else if display.isCurrentLocalAccount, display.localAvailability == .unknown {
+                Text(store.quotaSourcePreference == .remoteOnly ? "等待账号身份稳定" : "等待首次本机额度读取")
+                    .foregroundStyle(.secondary)
+            } else if display.isCurrentLocalAccount, store.quotaSourcePreference == .localOnly {
+                Text("本机额度不可用").foregroundStyle(.secondary)
+            } else if let error = display.remoteError { Text(error).foregroundStyle(.orange).font(.caption) }
             else { Text(account.enabled && store.monitoringEnabled ? "等待读取" : "未读取").foregroundStyle(.secondary) }
+            if let credits = display.remoteCredits { Text("Credits：\(credits)").monospacedDigit() }
+            if let remoteCapturedAt = display.remoteCapturedAt, display.usesLocalQuota {
+                Text("远程读取于 \(remoteCapturedAt.formatted(date: .abbreviated, time: .shortened))")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+            }
         }.font(.system(size: 11)).padding(12)
             .background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
     }

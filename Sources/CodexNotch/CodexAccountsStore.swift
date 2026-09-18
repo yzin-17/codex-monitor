@@ -86,6 +86,8 @@ struct CodexAccountState {
     @Published private(set) var states: [UUID: CodexAccountState] = [:]
     @Published private(set) var currentLocalAccountID: String?
     @Published private(set) var localIdentityChangedAt: Date?
+    @Published private(set) var localQuotaAvailability: CodexLocalQuotaAvailability = .unknown
+    @Published private(set) var quotaSourcePreference: RateLimitSourcePreference = .localFirst
     @Published var monitoringEnabled: Bool { didSet { defaults.set(monitoringEnabled, forKey: "codexAccounts.enabled"); reconfigure() } }
     @Published var interval: Double { didSet { defaults.set(min(1800, max(60, interval)), forKey: "codexAccounts.interval"); schedule() } }
     @Published var lastError: String?
@@ -102,6 +104,10 @@ struct CodexAccountState {
     private var localIdentityPollTimer: Timer?
     private var lastLocalAuthModificationDate: Date?
     private var localIdentityInitialized = false
+    private var hasReceivedLocalQuotaSnapshot = false
+    private var localQuotaUsage: CodexAccountUsage?
+    private var localQuotaOrigin: LocalRateLimitOrigin?
+    private var localIdleRefreshInterval: TimeInterval = 6
     private let automaticStart: Bool
     init(defaults: UserDefaults = .standard, vault: CodexAccountVault = .keychain,
          client: CodexAccountHTTPClient = .init(), automaticStart: Bool = true,
@@ -194,24 +200,112 @@ struct CodexAccountState {
         accounts[index].boundLocalAccountID = nil
         persist(); lastError = nil
     }
-    func canUseLocalFallback(for account: CodexAccount, localCapturedAt: Date?) -> Bool {
-        guard account.enabled,
-              let bound = account.boundLocalAccountID,
-              !bound.isEmpty,
-              bound == currentLocalAccountID,
-              verifiedRemoteAccountID(for: account) == bound,
-              let localCapturedAt else { return false }
-        if let localIdentityChangedAt, localCapturedAt < localIdentityChangedAt { return false }
-        return true
+
+    func updateLocalQuota(
+        snapshot: UsageSnapshot,
+        idleRefreshInterval: TimeInterval,
+        sourcePreference: RateLimitSourcePreference = .localFirst,
+        now: Date = Date()
+    ) {
+        let previousPreference = quotaSourcePreference
+        quotaSourcePreference = sourcePreference
+        hasReceivedLocalQuotaSnapshot = true
+        localIdleRefreshInterval = idleRefreshInterval.isFinite ? max(1, idleRefreshInterval) : 6
+        localQuotaUsage = Self.localQuotaUsage(from: snapshot)
+        localQuotaOrigin = snapshot.rateLimitOrigin
+        updateLocalQuotaAvailability(now: now, triggerImmediateFallback: true)
+        if previousPreference != sourcePreference,
+           sourcePreference == .remoteOnly || sourcePreference == .localFirst && resolvedLocalQuotaAvailability(now: now) == .unavailable {
+            for account in accounts where matchesCurrentLocalIdentity(account) {
+                refresh(id: account.id)
+            }
+        }
     }
+
+    func displayData(for account: CodexAccount, now: Date = Date()) -> CodexAccountDisplayData {
+        let state = states[account.id]
+        let remote = state?.usage
+        let matchesCurrent = matchesCurrentLocalIdentity(account)
+        let localAvailability = matchesCurrent
+            ? resolvedLocalQuotaAvailability(now: now)
+            : .unavailable
+        let identitySettled = CodexAccountQuotaFallbackPolicy.localIdentityIsSettled(
+            changedAt: localIdentityChangedAt,
+            now: now
+        )
+        let quotaUsage: CodexAccountUsage?
+        let quotaSource: CodexAccountQuotaSource?
+        if matchesCurrent {
+            switch quotaSourcePreference {
+            case .localFirst:
+                if localAvailability == .available, let localQuotaUsage {
+                    quotaUsage = localQuotaUsage
+                    quotaSource = localQuotaSource
+                } else if localAvailability == .unknown {
+                    quotaUsage = nil
+                    quotaSource = nil
+                } else if monitoringEnabled {
+                    quotaUsage = remote
+                    quotaSource = remote == nil ? nil : .remoteFallback
+                } else {
+                    quotaUsage = nil
+                    quotaSource = nil
+                }
+            case .localOnly:
+                if localAvailability == .available, let localQuotaUsage {
+                    quotaUsage = localQuotaUsage
+                    quotaSource = localQuotaSource
+                } else {
+                    quotaUsage = nil
+                    quotaSource = nil
+                }
+            case .remoteOnly:
+                if identitySettled, monitoringEnabled {
+                    quotaUsage = remote
+                    quotaSource = remote == nil ? nil : .remote
+                } else {
+                    quotaUsage = nil
+                    quotaSource = nil
+                }
+            }
+        } else if monitoringEnabled {
+            quotaUsage = remote
+            quotaSource = remote == nil ? nil : .remote
+        } else {
+            quotaUsage = nil
+            quotaSource = nil
+        }
+        return CodexAccountDisplayData(
+            quotaUsage: quotaUsage,
+            quotaSource: quotaSource,
+            localAvailability: localAvailability,
+            remotePlan: remote?.plan,
+            remoteCredits: remote?.credits,
+            remoteCapturedAt: remote?.capturedAt,
+            remoteError: state?.error,
+            isRefreshing: state?.isRefreshing == true,
+            isCurrentLocalAccount: matchesCurrent
+        )
+    }
+
+    func currentLocalAccountDisplayData(now: Date = Date()) -> CodexAccountDisplayData? {
+        guard let account = accounts.first(where: { matchesCurrentLocalIdentity($0) }) else { return nil }
+        return displayData(for: account, now: now)
+    }
+
     func refreshAll(interactive: Bool = false) {
         refreshLocalIdentity()
         guard monitoringEnabled else { return }
+        updateLocalQuotaAvailability(now: Date(), triggerImmediateFallback: false)
         for account in accounts where account.enabled { refresh(id: account.id, interactive: interactive) }
         schedule()
     }
     func refresh(id: UUID, interactive: Bool = false) {
-        guard monitoringEnabled, accounts.contains(where: { $0.id == id && $0.enabled }), tasks[id] == nil, !queue.contains(where: { $0.0 == id }) else { return }
+        guard monitoringEnabled,
+              let account = accounts.first(where: { $0.id == id && $0.enabled }),
+              interactive || shouldAutomaticallyRefresh(account, now: Date()),
+              tasks[id] == nil,
+              !queue.contains(where: { $0.0 == id }) else { return }
         queue.append((id, interactive)); pump()
     }
     func stop() { timer?.invalidate(); timer = nil; queue = []; for id in Array(tasks.keys) { cancel(id: id) } }
@@ -254,6 +348,86 @@ struct CodexAccountState {
         let returned = states[account.id]?.usage?.returnedWorkspaceID?.trimmingCharacters(in: .whitespacesAndNewlines)
         return returned?.isEmpty == false ? returned : nil
     }
+
+    private func matchesCurrentLocalIdentity(_ account: CodexAccount) -> Bool {
+        guard account.enabled,
+              let bound = account.boundLocalAccountID,
+              !bound.isEmpty,
+              bound == currentLocalAccountID else { return false }
+        return verifiedRemoteAccountID(for: account) == bound
+    }
+
+    private var localQuotaSource: CodexAccountQuotaSource {
+        switch localQuotaOrigin {
+        case .appServer: .localAppServer
+        case .localRecords, nil: .localRecords
+        }
+    }
+
+    private func shouldAutomaticallyRefresh(_ account: CodexAccount, now: Date) -> Bool {
+        guard matchesCurrentLocalIdentity(account) else { return true }
+        guard CodexAccountQuotaFallbackPolicy.localIdentityIsSettled(
+            changedAt: localIdentityChangedAt,
+            now: now
+        ) else { return false }
+        switch quotaSourcePreference {
+        case .localFirst:
+            return resolvedLocalQuotaAvailability(now: now) == .unavailable
+        case .localOnly:
+            return false
+        case .remoteOnly:
+            return true
+        }
+    }
+
+    private func resolvedLocalQuotaAvailability(now: Date) -> CodexLocalQuotaAvailability {
+        guard hasReceivedLocalQuotaSnapshot,
+              CodexAccountQuotaFallbackPolicy.localIdentityIsSettled(
+                changedAt: localIdentityChangedAt,
+                now: now
+              ) else { return .unknown }
+        guard currentLocalAccountID?.isEmpty == false,
+              let usage = localQuotaUsage,
+              CodexAccountQuotaFallbackPolicy.remoteHasWeekly(usage) else { return .unavailable }
+        if let localIdentityChangedAt, usage.capturedAt < localIdentityChangedAt { return .unavailable }
+        let age = now.timeIntervalSince(usage.capturedAt)
+        let maximumAge = max(120, localIdleRefreshInterval * 2)
+        guard age >= 0, age <= maximumAge else { return .unavailable }
+        return .available
+    }
+
+    private func updateLocalQuotaAvailability(now: Date, triggerImmediateFallback: Bool) {
+        let previous = localQuotaAvailability
+        let next = resolvedLocalQuotaAvailability(now: now)
+        if next != previous { localQuotaAvailability = next }
+        guard triggerImmediateFallback,
+              quotaSourcePreference == .localFirst,
+              next == .unavailable,
+              previous == .unknown || previous == .available else { return }
+        for account in accounts where matchesCurrentLocalIdentity(account) {
+            refresh(id: account.id)
+        }
+    }
+
+    private static func localQuotaUsage(from snapshot: UsageSnapshot) -> CodexAccountUsage? {
+        guard let capturedAt = snapshot.rateLimitCapturedAt else { return nil }
+        let quotas = snapshot.displayRateLimitWindows.compactMap { window -> AccountQuota? in
+            guard let remaining = window.remainingPercent, (0...100).contains(remaining) else { return nil }
+            let duration: Double?
+            if window.isFiveHourWindow { duration = 18_000 }
+            else if window.shortLabel == "7d" { duration = 604_800 }
+            else { duration = nil }
+            return AccountQuota(
+                id: window.id,
+                label: window.shortLabel,
+                usedPercent: Double(100 - remaining),
+                resetsAt: window.resetsAt,
+                durationSeconds: duration
+            )
+        }
+        let usage = CodexAccountUsage(quotas: quotas, capturedAt: capturedAt)
+        return CodexAccountQuotaFallbackPolicy.remoteHasWeekly(usage) ? usage : nil
+    }
     private func reconfigure() {
         stop()
         if monitoringEnabled && automaticStart { refreshAll() }
@@ -287,8 +461,18 @@ struct CodexAccountState {
         lastLocalAuthModificationDate = modificationDate
         let next = values?.isRegularFile == true ? CodexLocalAccountIdentity.readAccountID(from: localAuthURL) : nil
         if next != currentLocalAccountID {
+            let previous = currentLocalAccountID
             currentLocalAccountID = next
             localIdentityChangedAt = localIdentityInitialized ? Date() : nil
+            hasReceivedLocalQuotaSnapshot = false
+            localQuotaUsage = nil
+            localQuotaOrigin = nil
+            localQuotaAvailability = .unknown
+            if localIdentityInitialized, previous != nil {
+                for account in accounts where account.boundLocalAccountID == previous {
+                    refresh(id: account.id)
+                }
+            }
         }
         localIdentityInitialized = true
         installLocalIdentityWatcher()

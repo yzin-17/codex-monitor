@@ -27,6 +27,104 @@ struct CodexAccountUsage: Equatable, Sendable {
     var returnedWorkspaceID: String? = nil
     var capturedAt = Date()
 }
+
+enum CodexLocalQuotaAvailability: Equatable, Sendable {
+    case unknown
+    case available
+    case unavailable
+}
+
+enum CodexAccountQuotaSource: Equatable, Sendable {
+    case localAppServer
+    case localRecords
+    case remoteFallback
+    case remote
+
+    var usesLocalQuota: Bool {
+        self == .localAppServer || self == .localRecords
+    }
+
+    var displayLabel: String {
+        switch self {
+        case .localAppServer: "本机读取 · 实时接口"
+        case .localRecords: "本机读取 · 本地记录"
+        case .remoteFallback: "远程读取 · 自动兜底"
+        case .remote: "远程读取"
+        }
+    }
+
+    var hudLabel: String {
+        switch self {
+        case .localAppServer: "本机·实时"
+        case .localRecords: "本机·记录"
+        case .remoteFallback: "远程·兜底"
+        case .remote: "远程"
+        }
+    }
+}
+
+struct CodexAccountDisplayData: Equatable, Sendable {
+    var quotaUsage: CodexAccountUsage?
+    var quotaSource: CodexAccountQuotaSource?
+    var localAvailability: CodexLocalQuotaAvailability
+    var remotePlan: String?
+    var remoteCredits: String?
+    var remoteCapturedAt: Date?
+    var remoteError: String?
+    var isRefreshing: Bool
+    var isCurrentLocalAccount: Bool
+
+    var usesLocalQuota: Bool { quotaSource?.usesLocalQuota == true }
+}
+
+enum CodexAccountQuotaFallbackPolicy {
+    static let localIdentitySettleDelay: TimeInterval = 65
+
+    static func remoteHasWeekly(_ usage: CodexAccountUsage?) -> Bool {
+        usage?.quotas.contains(where: {
+            ($0.id == "secondary_window" || isWeeklyQuota($0)) && (0...100).contains($0.remainingPercent)
+        }) == true
+    }
+
+    static func remoteIsStale(_ usage: CodexAccountUsage?, interval: Double, now: Date) -> Bool {
+        guard let usage else { return true }
+        return now.timeIntervalSince(usage.capturedAt) > max(interval * 2, 600)
+    }
+
+    static func localIdentityIsSettled(changedAt: Date?, now: Date) -> Bool {
+        guard let changedAt else { return true }
+        return now.timeIntervalSince(changedAt) >= localIdentitySettleDelay
+    }
+
+    static func isFiveHourQuota(_ quota: AccountQuota) -> Bool {
+        if quota.durationSeconds == 18_000 { return true }
+        let label = quota.label
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: " ", with: "")
+            .lowercased()
+        return ["5h", "5小时", "5hr", "5hrs"].contains(label)
+    }
+
+    static func isWeeklyQuota(_ quota: AccountQuota) -> Bool {
+        if quota.durationSeconds == 604_800 { return true }
+        return quota.label
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: " ", with: "")
+            .lowercased() == "7d"
+    }
+
+    static func shouldUseLocal(
+        remoteUsage: CodexAccountUsage?,
+        remoteError: String?,
+        monitoringEnabled: Bool,
+        interval: Double,
+        bindingMatches: Bool,
+        localHasWeekly: Bool,
+        now: Date
+    ) -> Bool {
+        bindingMatches && localHasWeekly
+    }
+}
 enum CodexAccountError: Error, LocalizedError, Sendable, Equatable {
     case missingCredential, invalidCredential, invalidResponse, tooLarge, http(Int), redirect, keychain, accountMismatch, superseded
     var errorDescription: String? {

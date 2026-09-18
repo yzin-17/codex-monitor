@@ -19,6 +19,63 @@ private func requestUsage(_ input: Int = 100, _ output: Int = 20) -> TokenUsageB
     #expect(available.hasSkillEvidenceGap)
 }
 
+@Test func completeConversationCostCanReplaceFastSnapshotOnlyWhenCaughtUp() {
+    var usage = TokenUsageSummary.zero
+    usage.add(requestUsage(), model: "gpt-5.6-sol")
+    let agent = AgentCostDetail(id: "root", parentID: nil, depth: 0, model: "gpt-5.6-sol",
+        usage: usage, hasUsage: true, complete: true)
+    let complete = ConversationCostDetails(rootID: "root", agents: [agent], skills: [], pending: false,
+        diagnostics: [], observedAt: Date(), scanState: .caughtUp)
+    #expect(complete.canReplaceFastSnapshot)
+    #expect(complete.reconciledDisplayConfidence == .complete)
+
+    let scanning = ConversationCostDetails(rootID: "root", agents: [agent], skills: [], pending: true,
+        diagnostics: [], observedAt: Date(), scanState: .scanning(processedBytes: 1, targetBytes: 2,
+            currentAgentID: "root"))
+    #expect(!scanning.canReplaceFastSnapshot)
+    #expect(scanning.reconciledDisplayConfidence == nil)
+
+    let gapAgent = AgentCostDetail(id: "root", parentID: nil, depth: 0, model: "gpt-5.6-sol",
+        usage: usage, hasUsage: true, complete: true, hasGap: true)
+    let gap = ConversationCostDetails(rootID: "root", agents: [gapAgent], skills: [], pending: false,
+        diagnostics: ["存在计数或日志缺口"], observedAt: Date(), scanState: .gap)
+    #expect(!gap.canReplaceFastSnapshot)
+    #expect(gap.reconciledDisplayConfidence == .lowerBound)
+
+    let unavailableAgent = AgentCostDetail(id: "root", parentID: nil, depth: 0, model: "gpt-5.6-sol",
+        usage: usage, hasUsage: true, complete: false, unavailableReason: .unreadable)
+    let unavailable = ConversationCostDetails(rootID: "root", agents: [unavailableAgent], skills: [],
+        pending: false, diagnostics: [], observedAt: Date(),
+        scanState: .unavailable(agentID: "root", reason: .unreadable))
+    #expect(unavailable.reconciledDisplayConfidence == nil)
+}
+
+@Test func lowerBoundCostFormattingIsExplicit() {
+    #expect(Formatters.estimatedCostUSD(47.21, lowerBound: true) == "≥$47.21")
+    #expect(Formatters.estimatedCostUSD(nil, lowerBound: true) == "≥--")
+    #expect(Formatters.estimatedCostUSD(47.21) == "≈$47.21")
+}
+
+@Test func conversationCostPrefetchLimitsAndPrioritizesTasks() {
+    let now = Date()
+    func task(_ id: String, _ status: TaskStatus, _ age: TimeInterval) -> CodexTask {
+        CodexTask(id: id, title: id, status: status, detailPrefix: "模型 · 推理",
+            tokenCount: 120, tokenUsage: .unpriced(totalTokens: 120, model: "gpt-5.6-sol"),
+            updatedAt: now.addingTimeInterval(-age))
+    }
+
+    let selected = ConversationCostPrefetchPolicy.prioritizedTasks(from: [
+        task("idle-new", .idle, 1),
+        task("recent-newest", .recent, 2),
+        task("running-old", .running, 20),
+        task("running-newest", .running, 1),
+        task("recent-old", .recent, 30)
+    ])
+
+    #expect(selected.map(\.id) == ["running-newest", "running-old", "recent-newest"])
+    #expect(selected.count == ConversationCostPrefetchPolicy.maximumTaskCount)
+}
+
 private struct CostTestLaunchManager: LaunchAtLoginManaging {
     var isEnabled: Bool { false }
     func setEnabled(_ enabled: Bool) throws { }
@@ -46,6 +103,82 @@ private struct CostTestLaunchManager: LaunchAtLoginManaging {
     }
     let evicted = try #require(viewModel.makeConversationCostLoader(taskID: "task-0", skillsEnabled: true))
     #expect(evicted !== first)
+}
+
+@Test @MainActor func usageViewModelPrefetchSharesCompleteDetailWithTopSummary() async throws {
+    let fixture = CostFixture()
+    defer { fixture.clean() }
+    _ = try fixture.write(fixture.root)
+
+    let suite = "conversation-cost-prefetch-\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let settings = CodexNotchSettings(defaults: defaults,
+        secretStores: SecretStoreFactory(keychain: MemorySecretStore(), database: MemorySecretStore()),
+        launchAtLoginManager: CostTestLaunchManager())
+    let viewModel = UsageViewModel(store: CodexUsageStore(codexDirectory: fixture.home), settings: settings)
+    let task = CodexTask(id: fixture.root, title: "prefetch", status: .recent,
+        detailPrefix: "模型 · 推理", tokenCount: 1,
+        tokenUsage: .unpriced(totalTokens: 1, model: "gpt-5.6-sol"), updatedAt: Date())
+    let skillsEnabled = settings.skillInsightsEnabled
+
+    viewModel.prefetchConversationCosts(for: [task])
+    var detail: ConversationCostDetails?
+    for _ in 0..<100 {
+        if let candidate = viewModel.conversationCostDetail(for: task.id, skillsEnabled: skillsEnabled),
+           !candidate.pending {
+            detail = candidate
+            break
+        }
+        try await Task.sleep(nanoseconds: 10_000_000)
+    }
+    await viewModel.shutdownExtensions()
+
+    let loaded = try #require(detail)
+    #expect(loaded.canReplaceFastSnapshot)
+    #expect(viewModel.conversationCostDetail(for: task.id, skillsEnabled: skillsEnabled) == loaded)
+    let displayed = viewModel.conversationCostDisplaySummary(for: task, skillsEnabled: skillsEnabled)
+    #expect(displayed.usage == loaded.usage)
+    #expect(displayed.confidence == .complete)
+}
+
+@Test @MainActor func usageViewModelUsesCaughtUpGapDetailAsSharedLowerBound() async throws {
+    let fixture = CostFixture()
+    defer { fixture.clean() }
+    let unknown = #"{"timestamp":"2026-09-10T08:00:00Z","type":"unknown","payload":{"blob":""#
+        + String(repeating: "x", count: 600_000) + #""}}"# + "\n"
+    _ = try fixture.write(fixture.root,
+        tail: try fixture.tokens(120) + unknown + fixture.tokens(240))
+
+    let suite = "conversation-cost-lower-bound-\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let settings = CodexNotchSettings(defaults: defaults,
+        secretStores: SecretStoreFactory(keychain: MemorySecretStore(), database: MemorySecretStore()),
+        launchAtLoginManager: CostTestLaunchManager())
+    let viewModel = UsageViewModel(store: CodexUsageStore(codexDirectory: fixture.home), settings: settings)
+    let task = CodexTask(id: fixture.root, title: "gap", status: .recent,
+        detailPrefix: "模型 · 推理", tokenCount: 1,
+        tokenUsage: .unpriced(totalTokens: 1, model: "gpt-5.6-sol"), updatedAt: Date())
+    let skillsEnabled = settings.skillInsightsEnabled
+
+    viewModel.prefetchConversationCosts(for: [task])
+    var detail: ConversationCostDetails?
+    for _ in 0..<100 {
+        if let candidate = viewModel.conversationCostDetail(for: task.id, skillsEnabled: skillsEnabled),
+           !candidate.pending {
+            detail = candidate
+            break
+        }
+        try await Task.sleep(nanoseconds: 10_000_000)
+    }
+    await viewModel.shutdownExtensions()
+
+    let loaded = try #require(detail)
+    #expect(loaded.scanState == .gap)
+    let displayed = viewModel.conversationCostDisplaySummary(for: task, skillsEnabled: skillsEnabled)
+    #expect(displayed.usage == loaded.usage)
+    #expect(displayed.confidence == .lowerBound)
 }
 
 @Test func expandedPanelUsesReadableSize() {

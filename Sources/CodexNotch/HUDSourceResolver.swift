@@ -1,59 +1,5 @@
 import Foundation
 
-enum CodexAccountQuotaFallbackPolicy {
-    static let localIdentitySettleDelay: TimeInterval = 65
-
-    static func remoteHasWeekly(_ usage: CodexAccountUsage?) -> Bool {
-        usage?.quotas.contains(where: {
-            ($0.id == "secondary_window" || isWeeklyQuota($0)) && (0...100).contains($0.remainingPercent)
-        }) == true
-    }
-
-    static func remoteIsStale(_ usage: CodexAccountUsage?, interval: Double, now: Date) -> Bool {
-        guard let usage else { return true }
-        return now.timeIntervalSince(usage.capturedAt) > max(interval * 2, 600)
-    }
-
-    static func localIdentityIsSettled(changedAt: Date?, now: Date) -> Bool {
-        guard let changedAt else { return true }
-        return now.timeIntervalSince(changedAt) >= localIdentitySettleDelay
-    }
-
-    static func isFiveHourQuota(_ quota: AccountQuota) -> Bool {
-        if quota.durationSeconds == 18_000 { return true }
-        let label = quota.label
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: " ", with: "")
-            .lowercased()
-        return ["5h", "5小时", "5hr", "5hrs"].contains(label)
-    }
-
-    static func isWeeklyQuota(_ quota: AccountQuota) -> Bool {
-        if quota.durationSeconds == 604_800 { return true }
-        return quota.label
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: " ", with: "")
-            .lowercased() == "7d"
-    }
-
-    static func shouldUseLocal(
-        remoteUsage: CodexAccountUsage?,
-        remoteError: String?,
-        monitoringEnabled: Bool,
-        interval: Double,
-        bindingMatches: Bool,
-        localHasWeekly: Bool,
-        now: Date
-    ) -> Bool {
-        guard bindingMatches, localHasWeekly else { return false }
-        return !monitoringEnabled
-            || remoteError != nil
-            || remoteUsage == nil
-            || remoteIsStale(remoteUsage, interval: interval, now: now)
-            || !remoteHasWeekly(remoteUsage)
-    }
-}
-
 extension HUDEntityData {
     @MainActor static func resolve(source: String, usage: UsageViewModel, remote: RemoteMonitorViewModel,
                                    newAPI: BalanceMonitorViewModel, subAPI: BalanceMonitorViewModel,
@@ -83,7 +29,7 @@ extension HUDEntityData {
                 }
                 d.costToday = amount(s.usageTodaySummary); d.cost30d = amount(s.usage30dSummary)
             }
-            d.warning = s.errorMessage; d.capturedAt = s.lastUpdated
+            d.warning = s.errorMessage; d.capturedAt = s.rateLimitCapturedAt
             func sample(_ w: UsageQuotaWindow) -> HUDQuotaSample {
                 .init(remaining: w.remainingPercent.map(Double.init), resetsAt: w.resetsAt,
                       duration: w.isFiveHourWindow ? 18000 : w.shortLabel == "7d" ? 604800 : nil, label: w.shortLabel)
@@ -95,6 +41,51 @@ extension HUDEntityData {
             if let extra = d.scopedWindow { d.lanes.append(extra) }
             d.costTodayUSD = usage.hasLoadedUsageTotals ? s.usageTodaySummary.costUSD : nil
             d.cost30dUSD = usage.hasLoadedUsageTotals ? s.usage30dSummary.costUSD : nil
+            let now = Date()
+            let currentDisplay = accounts.currentLocalAccountDisplayData(now: now)
+            d.planType = currentDisplay?.remotePlan
+            d.balance = currentDisplay?.remoteCredits
+            switch accounts.quotaSourcePreference {
+            case .localFirst, .localOnly:
+                if accounts.localQuotaAvailability == .available {
+                    let actualSource: CodexAccountQuotaSource = s.rateLimitOrigin == .appServer
+                        ? .localAppServer
+                        : .localRecords
+                    d.provider = "Codex · \(actualSource.hudLabel)"
+                    d.state = actualSource.hudLabel
+                    d.warning = nil
+                } else if accounts.quotaSourcePreference == .localFirst,
+                          let currentDisplay,
+                          currentDisplay.quotaSource == .remoteFallback,
+                          let quotaUsage = currentDisplay.quotaUsage {
+                    clearQuota(in: &d)
+                    applyRemoteQuota(quotaUsage, to: &d)
+                    d.provider = "Codex · \(CodexAccountQuotaSource.remoteFallback.hudLabel)"
+                    d.state = CodexAccountQuotaSource.remoteFallback.hudLabel
+                    d.warning = currentDisplay.remoteError
+                } else {
+                    clearQuota(in: &d)
+                    d.state = accounts.localQuotaAvailability == .unknown ? "…" : "—"
+                    d.warning = accounts.localQuotaAvailability == .unknown
+                        ? "等待首次本机额度读取"
+                        : "本机额度不可用"
+                }
+            case .remoteOnly:
+                clearQuota(in: &d)
+                if let currentDisplay,
+                   currentDisplay.quotaSource == .remote,
+                   let quotaUsage = currentDisplay.quotaUsage {
+                    applyRemoteQuota(quotaUsage, to: &d)
+                    d.provider = "Codex · \(CodexAccountQuotaSource.remote.hudLabel)"
+                    d.state = CodexAccountQuotaSource.remote.hudLabel
+                    d.warning = currentDisplay.remoteError
+                } else {
+                    d.state = accounts.monitoringEnabled ? "—" : "OFF"
+                    d.warning = accounts.monitoringEnabled
+                        ? (currentDisplay?.localAvailability == .unknown ? "等待账号身份稳定" : "当前账号未绑定或远程额度不可用")
+                        : "账户监测已关闭"
+                }
+            }
             return d
         }
         if source.hasPrefix("codex-account:"), let id = UUID(uuidString: String(source.dropFirst(14))),
@@ -102,56 +93,47 @@ extension HUDEntityData {
             d.providerID = "codex"; d.provider = "Codex"; d.account = a.label
             guard a.enabled else { d.state = "OFF"; d.warning = "账户已关闭"; return d }
 
-            let state = accounts.states[id]
-            let remoteUsage = state?.usage
-            if let remoteUsage {
-                d.planType = remoteUsage.plan
-                d.balance = remoteUsage.credits // credits 只来自官方远程数据，本地额度不冒充余额。
-            }
-
             let now = Date()
-            let local = resolve(source: "local", usage: usage, remote: remote, newAPI: newAPI, subAPI: subAPI, accounts: accounts, settings: settings)
-            let localHasWeekly = local.weeklyWindow?.remaining != nil || local.weekly != nil
-            let bindingMatches = CodexAccountQuotaFallbackPolicy.localIdentityIsSettled(
-                    changedAt: accounts.localIdentityChangedAt,
-                    now: now
-                )
-                && accounts.canUseLocalFallback(for: a, localCapturedAt: local.capturedAt)
-            let shouldUseLocal = CodexAccountQuotaFallbackPolicy.shouldUseLocal(
-                remoteUsage: remoteUsage,
-                remoteError: state?.error,
-                monitoringEnabled: accounts.monitoringEnabled,
-                interval: accounts.interval,
-                bindingMatches: bindingMatches,
-                localHasWeekly: localHasWeekly,
-                now: now
-            )
+            let display = accounts.displayData(for: a, now: now)
+            d.planType = display.remotePlan
+            d.balance = display.remoteCredits // Credits 只来自官方远程数据，本机额度不冒充余额。
 
-            if shouldUseLocal {
-                applyLocalQuota(local, to: &d)
-                d.state = "LOCAL"
-                d.warning = nil
+            if let quotaUsage = display.quotaUsage {
+                applyRemoteQuota(quotaUsage, to: &d)
+                if let quotaSource = display.quotaSource {
+                    d.provider = "Codex · \(quotaSource.hudLabel)"
+                    d.state = quotaSource.hudLabel
+                }
+                if display.usesLocalQuota {
+                    d.warning = nil
+                } else {
+                    if let error = display.remoteError { d.warning = error }
+                    else if CodexAccountQuotaFallbackPolicy.remoteIsStale(
+                        quotaUsage,
+                        interval: accounts.interval,
+                        now: now
+                    ) { d.warning = "数据已过期，等待刷新" }
+                    else if !CodexAccountQuotaFallbackPolicy.remoteHasWeekly(quotaUsage) {
+                        d.warning = "每周额度暂不可用"
+                    }
+                }
                 return d
             }
 
-            // 关闭监测时不继续展示之前验证留下的远程额度；只有上面的显式绑定 local fallback 可以继续提供额度。
+            if display.isCurrentLocalAccount, display.localAvailability == .unknown {
+                d.state = "…"
+                d.warning = accounts.quotaSourcePreference == .remoteOnly ? "等待账号身份稳定" : "等待本机额度"
+                return d
+            }
+
             guard accounts.monitoringEnabled else {
                 d.state = "OFF"
                 d.warning = "账户监测已关闭"
                 return d
             }
 
-            if let remoteUsage {
-                applyRemoteQuota(remoteUsage, to: &d)
-                d.state = state?.isRefreshing == true ? "…" : state?.error != nil ? "!" : "OK"
-                if let error = state?.error { d.warning = error }
-                else if CodexAccountQuotaFallbackPolicy.remoteIsStale(remoteUsage, interval: accounts.interval, now: now) { d.warning = "数据已过期，等待刷新" }
-                else if !CodexAccountQuotaFallbackPolicy.remoteHasWeekly(remoteUsage) { d.warning = "每周额度暂不可用" }
-                return d
-            }
-
-            d.state = state?.isRefreshing == true ? "…" : state?.error != nil ? "!" : "—"
-            d.warning = state?.error ?? "每周额度暂不可用"
+            d.state = display.isRefreshing ? "…" : display.remoteError != nil ? "!" : "—"
+            d.warning = display.remoteError ?? "每周额度暂不可用"
             // 5h 没有有效数据时由 HUDEntityData 自动隐藏；7d 不隐藏，因此会明确显示 “7d —”。
             return d
         }
@@ -201,15 +183,16 @@ extension HUDEntityData {
             .min { ($0.remaining ?? 100) < ($1.remaining ?? 100) }
     }
 
-    private static func applyLocalQuota(_ local: Self, to data: inout Self) {
-        data.primary = local.primary
-        data.primaryLabel = local.primaryLabel
-        data.weekly = local.weekly
-        data.resetsAt = local.resetsAt
-        data.capturedAt = local.capturedAt
-        data.lanes = local.lanes
-        data.primaryWindow = local.primaryWindow
-        data.weeklyWindow = local.weeklyWindow
-        data.scopedWindow = local.scopedWindow
+    private static func clearQuota(in data: inout Self) {
+        data.primary = nil
+        data.primaryLabel = "会话"
+        data.weekly = nil
+        data.resetsAt = nil
+        data.capturedAt = nil
+        data.lanes = []
+        data.primaryWindow = nil
+        data.weeklyWindow = nil
+        data.scopedWindow = nil
     }
+
 }

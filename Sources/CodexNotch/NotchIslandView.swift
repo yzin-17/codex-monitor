@@ -511,21 +511,29 @@ struct DetailPanelView: View {
             migrateRemotePage()
             expandedTaskID = nil
             visibleTaskLimit = Self.taskPageSize
+            viewModel.cancelConversationCostPrefetch()
             synchronizeExtensionVisibility()
         }
         .onChange(of: overlayState.detailPresentationPhase) { _, phase in
             if !phase.showsContent {
                 expandedTaskID = nil
                 visibleTaskLimit = Self.taskPageSize
+                viewModel.cancelConversationCostPrefetch()
             }
             synchronizeExtensionVisibility()
         }
-        .onDisappear { performanceViewModel.setDetailVisible(false) }
+        .onDisappear {
+            viewModel.cancelConversationCostPrefetch()
+            performanceViewModel.setDetailVisible(false)
+        }
     }
 
     private func synchronizeExtensionVisibility() {
         let visible = overlayState.detailPresentationPhase.showsContent
         performanceViewModel.setDetailVisible(visible && selectedPage == .performance)
+        if visible && selectedPage == .codex {
+            viewModel.prefetchConversationCosts(for: snapshot.tasks)
+        }
         if visible && selectedPage == .skills { skillInsights.refreshWhenPresented() }
     }
 
@@ -895,11 +903,32 @@ struct DetailPanelView: View {
                 ScrollView(.vertical, showsIndicators: false) {
                     LazyVStack(spacing: 7) {
                         ForEach(displayedTasks) { task in
+                            let sharedConversationCost = viewModel.conversationCostDetail(
+                                for: task.id, skillsEnabled: settings.skillInsightsEnabled
+                            )
                             TaskRow(task: task, now: context.date,
                                 isExpanded: expandedTaskID == task.id,
                                 skillsEnabled: settings.skillInsightsEnabled,
-                                makeLoader: { viewModel.makeConversationCostLoader(taskID: task.id, skillsEnabled: settings.skillInsightsEnabled) },
-                                preview: previewCosts[task.id],
+                                conversationCostDetail: sharedConversationCost ?? previewCosts[task.id],
+                                displayedConversationCost: viewModel.conversationCostDisplaySummary(
+                                    for: task, skillsEnabled: settings.skillInsightsEnabled
+                                ),
+                                conversationCostLoading: viewModel.isConversationCostLoading(
+                                    for: task.id, skillsEnabled: settings.skillInsightsEnabled
+                                ),
+                                conversationCostError: viewModel.conversationCostError(
+                                    for: task.id, skillsEnabled: settings.skillInsightsEnabled
+                                ),
+                                onConversationCostLoad: {
+                                    viewModel.requestConversationCostDetail(
+                                        for: task.id, skillsEnabled: settings.skillInsightsEnabled
+                                    )
+                                },
+                                onConversationCostRefresh: {
+                                    viewModel.refreshConversationCostDetail(
+                                        for: task.id, skillsEnabled: settings.skillInsightsEnabled
+                                    )
+                                },
                                 resumeStore: viewModel.cliResume,
                                 codexAccounts: codexAccounts.accounts,
                                 onToggle: { expandedTaskID = expandedTaskID == task.id ? nil : task.id })
@@ -1556,8 +1585,12 @@ private struct TaskRow: View {
     let now: Date
     let isExpanded: Bool
     let skillsEnabled: Bool
-    let makeLoader: () -> ConversationCostLoader?
-    let preview: ConversationCostDetails?
+    let conversationCostDetail: ConversationCostDetails?
+    let displayedConversationCost: ConversationCostDisplaySummary
+    let conversationCostLoading: Bool
+    let conversationCostError: String?
+    let onConversationCostLoad: () -> Void
+    let onConversationCostRefresh: () -> Void
     let resumeStore: CLIResumeStore
     let codexAccounts: [CodexAccount]
     let onToggle: () -> Void
@@ -1598,12 +1631,20 @@ private struct TaskRow: View {
                 .accessibilityLabel("\(isExpanded ? "收起" : "展开")对话费用：\(task.title)")
                 .help("查看主代理与子代理费用明细")
                 TokenUsageTrigger(title: "\(task.title) Token 构成",
-                    tokenText: Formatters.compactTokens(task.tokenCount), summary: task.tokenUsage, style: .task)
+                    tokenText: displayedTokenText,
+                    summary: displayedConversationCost.usage,
+                    costIsLowerBound: displayedConversationCost.confidence == .lowerBound,
+                    style: .task)
                     .frame(width: 94, height: 36)
             }
             if isExpanded {
                 ConversationCostExpansion(task: task, skillsEnabled: skillsEnabled,
-                    makeLoader: makeLoader, preview: preview)
+                    detail: conversationCostDetail,
+                    displayedSummary: displayedConversationCost,
+                    loading: conversationCostLoading,
+                    error: conversationCostError,
+                    onLoad: onConversationCostLoad,
+                    onRefresh: onConversationCostRefresh)
                     .id(task.id)
                 CLIResumeControl(threadID: task.id, store: resumeStore, knownAccounts: codexAccounts)
             }
@@ -1611,6 +1652,16 @@ private struct TaskRow: View {
         .padding(.horizontal, 10).padding(.vertical, 8)
         .background(Color.white.opacity(isExpanded ? 0.065 : 0.035), in: RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.08), lineWidth: 1))
+    }
+
+    private var displayedTokenText: String {
+        let prefix: String
+        switch displayedConversationCost.confidence {
+        case .provisional: prefix = "≈"
+        case .complete: prefix = ""
+        case .lowerBound: prefix = "≥"
+        }
+        return prefix + Formatters.compactTokens(displayedConversationCost.usage.totalTokens)
     }
 
     private var statusColor: Color {
@@ -1938,7 +1989,17 @@ private struct TokenUsageTrigger: View {
     let title: String
     let tokenText: String
     let summary: TokenUsageSummary
+    let costIsLowerBound: Bool
     let style: TokenUsageTriggerStyle
+
+    init(title: String, tokenText: String, summary: TokenUsageSummary,
+         costIsLowerBound: Bool = false, style: TokenUsageTriggerStyle) {
+        self.title = title
+        self.tokenText = tokenText
+        self.summary = summary
+        self.costIsLowerBound = costIsLowerBound
+        self.style = style
+    }
 
     @State private var isTriggerHovered = false
     @State private var isPopoverHovered = false
@@ -1991,12 +2052,13 @@ private struct TokenUsageTrigger: View {
         .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isPinned)
         .help("悬停查看 Token 构成，点击固定")
         .accessibilityLabel(title)
-        .accessibilityValue("\(tokenText)，\(Formatters.estimatedCostUSD(summary.costUSD))")
+        .accessibilityValue("\(tokenText)，\(Formatters.estimatedCostUSD(summary.costUSD, lowerBound: costIsLowerBound))")
         .accessibilityHint("悬停查看，点击可固定弹窗")
         .popover(isPresented: presentationBinding, arrowEdge: .bottom) {
             TokenUsagePopover(
                 title: title,
                 summary: summary,
+                costIsLowerBound: costIsLowerBound,
                 isPinned: isPinned,
                 onHoverChanged: popoverHoverChanged
             )
@@ -2016,7 +2078,7 @@ private struct TokenUsageTrigger: View {
                     .foregroundStyle(.white.opacity(0.72))
                 Text("·")
                     .foregroundStyle(.white.opacity(0.28))
-                Text(Formatters.estimatedCostUSD(summary.costUSD))
+                Text(Formatters.estimatedCostUSD(summary.costUSD, lowerBound: costIsLowerBound))
                     .foregroundStyle(Color(red: 0.54, green: 0.80, blue: 1.0).opacity(0.88))
                 Image(systemName: "chevron.down")
                     .font(.system(size: 7.5, weight: .bold))
@@ -2105,6 +2167,7 @@ private struct TokenUsageTrigger: View {
 private struct TokenUsagePopover: View {
     let title: String
     let summary: TokenUsageSummary
+    let costIsLowerBound: Bool
     let isPinned: Bool
     let onHoverChanged: (Bool) -> Void
 
@@ -2122,7 +2185,7 @@ private struct TokenUsagePopover: View {
                 Text(title)
                     .font(.system(size: 13, weight: .bold))
                 Spacer(minLength: 18)
-                Text(Formatters.compactTokens(summary.totalTokens))
+                Text((costIsLowerBound ? "≥" : "") + Formatters.compactTokens(summary.totalTokens))
                     .font(.system(size: 12, weight: .heavy, design: .rounded))
                     .monospacedDigit()
             }
@@ -2146,7 +2209,7 @@ private struct TokenUsagePopover: View {
                 Text("API 等价估算")
                     .foregroundStyle(.secondary)
                 Spacer()
-                Text(Formatters.estimatedCostUSD(summary.costUSD))
+                Text(Formatters.estimatedCostUSD(summary.costUSD, lowerBound: costIsLowerBound))
                     .fontWeight(.bold)
                     .foregroundStyle(Color(red: 0.20, green: 0.56, blue: 0.95))
                     .monospacedDigit()

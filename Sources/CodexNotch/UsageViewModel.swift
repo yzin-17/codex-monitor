@@ -1,12 +1,33 @@
 import Combine
 import Foundation
 
+enum ConversationCostPrefetchPolicy {
+    static let maximumTaskCount = 3
+
+    static func prioritizedTasks(from tasks: [CodexTask]) -> [CodexTask] {
+        tasks
+            .filter { $0.status == .running || $0.status == .recent }
+            .sorted {
+                let leftPriority = $0.status == .running ? 0 : 1
+                let rightPriority = $1.status == .running ? 0 : 1
+                if leftPriority != rightPriority { return leftPriority < rightPriority }
+                if $0.updatedAt != $1.updatedAt { return $0.updatedAt > $1.updatedAt }
+                return $0.id < $1.id
+            }
+            .prefix(maximumTaskCount)
+            .map { $0 }
+    }
+}
+
 @MainActor
 final class UsageViewModel: ObservableObject {
     @Published private(set) var snapshot: UsageSnapshot = .empty
     @Published private(set) var isRefreshing = false
     @Published private(set) var isRefreshingUsage = false
     @Published private(set) var hasLoadedUsageTotals = false
+    @Published private(set) var conversationCostDetails: [String: ConversationCostDetails] = [:]
+    @Published private(set) var conversationCostLoadingKeys: Set<String> = []
+    @Published private(set) var conversationCostErrors: [String: String] = [:]
 
     lazy var publicInsights = PublicInsightsStore(defaults: settings.preferenceStore, automatic: !isPreviewMode)
     lazy var cliResume = CLIResumeStore(home: store.conversationDataDirectory,
@@ -14,6 +35,7 @@ final class UsageViewModel: ObservableObject {
         activeThreads: { [weak self] in Set(self?.snapshot.tasks.filter { $0.status == .running }.map(\.id) ?? []) })
 
     func shutdownExtensions() async {
+        cancelConversationCostWork(clearDetails: false)
         publicInsights.stop()
         await cliResume.shutdown()
     }
@@ -21,6 +43,7 @@ final class UsageViewModel: ObservableObject {
     private let store: CodexUsageStore
     private let settings: CodexNotchSettings
     private let isPreviewMode: Bool
+    private var conversationCostSkillsEnabled = true
     private var fastTimer: Timer?
     private var usageTimer: Timer?
     private var pendingSnapshotTimer: Timer?
@@ -54,6 +77,36 @@ final class UsageViewModel: ObservableObject {
         var lastUsed: Date
     }
     private var conversationCostLoaders: [String: ConversationCostLoaderCacheEntry] = [:]
+    private struct ConversationCostTaskMarker: Equatable, Sendable {
+        let updatedAt: Date
+        let tokenCount: Int
+        let activeSubagentCount: Int
+
+        init(task: CodexTask) {
+            updatedAt = task.updatedAt
+            tokenCount = task.tokenCount
+            activeSubagentCount = task.activeSubagentCount
+        }
+    }
+    private struct ConversationCostRequest {
+        let taskID: String
+        let skillsEnabled: Bool
+        let taskMarker: ConversationCostTaskMarker?
+        var isManual: Bool
+
+        var key: String {
+            Self.key(taskID: taskID, skillsEnabled: skillsEnabled)
+        }
+
+        static func key(taskID: String, skillsEnabled: Bool) -> String {
+            "\(taskID.lowercased())|\(skillsEnabled ? "skills" : "plain")"
+        }
+    }
+    private var conversationCostQueue: [ConversationCostRequest] = []
+    private var conversationCostActiveKey: String?
+    private var conversationCostWorker: Task<Void, Never>?
+    private var conversationCostGeneration = 0
+    private var conversationCostTaskMarkers: [String: ConversationCostTaskMarker] = [:]
 
     init(
         store: CodexUsageStore = CodexUsageStore(),
@@ -63,6 +116,7 @@ final class UsageViewModel: ObservableObject {
         self.store = store
         self.settings = settings
         isPreviewMode = previewSnapshot != nil
+        conversationCostSkillsEnabled = settings.skillInsightsEnabled
         if let previewSnapshot {
             snapshot = previewSnapshot
             hasLoadedUsageTotals = true
@@ -96,8 +150,215 @@ final class UsageViewModel: ObservableObject {
         if conversationCostLoaders.count > 8,
            let oldest = conversationCostLoaders.min(by: { $0.value.lastUsed < $1.value.lastUsed })?.key {
             conversationCostLoaders.removeValue(forKey: oldest)
+            conversationCostDetails.removeValue(forKey: oldest)
+            conversationCostErrors.removeValue(forKey: oldest)
+            conversationCostTaskMarkers.removeValue(forKey: oldest)
         }
         return loader
+    }
+
+    func conversationCostDetail(for taskID: String, skillsEnabled: Bool) -> ConversationCostDetails? {
+        let key = ConversationCostRequest.key(taskID: taskID, skillsEnabled: skillsEnabled)
+        return conversationCostDetails[key]
+    }
+
+    func isConversationCostLoading(for taskID: String, skillsEnabled: Bool) -> Bool {
+        let key = ConversationCostRequest.key(taskID: taskID, skillsEnabled: skillsEnabled)
+        return conversationCostLoadingKeys.contains(key)
+    }
+
+    func conversationCostError(for taskID: String, skillsEnabled: Bool) -> String? {
+        let key = ConversationCostRequest.key(taskID: taskID, skillsEnabled: skillsEnabled)
+        return conversationCostErrors[key]
+    }
+
+    func conversationCostDisplaySummary(for task: CodexTask,
+                                        skillsEnabled: Bool) -> ConversationCostDisplaySummary {
+        guard let detail = conversationCostDetail(for: task.id, skillsEnabled: skillsEnabled),
+              let confidence = detail.reconciledDisplayConfidence else {
+            return ConversationCostDisplaySummary(usage: task.tokenUsage, confidence: .provisional)
+        }
+        return ConversationCostDisplaySummary(usage: detail.usage, confidence: confidence)
+    }
+
+    func prefetchConversationCosts(for tasks: [CodexTask]) {
+        guard !isPreviewMode else { return }
+        let candidates = ConversationCostPrefetchPolicy.prioritizedTasks(from: tasks)
+        let desiredKeys = Set(candidates.map {
+            ConversationCostRequest.key(taskID: $0.id, skillsEnabled: settings.skillInsightsEnabled)
+        })
+        conversationCostQueue.removeAll { request in
+            !request.isManual && !desiredKeys.contains(request.key)
+        }
+
+        for task in candidates {
+            let key = ConversationCostRequest.key(taskID: task.id, skillsEnabled: settings.skillInsightsEnabled)
+            guard shouldPrefetch(task: task, key: key) else { continue }
+            enqueueConversationCost(
+                taskID: task.id,
+                skillsEnabled: settings.skillInsightsEnabled,
+                taskMarker: ConversationCostTaskMarker(task: task),
+                isManual: false
+            )
+        }
+        pumpConversationCostQueue()
+    }
+
+    func requestConversationCostDetail(for taskID: String, skillsEnabled: Bool) {
+        guard !isPreviewMode else { return }
+        let key = ConversationCostRequest.key(taskID: taskID, skillsEnabled: skillsEnabled)
+        if let detail = conversationCostDetails[key],
+           !detail.pending || detail.scanState.isWaitingForAppend {
+            return
+        }
+        enqueueConversationCost(taskID: taskID, skillsEnabled: skillsEnabled,
+            taskMarker: taskMarker(for: taskID), isManual: true)
+        pumpConversationCostQueue()
+    }
+
+    func refreshConversationCostDetail(for taskID: String, skillsEnabled: Bool) {
+        guard !isPreviewMode else { return }
+        enqueueConversationCost(taskID: taskID, skillsEnabled: skillsEnabled,
+            taskMarker: taskMarker(for: taskID), isManual: true)
+        pumpConversationCostQueue()
+    }
+
+    func cancelConversationCostPrefetch() {
+        guard !isPreviewMode else { return }
+        cancelConversationCostWork(clearDetails: false)
+    }
+
+    private func taskMarker(for taskID: String) -> ConversationCostTaskMarker? {
+        snapshot.tasks.first { $0.id.caseInsensitiveCompare(taskID) == .orderedSame }
+            .map(ConversationCostTaskMarker.init(task:))
+    }
+
+    private func shouldPrefetch(task: CodexTask, key: String) -> Bool {
+        guard let detail = conversationCostDetails[key] else { return true }
+        if detail.pending { return true }
+        return conversationCostTaskMarkers[key] != ConversationCostTaskMarker(task: task)
+    }
+
+    private func enqueueConversationCost(taskID: String, skillsEnabled: Bool,
+                                         taskMarker: ConversationCostTaskMarker?,
+                                         isManual: Bool) {
+        let key = ConversationCostRequest.key(taskID: taskID, skillsEnabled: skillsEnabled)
+        conversationCostErrors.removeValue(forKey: key)
+        guard conversationCostActiveKey != key else { return }
+
+        if let index = conversationCostQueue.firstIndex(where: { $0.key == key }) {
+            if let taskMarker {
+                conversationCostQueue[index] = ConversationCostRequest(
+                    taskID: conversationCostQueue[index].taskID,
+                    skillsEnabled: conversationCostQueue[index].skillsEnabled,
+                    taskMarker: taskMarker,
+                    isManual: conversationCostQueue[index].isManual || isManual
+                )
+            }
+            conversationCostQueue[index].isManual = conversationCostQueue[index].isManual || isManual
+            if isManual && index > 0 {
+                let request = conversationCostQueue.remove(at: index)
+                conversationCostQueue.insert(request, at: 0)
+            }
+        } else {
+            let request = ConversationCostRequest(
+                taskID: taskID.lowercased(), skillsEnabled: skillsEnabled,
+                taskMarker: taskMarker,
+                isManual: isManual
+            )
+            if isManual {
+                conversationCostQueue.insert(request, at: 0)
+            } else {
+                conversationCostQueue.append(request)
+            }
+        }
+    }
+
+    private func pumpConversationCostQueue() {
+        guard !isPreviewMode, conversationCostWorker == nil,
+              !conversationCostQueue.isEmpty else { return }
+        let request = conversationCostQueue.removeFirst()
+        let key = request.key
+        conversationCostActiveKey = key
+        conversationCostLoadingKeys = conversationCostLoadingKeys.union([key])
+        conversationCostErrors.removeValue(forKey: key)
+        let generation = conversationCostGeneration
+        guard let loader = makeConversationCostLoader(taskID: request.taskID,
+                                                       skillsEnabled: request.skillsEnabled) else {
+            finishConversationCostRequest(key: key, generation: generation)
+            return
+        }
+        let worker = Task { [weak self, loader] in
+            guard let self else { return }
+            await self.runConversationCostScan(request, loader: loader, generation: generation)
+        }
+        conversationCostWorker = worker
+    }
+
+    private func runConversationCostScan(_ request: ConversationCostRequest,
+                                         loader: ConversationCostLoader,
+                                         generation: Int) async {
+        do {
+            while !Task.isCancelled {
+                let slice = Task.detached(priority: .utility) {
+                    try loader.load(
+                        rootID: request.taskID,
+                        includeSkills: request.skillsEnabled,
+                        shouldCancel: { Task.isCancelled }
+                    )
+                }
+                let next = try await withTaskCancellationHandler(
+                    operation: { try await slice.value },
+                    onCancel: { slice.cancel() }
+                )
+                guard generation == conversationCostGeneration else { return }
+                var details = conversationCostDetails
+                details[request.key] = next
+                conversationCostDetails = details
+                if let taskMarker = request.taskMarker {
+                    conversationCostTaskMarkers[request.key] = taskMarker
+                }
+                conversationCostErrors.removeValue(forKey: request.key)
+
+                // EOF with a partial row is a stable observation point. Release
+                // the serial worker and let the next snapshot or manual refresh
+                // retry after the file has actually changed.
+                if !next.pending || next.scanState.isWaitingForAppend { break }
+                await Task.yield()
+            }
+        } catch is CancellationError {
+            // Cancellation is expected when the candidate set or settings change.
+        } catch {
+            if generation == conversationCostGeneration {
+                var errors = conversationCostErrors
+                errors[request.key] = "读取失败；未将缺失数据当作零费用。"
+                conversationCostErrors = errors
+            }
+        }
+        finishConversationCostRequest(key: request.key, generation: generation)
+    }
+
+    private func finishConversationCostRequest(key: String, generation: Int) {
+        guard generation == conversationCostGeneration else { return }
+        conversationCostLoadingKeys.remove(key)
+        conversationCostActiveKey = nil
+        conversationCostWorker = nil
+        pumpConversationCostQueue()
+    }
+
+    private func cancelConversationCostWork(clearDetails: Bool) {
+        conversationCostGeneration += 1
+        conversationCostWorker?.cancel()
+        conversationCostWorker = nil
+        conversationCostActiveKey = nil
+        conversationCostQueue.removeAll()
+        conversationCostLoadingKeys.removeAll()
+        if clearDetails {
+            conversationCostDetails.removeAll()
+            conversationCostErrors.removeAll()
+            conversationCostTaskMarkers.removeAll()
+            conversationCostLoaders.removeAll()
+        }
     }
 
     func refresh(bypassFastCache: Bool = false) {
@@ -136,6 +397,9 @@ final class UsageViewModel: ObservableObject {
                 mergedSnapshot.usage30d = self.snapshot.usage30d
                 mergedSnapshot.usageToday = self.snapshot.usageToday
                 self.snapshot = mergedSnapshot
+                if snapshotLoadSucceeded {
+                    self.prefetchConversationCosts(for: self.snapshot.tasks)
+                }
                 self.isRefreshingSnapshot = false
                 self.updateRefreshingState()
                 let shouldRefreshAgain = self.pendingSnapshotRefresh
@@ -570,6 +834,11 @@ final class UsageViewModel: ObservableObject {
     }
 
     private func settingsDidChange() {
+        let skillsChanged = conversationCostSkillsEnabled != settings.skillInsightsEnabled
+        conversationCostSkillsEnabled = settings.skillInsightsEnabled
+        if skillsChanged {
+            cancelConversationCostWork(clearDetails: true)
+        }
         settingsChangeTimer?.invalidate()
         settingsChangeTimer = nil
         fastTimer?.invalidate()
@@ -663,6 +932,7 @@ private struct LocalUsageSettingsSnapshot: Equatable {
     let usageRefreshInterval: TimeInterval
     let watcherRefreshInterval: TimeInterval
     let fileChangeRefreshMinimumGap: TimeInterval
+    let skillInsightsEnabled: Bool
     let rateLimitSource: RateLimitSourcePreference
     let taskHistoryRange: TaskHistoryRange
 
@@ -673,6 +943,7 @@ private struct LocalUsageSettingsSnapshot: Equatable {
         usageRefreshInterval = settings.usageRefreshInterval
         watcherRefreshInterval = settings.watcherRefreshInterval
         fileChangeRefreshMinimumGap = settings.fileChangeRefreshMinimumGap
+        skillInsightsEnabled = settings.skillInsightsEnabled
         rateLimitSource = settings.rateLimitSource
         taskHistoryRange = settings.taskHistoryRange
     }
