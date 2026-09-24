@@ -53,7 +53,7 @@ extension HUDEntityData {
                         : .localRecords
                     d.provider = "Codex · \(actualSource.hudLabel)"
                     d.state = actualSource.hudLabel
-                    d.warning = nil
+                    d.warning = s.quotaWarning(now: now)
                 } else if accounts.quotaSourcePreference == .localFirst,
                           let currentDisplay,
                           currentDisplay.quotaSource == .remoteFallback,
@@ -63,12 +63,20 @@ extension HUDEntityData {
                     d.provider = "Codex · \(CodexAccountQuotaSource.remoteFallback.hudLabel)"
                     d.state = CodexAccountQuotaSource.remoteFallback.hudLabel
                     d.warning = currentDisplay.remoteError
+                } else if accounts.localQuotaAvailability != .unknown,
+                          s.canDisplayQuotaHistory(accountID: accounts.currentLocalAccountID, now: now) {
+                    d.state = "旧数据"
+                    d.provider = "Codex · 历史快照"
+                    d.quotaIsHistorical = true
+                    d.warning = s.quotaWarning(now: now) ?? "额度数据已过期"
                 } else {
                     clearQuota(in: &d)
                     d.state = accounts.localQuotaAvailability == .unknown ? "…" : "—"
-                    d.warning = accounts.localQuotaAvailability == .unknown
+                    d.warning = s.rateLimitDiagnostic?.failure?.message ?? (accounts.localQuotaAvailability == .unknown
                         ? "等待首次本机额度读取"
-                        : "本机额度不可用"
+                        : s.quotaWarning(now: now) ?? "本机额度不可用")
+                    d.state = s.rateLimitDiagnostic?.failure == .authentication ? "需登录" : "不可用"
+                    d.quotaUnavailableReason = accounts.localQuotaAvailability == .unknown ? "待读取" : d.warning
                 }
             case .remoteOnly:
                 clearQuota(in: &d)
@@ -105,7 +113,10 @@ extension HUDEntityData {
                     d.state = quotaSource.hudLabel
                 }
                 if display.usesLocalQuota {
-                    d.warning = nil
+                    d.warning = display.localWarning
+                    if display.localAvailability != .available {
+                        d.state = "旧数据"; d.provider = "Codex · 历史快照"; d.quotaIsHistorical = true
+                    }
                 } else {
                     if let error = display.remoteError { d.warning = error }
                     else if CodexAccountQuotaFallbackPolicy.remoteIsStale(

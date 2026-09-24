@@ -1,5 +1,30 @@
 import Foundation
 
+enum QuotaReadFailure: String, Equatable, Sendable {
+    case runtimeMissing, runtimeNotExecutable, launchFailed, processExited, timedOut
+    case authentication, protocolError, invalidResponse, identityUnavailable
+
+    var message: String {
+        switch self {
+        case .runtimeMissing: "未找到 Codex 运行时"
+        case .runtimeNotExecutable: "Codex 运行时不可执行"
+        case .launchFailed: "Codex 额度采集启动失败"
+        case .processExited: "Codex 额度采集进程提前退出"
+        case .timedOut: "Codex 额度查询超时"
+        case .authentication: "需重新登录 Codex"
+        case .protocolError: "Codex 额度协议错误"
+        case .invalidResponse: "Codex 额度响应无法解析"
+        case .identityUnavailable: "等待本机账号身份确认"
+        }
+    }
+}
+
+struct QuotaReadDiagnostic: Equatable, Sendable {
+    let attemptedAt: Date
+    var failure: QuotaReadFailure?
+    var usedCache = false
+}
+
 typealias NotchPointAdjustment = Double
 
 enum SettingsShortcutFilter {
@@ -48,6 +73,8 @@ struct UsageSnapshot: Equatable {
     var rateLimitCapturedAt: Date? = nil
     /// 本机额度最终采用的实际读取渠道；仅用于进程内调度与展示。
     var rateLimitOrigin: LocalRateLimitOrigin? = nil
+    var rateLimitAccountID: String? = nil
+    var rateLimitDiagnostic: QuotaReadDiagnostic? = nil
     var resetCredits: RateLimitResetCredits? = nil
     var usage24h: Int
     var usage7d: Int
@@ -77,8 +104,29 @@ struct UsageSnapshot: Equatable {
         errorMessage: nil
     )
 
+    func quotaWarning(now: Date = Date(), maximumAge: TimeInterval = 120) -> String? {
+        if let failure = rateLimitDiagnostic?.failure { return failure.message }
+        guard let captured = rateLimitCapturedAt else { return "尚无额度数据" }
+        if now.timeIntervalSince(captured) > maximumAge { return "额度数据已过期" }
+        if displayRateLimitWindows.contains(where: { ($0.resetsAt ?? .distantFuture) <= now }) { return "额度窗口已到期，待刷新" }
+        if displayRateLimitWindows.contains(where: { $0.resetsAt == nil }) { return "额度重置时间未知" }
+        return nil
+    }
+
+    func canDisplayQuotaHistory(accountID: String?, now: Date) -> Bool {
+        guard let accountID, accountID == rateLimitAccountID,
+              rateLimitDiagnostic?.failure != .identityUnavailable,
+              let captured = rateLimitCapturedAt else { return false }
+        return (0...600).contains(now.timeIntervalSince(captured))
+    }
+
     func stabilizedRateLimits(against previous: UsageSnapshot) -> UsageSnapshot {
         var copy = self
+        // Unknown identity cannot prove that two snapshots belong to the same account.
+        guard let identity = rateLimitAccountID, identity == previous.rateLimitAccountID,
+              rateLimitDiagnostic?.failure != .identityUnavailable,
+              let captured = previous.rateLimitCapturedAt,
+              (0...600).contains(lastUpdated.timeIntervalSince(captured)) else { return copy }
         if copy.resetCredits == nil {
             copy.resetCredits = previous.resetCredits
         }
@@ -86,38 +134,11 @@ struct UsageSnapshot: Equatable {
             copy.sparkQuotaWindows = previous.sparkQuotaWindows
         }
 
-        if !copy.rateLimitWindows.isEmpty {
-            return copy
-        }
-
-        if previous.rateLimitWindows.isEmpty {
-            var retainedPreviousRateLimit = false
-            if copy.primaryPercent == nil {
-                copy.primaryPercent = previous.primaryPercent
-                copy.primaryResetsAt = previous.primaryResetsAt
-                retainedPreviousRateLimit = previous.primaryPercent != nil || previous.primaryResetsAt != nil
-            }
-            if copy.secondaryPercent == nil {
-                copy.secondaryPercent = previous.secondaryPercent
-                copy.secondaryResetsAt = previous.secondaryResetsAt
-                retainedPreviousRateLimit = retainedPreviousRateLimit
-                    || previous.secondaryPercent != nil
-                    || previous.secondaryResetsAt != nil
-            }
-            if retainedPreviousRateLimit {
-                switch (copy.rateLimitCapturedAt, previous.rateLimitCapturedAt) {
-                case let (current?, previous?): copy.rateLimitCapturedAt = min(current, previous)
-                case (nil, let previous?): copy.rateLimitCapturedAt = previous
-                default: break
-                }
-                if copy.rateLimitOrigin == nil {
-                    copy.rateLimitOrigin = previous.rateLimitOrigin
-                }
-            }
-            return copy
-        }
-
-        if copy.primaryPercent == nil && copy.secondaryPercent == nil {
+        // Retain a whole prior observation only when this attempt returned no window.
+        // A partial new observation cannot prove it belongs to the previous window.
+        if copy.rateLimitWindows.isEmpty,
+           copy.primaryPercent == nil, copy.secondaryPercent == nil,
+           copy.primaryResetsAt == nil, copy.secondaryResetsAt == nil {
             copy.rateLimitWindows = previous.rateLimitWindows
             copy.primaryPercent = previous.primaryPercent
             copy.primaryResetsAt = previous.primaryResetsAt
@@ -807,6 +828,10 @@ struct ThreadTokenRecord: Decodable {
 }
 
 struct RateLimitSnapshot: Equatable {
+    static func unavailable(diagnostic: QuotaReadDiagnostic) -> Self {
+        .init(primaryPercent: nil, secondaryPercent: nil, primaryResetsAt: nil,
+              secondaryResetsAt: nil, capturedAt: nil, isPrimaryCodexLimit: false, diagnostic: diagnostic)
+    }
     let primaryPercent: Int?
     let secondaryPercent: Int?
     let primaryResetsAt: Int?
@@ -818,6 +843,8 @@ struct RateLimitSnapshot: Equatable {
     var resetCredits: RateLimitResetCredits? = nil
     var planType: String? = nil
     var origin: LocalRateLimitOrigin? = nil
+    var accountID: String? = nil
+    var diagnostic: QuotaReadDiagnostic? = nil
 
     static func preferringAppServer(
         appServer: RateLimitSnapshot?,
@@ -830,7 +857,21 @@ struct RateLimitSnapshot: Equatable {
         // Rollout timestamps describe when a log was written, not when its quota
         // was fetched. Replayed quota values must not replace a live response.
         var result = appServer
-        let sparkCandidates = appServer.sparkWindows + localFiles.sparkWindows
+        if appServer.diagnostic?.failure != nil,
+           let captured = appServer.capturedAt, let localTime = localFiles.capturedAt,
+           localTime > captured, appServer.accountID != nil, appServer.accountID == localFiles.accountID,
+           !localFiles.windows.isEmpty,
+           localFiles.windows.allSatisfy({ local in
+               guard let previous = appServer.windows.first(where: { $0.shortLabel == local.shortLabel }),
+                     let reset = local.resetsAt, let oldReset = previous.resetsAt,
+                     let remaining = local.remainingPercent, let oldRemaining = previous.remainingPercent else { return false }
+               return reset == oldReset && remaining <= oldRemaining
+           }) {
+            result = localFiles
+            result.diagnostic = appServer.diagnostic
+        }
+        let sameIdentity = appServer.accountID != nil && appServer.accountID == localFiles.accountID
+        let sparkCandidates = appServer.sparkWindows + (sameIdentity ? localFiles.sparkWindows : [])
         result.sparkWindows = Dictionary(
             grouping: sparkCandidates,
             by: { $0.shortLabel.lowercased() }
@@ -845,10 +886,10 @@ struct RateLimitSnapshot: Equatable {
             Self.quotaWindowPriority(lhs.shortLabel) < Self.quotaWindowPriority(rhs.shortLabel)
         }
         if result.resetCredits == nil {
-            result.resetCredits = appServer.resetCredits ?? localFiles.resetCredits
+            result.resetCredits = appServer.resetCredits
         }
         if result.planType == nil {
-            result.planType = appServer.planType ?? localFiles.planType
+            result.planType = appServer.planType
         }
         return result
     }
@@ -917,22 +958,10 @@ struct RateLimitSnapshot: Equatable {
     }
 
     private func displayPercent(_ percent: Int?, resetsAt: Int?, now: Date) -> Int? {
-        if let resetsAt, Int(now.timeIntervalSince1970) >= resetsAt {
-            return 100
-        }
-        if let percent, percent >= 99 {
-            return 100
-        }
         return percent
     }
 
     private func displayPercent(_ percent: Int?, resetsAt: Date?, now: Date) -> Int? {
-        if let resetsAt, now >= resetsAt {
-            return 100
-        }
-        if let percent, percent >= 99 {
-            return 100
-        }
         return percent
     }
 
@@ -944,17 +973,13 @@ struct RateLimitSnapshot: Equatable {
     }
 
     private func displayResetDate(_ timestamp: Int?, now: Date) -> Date? {
-        guard let timestamp,
-              Int(now.timeIntervalSince1970) < timestamp else {
+        guard let timestamp else {
             return nil
         }
         return Date(timeIntervalSince1970: TimeInterval(timestamp))
     }
 
     private func displayResetDate(_ date: Date?, now: Date) -> Date? {
-        guard let date, now < date else {
-            return nil
-        }
         return date
     }
 

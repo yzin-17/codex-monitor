@@ -7,6 +7,7 @@ enum ShellError: Error, LocalizedError {
     case timedOut(String, TimeInterval, String)
     case nonZeroExit(String, Int32, String)
     case decodeFailed(String)
+    case rpcFailure(Int, Bool)
 
     var errorDescription: String? {
         switch self {
@@ -20,6 +21,8 @@ enum ShellError: Error, LocalizedError {
             "\(executable) exited with status \(status): \(output)"
         case .decodeFailed(let detail):
             "无法解析命令输出：\(detail)"
+        case .rpcFailure(_, let authentication):
+            authentication ? "需重新登录 Codex" : "Codex 额度协议错误"
         }
     }
 }
@@ -29,17 +32,20 @@ enum Shell {
     /// followed by EOF can shut app-server down while its network read is pending.
     static func runJSONRPC(
         _ executable: String, _ arguments: [String], input: String,
-        responseID: Int, timeout: TimeInterval
+        responseID: Int, timeout: TimeInterval,
+        initializationID: Int? = nil, afterInitialization: String = "",
+        environment: [String: String]? = nil
     ) throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
+        if let environment { process.environment = environment }
         let inputPipe = Pipe()
         let outputPipe = Pipe()
         process.standardInput = inputPipe
         process.standardOutput = outputPipe
         process.standardError = FileHandle.nullDevice
-        try process.run()
+        do { try process.run() } catch { throw ShellError.launchFailed(executable) }
         try? inputPipe.fileHandleForReading.close()
         try? outputPipe.fileHandleForWriting.close()
         let completed = DispatchSemaphore(value: 0)
@@ -52,7 +58,7 @@ enum Shell {
             if process.isRunning {
                 terminateProcessTree(rootPID: process.processIdentifier, signal: SIGTERM)
             }
-            if completed.wait(timeout: .now() + .milliseconds(200)) == .timedOut {
+            if completed.wait(timeout: .now() + .milliseconds(200)) == .timedOut, process.isRunning {
                 terminateProcessTree(rootPID: process.processIdentifier, signal: SIGKILL)
                 _ = completed.wait(timeout: .now() + .milliseconds(300))
             }
@@ -61,6 +67,7 @@ enum Shell {
         try inputPipe.fileHandleForWriting.write(contentsOf: Data(input.utf8))
         let deadline = ProcessInfo.processInfo.systemUptime + timeout
         var pending = Data()
+        var initialized = initializationID == nil
         var bytes = [UInt8](repeating: 0, count: 8_192)
         while ProcessInfo.processInfo.systemUptime < deadline {
             let remaining = deadline - ProcessInfo.processInfo.systemUptime
@@ -70,7 +77,9 @@ enum Shell {
             guard ready > 0 else { break }
             let count = Darwin.read(descriptor.fd, &bytes, bytes.count)
             if count < 0, errno == EINTR { continue }
-            guard count > 0 else { break }
+            guard count > 0 else {
+                throw ShellError.nonZeroExit(executable, process.isRunning ? -1 : process.terminationStatus, "")
+            }
             pending.append(contentsOf: bytes.prefix(count))
             // Bound malformed output without retaining initialization/notification lines.
             guard pending.count <= 1_048_576 else {
@@ -79,8 +88,19 @@ enum Shell {
             while let newline = pending.firstIndex(of: 0x0A) {
                 let line = Data(pending[..<newline])
                 pending.removeSubrange(...newline)
-                if let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
-                   object["id"] as? Int == responseID {
+                guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+                      let id = object["id"] as? Int else { continue }
+                if id == initializationID || id == responseID,
+                   let error = object["error"] as? [String: Any] {
+                    let message = (error["message"] as? String ?? "").lowercased()
+                    let auth = ["401", "403", "unauthorized", "authentication", "not logged", "login", "sign in", "token expired"].contains { message.contains($0) }
+                    throw ShellError.rpcFailure(error["code"] as? Int ?? 0, auth)
+                }
+                if id == initializationID, !initialized {
+                    guard object["result"] != nil else { throw ShellError.decodeFailed("initialize") }
+                    initialized = true
+                    try inputPipe.fileHandleForWriting.write(contentsOf: Data(afterInitialization.utf8))
+                } else if id == responseID, initialized {
                     return String(decoding: line, as: UTF8.self)
                 }
             }

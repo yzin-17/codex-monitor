@@ -27,6 +27,8 @@ struct HUDEntityData: Equatable {
     var costToday: String?
     var cost30d: String?
     var warning: String?
+    var quotaIsHistorical = false
+    var quotaUnavailableReason: String?
     var primaryLabel = "5h"
     var primaryWindow: HUDQuotaSample?
     var weeklyWindow: HUDQuotaSample?
@@ -129,7 +131,9 @@ struct HUDEntityData: Equatable {
             case .automatic: w?.label ?? "自动"
             default: w?.label ?? (metric == .primaryLane ? "第一" : metric == .secondaryLane ? "第二" : "第三")
             }
-            return .init(label: label, value: percent.map { "\(Int((remaining ? $0 : 100 - $0).rounded()))%" } ?? "—", tone: tone(for: percent))
+            if let reset = w?.resetsAt, reset <= now { return .init(label: label, value: "待刷新", tone: .tertiary) }
+            let value = percent.map { "\(Int((remaining ? $0 : 100 - $0).rounded()))%" + (quotaIsHistorical ? "·旧" : "") }
+            return .init(label: label, value: value ?? quotaUnavailableReason ?? "—", tone: quotaIsHistorical ? .warning : tone(for: percent))
         }
         if metric.isPace {
             let n = numeric(metric, now: now)
@@ -137,7 +141,9 @@ struct HUDEntityData: Equatable {
                          value: n.map { String(format: "%+.0f%%", $0) } ?? "—", tone: n.map { $0 > 20 ? .critical : $0 > 0 ? .warning : .healthy } ?? .tertiary)
         }
         if metric.isCountdown || metric.isAbsoluteReset {
-            guard let reset = window(for: metric)?.resetsAt else { return .init(value: "重置 —", tone: .tertiary) }
+            guard let reset = window(for: metric)?.resetsAt else {
+                return .init(value: window(for: metric)?.remaining == nil ? "暂无额度" : "重置未知", tone: .tertiary)
+            }
             let seconds = reset.timeIntervalSince(now)
             guard seconds > 0 else { return .init(value: "待刷新", tone: .tertiary) }
             if metric.isAbsoluteReset {

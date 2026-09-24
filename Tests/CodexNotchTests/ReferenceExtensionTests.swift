@@ -176,7 +176,9 @@ private func referenceCatalog(at now: Date) throws -> SkillCatalogSnapshot {
     let defaults = try #require(UserDefaults(suiteName: suite))
     defer { defaults.removePersistentDomain(forName: suite) }
     let settings = referenceSettings(defaults)
-    let usage = UsageViewModel(settings: settings, previewSnapshot: NotchOverlayController.visualQASnapshot())
+    var usageSnapshot = NotchOverlayController.visualQASnapshot()
+    usageSnapshot.rateLimitAccountID = "synthetic-work"
+    let usage = UsageViewModel(settings: settings, previewSnapshot: usageSnapshot)
     var radarData = CodexRadarSnapshot.disabled
     radarData.state = .ready
     radarData.models = [
@@ -330,6 +332,26 @@ private func referenceCatalog(at now: Date) throws -> SkillCatalogSnapshot {
         }
     }.formStyle(.grouped)
     try await captureCustomization(AnyView(sourcePicker), size: .init(width: 680, height: 180), name: "quota-source-settings", output: output)
+    prefs.value.sourceID = "local"
+    prefs.value.updateActiveLayout(.init(lines: [["weekly", "weeklyCountdown"]]))
+    prefs.value.maximumWidth = 360
+    for (name, reset, failure) in [
+        ("quota-expired", Date().addingTimeInterval(-1) as Date?, nil as QuotaReadFailure?),
+        ("quota-reset-unknown", nil, nil),
+        ("quota-auth-failure", Date().addingTimeInterval(3600), .authentication)
+    ] {
+        var sample = usageSnapshot
+        sample.rateLimitWindows = [.init(id: "primary-7d", shortLabel: "7d", remainingPercent: 72, resetsAt: reset)]
+        sample.secondaryResetsAt = reset
+        sample.secondaryPercent = 72
+        sample.rateLimitCapturedAt = Date()
+        sample.rateLimitDiagnostic = .init(attemptedAt: Date(), failure: failure)
+        previewStore.updateLocalQuota(snapshot: sample, idleRefreshInterval: 60, sourcePreference: .localOnly)
+        let model = UsageViewModel(settings: settings, previewSnapshot: sample)
+        let recoveryHUD = ConfigurableHUDView(preferences: prefs, accounts: previewStore, usage: model,
+            remote: remote, newAPI: newAPI, subAPI: subAPI, settings: settings, publicInsights: model.publicInsights, menuBar: true)
+        try await captureCustomization(AnyView(recoveryHUD), size: .init(width: 360, height: MenuBarMetrics.height()), name: name, output: output)
+    }
     let resumeID = "11111111-1111-4111-8111-111111111111"
     let resume = CLIResumeStore(home: URL(fileURLWithPath: "/synthetic/codex"), defaults: defaults, automatic: false,
         inspector: { _, _, _ in .init(context: .init(threadID: resumeID, path: "/synthetic/log", cwd: "/synthetic/project", model: "gpt-test", effort: "high", sandbox: "workspace-write", approval: "on-request", fileSize: 0, modifiedAt: Date()), identity: .init(workspaceID: "synthetic-workspace", subject: "synthetic-user", label: "合成示例账号"), lastTurnID: "synthetic-turn", quotaPaused: true, lastTurnStatus: "failed", usage: .init(quotas: [.init(id: "primary_window", label: "5h", usedPercent: 100, resetsAt: Date().addingTimeInterval(3600), durationSeconds: 18000)]), checkedAt: Date()) },

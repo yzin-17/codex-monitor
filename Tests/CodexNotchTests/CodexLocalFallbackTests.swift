@@ -66,12 +66,14 @@ private func makeLocalFirstStore(
 private func localQuotaSnapshot(
     weeklyRemaining: Int?,
     capturedAt: Date?,
-    origin: LocalRateLimitOrigin = .appServer
+    origin: LocalRateLimitOrigin = .appServer,
+    accountID: String = "acct-a"
 ) -> UsageSnapshot {
     var snapshot = UsageSnapshot.empty
     snapshot.secondaryPercent = weeklyRemaining
     snapshot.secondaryResetsAt = capturedAt?.addingTimeInterval(604_800)
     snapshot.rateLimitCapturedAt = capturedAt
+    snapshot.rateLimitAccountID = accountID
     snapshot.rateLimitOrigin = capturedAt == nil ? nil : origin
     snapshot.lastUpdated = capturedAt?.addingTimeInterval(30) ?? Date()
     return snapshot
@@ -431,7 +433,7 @@ private func waitForRequests(_ recorder: CodexRequestRecorder, count: Int) async
 
     let settledNow = now.addingTimeInterval(CodexAccountQuotaFallbackPolicy.localIdentitySettleDelay + 2)
     store.updateLocalQuota(
-        snapshot: localQuotaSnapshot(weeklyRemaining: 66, capturedAt: settledNow),
+        snapshot: localQuotaSnapshot(weeklyRemaining: 66, capturedAt: settledNow, accountID: "acct-b"),
         idleRefreshInterval: 60,
         now: settledNow
     )
@@ -452,6 +454,7 @@ private func waitForRequests(_ recorder: CodexRequestRecorder, count: Int) async
         )
     ]
     var next = UsageSnapshot.empty
+    next.rateLimitAccountID = "acct-a"
     next.lastUpdated = capturedAt.addingTimeInterval(90)
     let stabilized = next.stabilizedRateLimits(against: previous)
     #expect(stabilized.rateLimitCapturedAt == capturedAt)
@@ -463,6 +466,28 @@ private func waitForRequests(_ recorder: CodexRequestRecorder, count: Int) async
     #expect(!json.contains("rate_limit_captured_at"))
     #expect(!json.contains("rateLimitOrigin"))
     #expect(!json.contains("rate_limit_origin"))
+}
+
+@Test @MainActor func unreadableIdentityDoesNotPretendToSwitchAccountsOrExposeQuota() async throws {
+    let (store, _, defaults, suite, root) = try makeLocalFirstStore(accountIDs: ["acct-a"], boundAccountIDs: ["acct-a"])
+    defer { defaults.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: root) }
+    let now = Date()
+    store.updateLocalQuota(snapshot: localQuotaSnapshot(weeklyRemaining: 72, capturedAt: now), idleRefreshInterval: 60, sourcePreference: .localOnly, now: now)
+    let account = try #require(store.accounts.first)
+    #expect(store.displayData(for: account, now: now).usesLocalQuota)
+    let auth = root.appendingPathComponent("auth.json")
+    try "{".write(to: auth, atomically: true, encoding: .utf8)
+    store.refreshAll()
+    #expect(store.currentLocalAccountID == "acct-a")
+    #expect(!store.localIdentityReadable)
+    #expect(store.displayData(for: account, now: now).quotaUsage == nil)
+    store.bindCurrentLocalAccount(to: account.id)
+    #expect(store.lastError?.contains("未检测到") == true)
+    try #"{"tokens":{"account_id":"acct-a"}}"#.write(to: auth, atomically: true, encoding: .utf8)
+    store.refreshAll()
+    #expect(store.localIdentityReadable)
+    #expect(store.localIdentityChangedAt == nil)
+    #expect(store.displayData(for: account, now: now).usesLocalQuota)
 }
 
 @Test func remoteFailureOrMissingWeeklyUsesMatchedLocalQuota() {

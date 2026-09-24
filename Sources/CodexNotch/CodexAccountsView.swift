@@ -29,10 +29,16 @@ struct CodexAccountsSettingsView: View {
                     HStack {
                         Toggle(account.label, isOn: Binding(get: { account.enabled }, set: { store.setEnabled($0, id: account.id) }))
                         if account.verifiedAt != nil { Text("官方额度接口").font(.caption).foregroundStyle(.secondary) }
-                        Button("重新验证") { store.refresh(id: account.id, interactive: true) }
-                            .disabled(!store.monitoringEnabled || !account.enabled)
+                        Button("刷新额度") { store.refresh(id: account.id, interactive: true) }
+                            .disabled(!store.monitoringEnabled || !account.enabled || store.states[account.id]?.isRefreshing == true)
+                        CodexReauthenticationButton(store: store, account: account)
                         Button("编辑") { draft = account; token = ""; error = nil; editing = true }
                         Button("删除", role: .destructive) { deleting = account }
+                    }
+                    if store.states[account.id]?.isRefreshing == true { ProgressView("正在刷新额度…").controlSize(.small) }
+                    else if let error = store.states[account.id]?.error { Text(error).font(.caption).foregroundStyle(.orange) }
+                    else if let captured = store.states[account.id]?.usage?.capturedAt {
+                        Text("额度刷新成功 · \(captured.formatted(date: .omitted, time: .standard))").font(.caption).foregroundStyle(.secondary)
                     }
                     HStack(spacing: 8) {
                         Text("本机账号")
@@ -192,7 +198,7 @@ struct CodexAccountsPanel: View {
                     ForEach(store.accounts) { Text($0.label).tag($0.id.uuidString) }
                 }.labelsHidden().frame(width: 190)
                 Spacer()
-                Button("刷新") { store.refreshAll(interactive: true) }.disabled(!store.monitoringEnabled)
+                Button("刷新额度") { store.refreshAll(interactive: true) }.disabled(!store.monitoringEnabled)
                 Button("管理", action: onSettings)
             }
             if !store.monitoringEnabled { Text("Codex 账号额度监测未启用；原网关账号不受影响。").font(.caption).foregroundStyle(.secondary) }
@@ -213,9 +219,13 @@ struct CodexAccountsPanel: View {
                 if display.isRefreshing { ProgressView().controlSize(.small) }
                 if !account.enabled { Text("已关闭").foregroundStyle(.secondary) }
                 Spacer()
-                Button("验证") { store.refresh(id: account.id, interactive: true) }.disabled(!store.monitoringEnabled || !account.enabled)
+                Button("刷新额度") { store.refresh(id: account.id, interactive: true) }.disabled(!store.monitoringEnabled || !account.enabled || display.isRefreshing)
+                CodexReauthenticationButton(store: store, account: account)
             }
             if let usage = display.quotaUsage {
+                if display.usesLocalQuota, let warning = display.localWarning {
+                    Text(warning).foregroundStyle(.orange).font(.caption)
+                }
                 if let error = display.remoteError, !display.usesLocalQuota {
                     Text("旧数据 · \(error)").foregroundStyle(.orange).font(.caption)
                 }
@@ -223,8 +233,11 @@ struct CodexAccountsPanel: View {
                     HStack {
                         Text(quota.label).frame(width: 110, alignment: .leading)
                         ProgressView(value: quota.remainingPercent, total: 100)
-                        Text("剩余 \(Int(quota.remainingPercent.rounded()))%").monospacedDigit().frame(width: 85, alignment: .trailing)
-                        if let date = quota.resetsAt { Text(date, style: .relative).font(.caption).foregroundStyle(.secondary).frame(width: 95) }
+                        Text((quota.resetsAt ?? .distantFuture) <= Date() ? "待刷新" : "剩余 \(Int(quota.remainingPercent.rounded()))%").monospacedDigit().frame(width: 85, alignment: .trailing)
+                        if let date = quota.resetsAt {
+                            if date <= Date() { Text("窗口已到期").font(.caption).foregroundStyle(.secondary) }
+                            else { Text(date, style: .relative).font(.caption).foregroundStyle(.secondary).frame(width: 95) }
+                        } else { Text("重置未知").font(.caption).foregroundStyle(.secondary) }
                     }
                 }
                 Text("额度数据源：\(display.quotaSource?.displayLabel ?? "未知") · \(display.usesLocalQuota ? "采集" : "读取")于 \(usage.capturedAt.formatted(date: .abbreviated, time: .shortened))")
@@ -233,7 +246,7 @@ struct CodexAccountsPanel: View {
                 Text(store.quotaSourcePreference == .remoteOnly ? "等待账号身份稳定" : "等待首次本机额度读取")
                     .foregroundStyle(.secondary)
             } else if display.isCurrentLocalAccount, store.quotaSourcePreference == .localOnly {
-                Text("本机额度不可用").foregroundStyle(.secondary)
+                Text(display.localWarning ?? "本机额度不可用").foregroundStyle(.secondary)
             } else if let error = display.remoteError { Text(error).foregroundStyle(.orange).font(.caption) }
             else { Text(account.enabled && store.monitoringEnabled ? "等待读取" : "未读取").foregroundStyle(.secondary) }
             if let credits = display.remoteCredits { Text("Credits：\(credits)").monospacedDigit() }
@@ -243,5 +256,103 @@ struct CodexAccountsPanel: View {
             }
         }.font(.system(size: 11)).padding(12)
             .background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
+    }
+}
+
+private struct CodexReauthenticationButton: View {
+    @ObservedObject var store: CodexAccountsStore
+    let account: CodexAccount
+    @StateObject private var flow = CodexReauthenticationFlow()
+
+    var body: some View {
+        Button("重新登录") {
+            flow.start {
+                let credential = try await CodexBrowserLoginClient().login { url in
+                    flow.message = "请在浏览器中授权同一账号，最长等待 5 分钟…"
+                    return NSWorkspace.shared.open(url)
+                }
+                try Task.checkCancellation()
+                flow.message = "正在验证新凭据…"
+                try await store.reauthenticate(account, credential: credential)
+            }
+        }
+        .modifier(CodexReauthenticationPresentation(flow: flow, accountLabel: account.label, onCancel: cancel))
+        .onDisappear(perform: cancel)
+    }
+
+    private func cancel() {
+        flow.cancel()
+        store.cancelVerification(id: account.id)
+    }
+}
+
+@MainActor final class CodexReauthenticationFlow: ObservableObject {
+    @Published var presented = false
+    @Published private(set) var busy = false
+    @Published var message = ""
+    private var operation: Task<Void, Never>?
+    private var generation: UUID?
+
+    func start(_ action: @escaping @MainActor () async throws -> Void) {
+        cancel()
+        let ticket = UUID()
+        generation = ticket
+        message = "正在准备独立登录环境…"
+        busy = true
+        presented = true
+        operation = Task { @MainActor in
+            do {
+                try await action()
+                try Task.checkCancellation()
+                guard generation == ticket else { return }
+                busy = false
+                presented = false
+            } catch is CancellationError {
+                guard generation == ticket else { return }
+                busy = false
+                presented = false
+            } catch {
+                guard generation == ticket else { return }
+                message = (error as? CodexAccountError)?.errorDescription
+                    ?? (error as? CodexBrowserLoginError)?.errorDescription ?? "重新登录失败，请重试。"
+                busy = false
+            }
+            operation = nil
+        }
+    }
+
+    func cancel() {
+        generation = nil
+        operation?.cancel()
+        operation = nil
+        busy = false
+        presented = false
+    }
+}
+
+struct CodexReauthenticationPresentation: ViewModifier {
+    @ObservedObject var flow: CodexReauthenticationFlow
+    let accountLabel: String
+    let onCancel: () -> Void
+
+    func body(content: Content) -> some View {
+        content.sheet(isPresented: $flow.presented, onDismiss: onCancel) {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("重新登录 · \(accountLabel)").font(.headline)
+                Text(flow.message).fixedSize(horizontal: false, vertical: true)
+                if flow.busy { ProgressView().controlSize(.small) }
+                HStack {
+                    Spacer()
+                    Button(flow.busy ? "取消" : "关闭", action: onCancel)
+                        .keyboardShortcut(.cancelAction)
+                }
+            }
+            .padding(24)
+            .frame(width: 400, alignment: .leading)
+            .foregroundStyle(MonitorTheme.textPrimary)
+            .background(Color(white: 0.1))
+            .preferredColorScheme(.dark)
+            .interactiveDismissDisabled(flow.busy)
+        }
     }
 }

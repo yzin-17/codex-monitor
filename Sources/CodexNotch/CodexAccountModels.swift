@@ -73,6 +73,7 @@ struct CodexAccountDisplayData: Equatable, Sendable {
     var remoteError: String?
     var isRefreshing: Bool
     var isCurrentLocalAccount: Bool
+    var localWarning: String? = nil
 
     var usesLocalQuota: Bool { quotaSource?.usesLocalQuota == true }
 }
@@ -133,7 +134,7 @@ enum CodexAccountError: Error, LocalizedError, Sendable, Equatable {
         case .invalidCredential: "需要 Codex OAuth Access Token；不接受 API Key、Cookie 或完整请求头。"
         case .invalidResponse: "Codex 返回了无法识别的额度数据；未将此结果视为验证成功。"
         case .tooLarge: "文件或响应超过读取上限。"
-        case .http(let code): code == 401 || code == 403 ? "HTTP \(code)：凭据过期或无读取权限，请在 Codex 重新登录后导入。" : "Codex 验证失败（HTTP \(code)）。"
+        case .http(let code): code == 401 || code == 403 ? "HTTP \(code)：凭据过期或无读取权限，请点击“重新登录”。" : "Codex 验证失败（HTTP \(code)）。"
         case .redirect: "为保护凭据，已拒绝 HTTP 重定向。"
         case .keychain: "钥匙串操作失败，未保存账户变更。"
         case .accountMismatch: "返回的工作区与所选 Account ID 不一致，结果未保存。"

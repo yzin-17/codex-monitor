@@ -117,6 +117,7 @@ func rateLimitSourceRetainsLastSuccessDuringFailedRefreshAndRetryBackoff() throw
     #!/bin/sh
     cd "$(dirname "$0")"
     read -r initialize
+    printf '%s\\n' '{"id":1,"result":{}}'
     read -r initialized
     read -r request
     printf 'call\\n' >> calls
@@ -124,6 +125,7 @@ func rateLimitSourceRetainsLastSuccessDuringFailedRefreshAndRetryBackoff() throw
     """.write(to: executable, atomically: true, encoding: .utf8)
     try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
     let now = Date()
+    try #"{"tokens":{"account_id":"acct-a"}}"#.write(to: root.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
     let reset = Int(now.timeIntervalSince1970) + 604_800
     let rollout = root.appendingPathComponent("quota.jsonl")
     let iso = ISO8601DateFormatter()
@@ -165,8 +167,92 @@ func rateLimitSourceRetainsLastSuccessDuringFailedRefreshAndRetryBackoff() throw
     #expect(localRecord.secondaryPercent == 80)
     #expect(localRecord.rateLimitOrigin == .localRecords)
     #expect(try String(contentsOf: calls, encoding: .utf8).split(separator: "\n").count == 2)
+    try #"{"timestamp":"\#(iso.string(from: now.addingTimeInterval(46)))","type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","primary":{"used_percent":40,"window_minutes":10080,"resets_at":\#(reset)}}}}"#
+        .write(to: rollout, atomically: true, encoding: .utf8)
+    // A newer log with an identical reset still does not prove account ownership.
+    #expect(try read(at: 50).secondaryPercent == 78)
     try writeResponse(remaining: 77, reset: reset)
     #expect(try read(at: 77).secondaryPercent == 77)
     try writeResponse(remaining: 100, reset: reset + 604_800)
     #expect(try read(at: 108).secondaryPercent == 100)
+    try "".write(to: response, atomically: true, encoding: .utf8)
+    let failed = try read(at: 139)
+    #expect(failed.rateLimitDiagnostic?.failure == .processExited)
+    #expect(failed.rateLimitCapturedAt == now.addingTimeInterval(108))
+    let old = try read(at: 800)
+    #expect(!old.canDisplayQuotaHistory(accountID: "acct-a", now: now.addingTimeInterval(800)))
+    try #"{"tokens":{"account_id":"acct-b"}}"#.write(to: root.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+    let switched = try read(at: 801)
+    #expect(switched.secondaryPercent == nil)
+    #expect(switched.rateLimitAccountID == nil)
+}
+
+@Test func quotaHandshakeWaitsBeforeSendingRead() throws {
+    let script = """
+    read -r initialize
+    sleep 0.1
+    printf '%s\\n' '{"id":1,"result":{}}'
+    read -r initialized
+    read -r request
+    test "$initialized" = initialized || exit 7
+    test "$request" = quota || exit 8
+    printf '%s\\n' '{"id":2,"result":{}}'
+    """
+    let result = try Shell.runJSONRPC("/bin/sh", ["-c", script], input: "initialize\n", responseID: 2,
+                                      timeout: 2, initializationID: 1, afterInitialization: "initialized\nquota\n")
+    #expect(result.contains("result"))
+}
+
+@Test func quotaRPCFailureIsClassifiedWithoutLeakingServerMessage() throws {
+    for (message, auth) in [("401 unauthorized secret-token", true), ("unsupported method secret-token", false)] {
+        do {
+            _ = try Shell.runJSONRPC("/bin/sh", ["-c", "read -r x; printf '%s\\n' '{\"id\":1,\"error\":{\"code\":-32000,\"message\":\"\(message)\"}}'"],
+                                    input: "initialize\n", responseID: 2, timeout: 2, initializationID: 1)
+            Issue.record("错误响应必须失败")
+        } catch ShellError.rpcFailure(let code, let authentication) {
+            #expect(code == -32000)
+            #expect(authentication == auth)
+            #expect(!ShellError.rpcFailure(code, authentication).localizedDescription.contains("secret-token"))
+        }
+    }
+}
+
+@Test func quotaFailureCacheSelectsOnlyCorrelatedConsumption() {
+    var cached = weeklyQuota(78, at: 2_000)
+    cached.accountID = "acct-a"
+    cached.diagnostic = .init(attemptedAt: Date(timeIntervalSince1970: 2_040), failure: .timedOut, usedCache: true)
+    var local = weeklyQuota(80, at: 2_030)
+    local.accountID = "acct-a"
+    #expect(RateLimitSnapshot.preferringAppServer(appServer: cached, localFiles: local).secondaryPercent == 78)
+    local = weeklyQuota(76, at: 2_030)
+    local.accountID = "acct-a"
+    #expect(RateLimitSnapshot.preferringAppServer(appServer: cached, localFiles: local).capturedAt == local.capturedAt)
+    local.accountID = "acct-b"
+    #expect(RateLimitSnapshot.preferringAppServer(appServer: cached, localFiles: local).secondaryPercent == 78)
+}
+
+@Test func quotaExpiryPreservesRawValuesAndMissingResetStaysUnknown() {
+    let now = Date(timeIntervalSince1970: 20_000)
+    let expired = weeklyQuota(99, at: 2_000)
+    #expect(expired.displayWindows(now: now).first?.remainingPercent == 99)
+    #expect(expired.displayWindows(now: now).first?.resetsAt == Date(timeIntervalSince1970: 10_000))
+    var data = HUDEntityData()
+    data.weeklyWindow = .init(remaining: 99, resetsAt: Date(timeIntervalSince1970: 10_000), duration: 604_800, label: "7d")
+    #expect(data.display(.weekly, remaining: true, now: now).value == "待刷新")
+    var previous = UsageSnapshot.empty
+    previous.rateLimitAccountID = "acct-a"
+    previous.rateLimitCapturedAt = now
+    previous.rateLimitWindows = expired.windows
+    var next = previous
+    next.rateLimitWindows = [.init(id: "primary-7d", shortLabel: "7d", remainingPercent: 99, resetsAt: nil)]
+    #expect(next.stabilizedRateLimits(against: previous).rateLimitWindows[0].resetsAt == nil)
+    next.rateLimitWindows = []
+    next.rateLimitAccountID = "acct-b"
+    #expect(next.stabilizedRateLimits(against: previous).rateLimitWindows.isEmpty)
+}
+
+@Test func quotaParserAcceptsMultiBucketWithoutLegacyBucket() {
+    let store = CodexUsageStore(appServerExecutable: "/missing/codex")
+    let result = store.parseAppServerRateLimits(output: #"{"id":2,"result":{"rateLimitsByLimitId":{"codex":{"primary":{"usedPercent":1,"windowDurationMins":10080,"resetsAt":1900000000}}}}}"#, now: Date())
+    #expect(result?.secondaryPercent == 99)
 }

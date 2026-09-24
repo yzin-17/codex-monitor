@@ -149,8 +149,8 @@ runner.check(
     "expanded detail frame height should equal detail height"
 )
 
-runner.check(AppInfo.version == "0.4.6", "app info should expose version 0.4.6")
-runner.check(AppInfo.displayVersion == "0.4.6", "app info should fall back to source version when bundle version is unavailable")
+runner.check(AppInfo.version == "0.4.7", "app info should expose version 0.4.7")
+runner.check(AppInfo.displayVersion == "0.4.7", "app info should fall back to source version when bundle version is unavailable")
 
 let resetCreditsNow = Date(timeIntervalSince1970: 1_784_500_000)
 let appServerResetCreditsJSON = Data(#"""
@@ -533,6 +533,8 @@ let previousRateLimitSnapshot = UsageSnapshot(
     secondaryPercent: 66,
     primaryResetsAt: Date(timeIntervalSince1970: 2_000),
     secondaryResetsAt: Date(timeIntervalSince1970: 3_000),
+    rateLimitCapturedAt: Date(timeIntervalSince1970: 1_000),
+    rateLimitAccountID: "synthetic-account",
     resetCredits: RateLimitResetCredits(
         availableCount: 3,
         credits: [RateLimitResetCredit(id: "previous", expiresAt: Date(timeIntervalSince1970: 4_000))],
@@ -551,6 +553,7 @@ let missingRateLimitSnapshot = UsageSnapshot(
     secondaryPercent: nil,
     primaryResetsAt: nil,
     secondaryResetsAt: nil,
+    rateLimitAccountID: "synthetic-account",
     usage24h: 4,
     usage7d: 5,
     usage30d: 6,
@@ -598,8 +601,8 @@ let expiredRateLimitSnapshot = RateLimitSnapshot(
     capturedAt: rateLimitNow,
     isPrimaryCodexLimit: true
 )
-runner.check(expiredRateLimitSnapshot.primaryDisplayPercent(now: rateLimitNow) == 100, "expired 5h quota should display as restored")
-runner.check(expiredRateLimitSnapshot.primaryDisplayResetDate(now: rateLimitNow) == nil, "expired 5h reset time should be hidden")
+runner.check(expiredRateLimitSnapshot.primaryDisplayPercent(now: rateLimitNow) == 42, "到期额度应保留原始值")
+runner.check(expiredRateLimitSnapshot.primaryDisplayResetDate(now: rateLimitNow) == Date(timeIntervalSince1970: 1_900), "到期窗口应保留时间供界面显示待刷新")
 runner.check(expiredRateLimitSnapshot.secondaryDisplayResetDate(now: rateLimitNow) == Date(timeIntervalSince1970: 2_500), "future 7d reset time should be preserved")
 let cachedAppServerRateLimits = RateLimitSnapshot(
     primaryPercent: nil,

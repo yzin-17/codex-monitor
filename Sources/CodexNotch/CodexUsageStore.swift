@@ -47,6 +47,7 @@ final class CodexUsageStore: @unchecked Sendable {
     private var recentPathsCache: RecentPathsCache?
     private var recentTaskPathsCache: RecentPathsCache?
     private var appServerRateLimitCache: AppServerRateLimitCache?
+    private var quotaAccountID: String?
     private var periodUsageCache: PeriodUsageCache?
     private var rateLimitFileCache: [String: FileValueCache<RateLimitSnapshot>] = [:]
     private var periodUsageBatchCache: [Int: PeriodUsageBatchCache] = [:]
@@ -137,6 +138,16 @@ final class CodexUsageStore: @unchecked Sendable {
         taskHistoryRange: TaskHistoryRange = .threeDays,
         now: Date = Date()
     ) -> UsageSnapshot {
+        let identity = CodexLocalAccountIdentity.readAccountID(from: codexDirectory.appendingPathComponent("auth.json"))
+        cacheLock.lock()
+        if identity != quotaAccountID || rateLimitSource != .remoteOnly && fastCache?.rateLimits.accountID != identity {
+            fastCache = nil
+            if let identity {
+                if identity != quotaAccountID { appServerRateLimitCache = nil }
+                quotaAccountID = identity
+            }
+        }
+        cacheLock.unlock()
         if !bypassFastCache,
            !includePeriodUsage,
            let cachedSnapshot = cachedFastSnapshot(
@@ -198,6 +209,8 @@ final class CodexUsageStore: @unchecked Sendable {
                 rateLimitWindows: rateLimits.displayWindows(now: now),
                 rateLimitCapturedAt: rateLimits.capturedAt,
                 rateLimitOrigin: rateLimits.origin,
+                rateLimitAccountID: rateLimits.accountID,
+                rateLimitDiagnostic: rateLimits.diagnostic,
                 resetCredits: rateLimits.resetCredits,
                 usage24h: usage.day,
                 usage7d: usage.week,
@@ -214,7 +227,21 @@ final class CodexUsageStore: @unchecked Sendable {
                 errorMessage: nil
             )
         } catch {
-            return errorSnapshot(error, now: now)
+            // Quota collection does not depend on the conversation database being readable.
+            var snapshot = errorSnapshot(error, now: now)
+            let limits = loadRateLimits(from: [], source: rateLimitSource, now: now)
+            snapshot.primaryPercent = limits.primaryDisplayPercent(now: now)
+            snapshot.secondaryPercent = limits.secondaryDisplayPercent(now: now)
+            snapshot.primaryResetsAt = limits.primaryDisplayResetDate(now: now)
+            snapshot.secondaryResetsAt = limits.secondaryDisplayResetDate(now: now)
+            snapshot.rateLimitWindows = limits.displayWindows(now: now)
+            snapshot.rateLimitCapturedAt = limits.capturedAt
+            snapshot.rateLimitOrigin = limits.origin
+            snapshot.rateLimitAccountID = limits.accountID
+            snapshot.rateLimitDiagnostic = limits.diagnostic
+            snapshot.resetCredits = limits.resetCredits
+            snapshot.sparkQuotaWindows = limits.displaySparkWindows(now: now)
+            return snapshot
         }
     }
 
@@ -321,6 +348,8 @@ final class CodexUsageStore: @unchecked Sendable {
             rateLimitWindows: cache.rateLimits.displayWindows(now: now),
             rateLimitCapturedAt: cache.rateLimits.capturedAt,
             rateLimitOrigin: cache.rateLimits.origin,
+            rateLimitAccountID: cache.rateLimits.accountID,
+            rateLimitDiagnostic: cache.rateLimits.diagnostic,
             resetCredits: cache.rateLimits.resetCredits,
             usage24h: usage.day,
             usage7d: usage.week,
@@ -2436,14 +2465,30 @@ final class CodexUsageStore: @unchecked Sendable {
     }
 
     private func loadRateLimits(from paths: [String], source: RateLimitSourcePreference, now: Date) -> RateLimitSnapshot {
+        let identity = CodexLocalAccountIdentity.readAccountID(from: codexDirectory.appendingPathComponent("auth.json"))
+        let local = loadLatestRateLimits(from: paths)
         switch source {
         case .localFirst, .localOnly:
-            RateLimitSnapshot.preferringAppServer(
-                appServer: loadAppServerRateLimits(now: now),
-                localFiles: loadLatestRateLimits(from: paths)
-            )
+            let server = loadAppServerRateLimits(now: now, identity: identity)
+            // Rollouts do not attest account identity. Matching reset timestamps alone
+            // cannot assign their observations to the currently authenticated account.
+            var result = RateLimitSnapshot.preferringAppServer(appServer: server, localFiles: local)
+            cacheLock.lock()
+            result.diagnostic = server?.diagnostic ?? appServerRateLimitCache?.diagnostic
+            cacheLock.unlock()
+            if result.accountID == nil {
+                result = .unavailable(diagnostic: result.diagnostic ?? .init(attemptedAt: now, failure: .identityUnavailable))
+            }
+            if identity == nil {
+                result = .unavailable(diagnostic: .init(attemptedAt: now, failure: .identityUnavailable))
+            }
+            let after = CodexLocalAccountIdentity.readAccountID(from: codexDirectory.appendingPathComponent("auth.json"))
+            guard identity == after else {
+                return .unavailable(diagnostic: .init(attemptedAt: now, failure: .identityUnavailable))
+            }
+            return result
         case .remoteOnly:
-            loadLatestRateLimits(from: paths)
+            return local
         }
     }
 
@@ -2503,43 +2548,63 @@ final class CodexUsageStore: @unchecked Sendable {
         }
     }
 
-    private func loadAppServerRateLimits(now: Date) -> RateLimitSnapshot? {
+    private func loadAppServerRateLimits(now: Date, identity: String?) -> RateLimitSnapshot? {
         cacheLock.lock()
         let cached = appServerRateLimitCache
         cacheLock.unlock()
 
-        if let cached {
+        guard let identity else { return nil }
+        if let cached, cached.lastSuccessfulSnapshot?.accountID == identity || cached.lastSuccessfulSnapshot == nil {
             switch cached.state {
             case .success(let snapshot) where now.timeIntervalSince(cached.createdAt) < UsageScanPolicy.appServerSuccessCacheTTL:
-                return snapshot
+                var result = snapshot
+                result.diagnostic = .init(attemptedAt: cached.createdAt, usedCache: true)
+                return result
             case .failure where now.timeIntervalSince(cached.createdAt) < UsageScanPolicy.appServerFailureCacheTTL:
-                return cached.lastSuccessfulSnapshot
+                var result = cached.lastSuccessfulSnapshot
+                result?.diagnostic = cached.diagnostic
+                return result
             default:
                 break
             }
         }
 
-        guard let appServerExecutable,
-              FileManager.default.fileExists(atPath: appServerExecutable) else {
-            cacheAppServerRateLimits(.failure, now: now)
-            return cached?.lastSuccessfulSnapshot
+        func failed(_ reason: QuotaReadFailure) -> RateLimitSnapshot? {
+            cacheAppServerRateLimits(.failure, now: now, failure: reason)
+            var previous = cached?.lastSuccessfulSnapshot
+            guard previous?.accountID == identity else { return nil }
+            previous?.diagnostic = .init(attemptedAt: now, failure: reason, usedCache: true)
+            return previous
         }
-
-        let output = try? Shell.runJSONRPC(
-            appServerExecutable, ["app-server", "--stdio"],
-            input: appServerRateLimitInput(), responseID: 2, timeout: 4
-        )
-        guard let output,
-              let snapshot = parseAppServerRateLimits(output: output, now: now) else {
-            cacheAppServerRateLimits(.failure, now: now)
-            return cached?.lastSuccessfulSnapshot
-        }
-
-        cacheAppServerRateLimits(.success(snapshot), now: now)
-        return snapshot
+        guard let appServerExecutable, FileManager.default.fileExists(atPath: appServerExecutable) else { return failed(.runtimeMissing) }
+        guard FileManager.default.isExecutableFile(atPath: appServerExecutable) else { return failed(.runtimeNotExecutable) }
+        do {
+            let messages = appServerRateLimitInput().split(separator: "\n").map(String.init)
+            var environment = ProcessInfo.processInfo.environment
+            for key in ["OPENAI_API_KEY", "CODEX_API_KEY", "CODEX_ACCESS_TOKEN", "CHATGPT_ACCESS_TOKEN", "OPENAI_BASE_URL"] { environment[key] = nil }
+            environment["CODEX_HOME"] = codexDirectory.path
+            let output = try Shell.runJSONRPC(
+                appServerExecutable, ["-c", "cli_auth_credentials_store=\"file\"", "app-server"], input: messages[0] + "\n",
+                responseID: 2, timeout: 12, initializationID: 1,
+                afterInitialization: messages.dropFirst().joined(separator: "\n") + "\n",
+                environment: environment
+            )
+            guard var snapshot = parseAppServerRateLimits(output: output, now: now) else { return failed(.invalidResponse) }
+            guard identity == CodexLocalAccountIdentity.readAccountID(from: codexDirectory.appendingPathComponent("auth.json")) else {
+                return failed(.identityUnavailable)
+            }
+            snapshot.accountID = identity
+            snapshot.diagnostic = .init(attemptedAt: now)
+            cacheAppServerRateLimits(.success(snapshot), now: now)
+            return snapshot
+        } catch ShellError.launchFailed { return failed(.launchFailed) }
+        catch ShellError.timedOut { return failed(.timedOut) }
+        catch ShellError.nonZeroExit { return failed(.processExited) }
+        catch ShellError.rpcFailure(_, let auth) { return failed(auth ? .authentication : .protocolError) }
+        catch { return failed(.invalidResponse) }
     }
 
-    private func cacheAppServerRateLimits(_ state: AppServerRateLimitCache.State, now: Date) {
+    private func cacheAppServerRateLimits(_ state: AppServerRateLimitCache.State, now: Date, failure: QuotaReadFailure? = nil) {
         cacheLock.lock()
         let lastSuccessfulSnapshot: RateLimitSnapshot?
         switch state {
@@ -2547,7 +2612,8 @@ final class CodexUsageStore: @unchecked Sendable {
         case .failure: lastSuccessfulSnapshot = appServerRateLimitCache?.lastSuccessfulSnapshot
         }
         appServerRateLimitCache = AppServerRateLimitCache(
-            createdAt: now, state: state, lastSuccessfulSnapshot: lastSuccessfulSnapshot
+            createdAt: now, state: state, lastSuccessfulSnapshot: lastSuccessfulSnapshot,
+            diagnostic: .init(attemptedAt: now, failure: failure, usedCache: failure != nil && lastSuccessfulSnapshot != nil)
         )
         cacheLock.unlock()
     }
@@ -2569,7 +2635,7 @@ final class CodexUsageStore: @unchecked Sendable {
                 continue
             }
 
-            let snapshot = result.rateLimitsByLimitId?["codex"] ?? result.rateLimits
+            guard let snapshot = result.rateLimitsByLimitId?["codex"] ?? result.rateLimits else { continue }
             guard snapshot.limitId == nil || snapshot.limitId == "codex" else {
                 continue
             }
@@ -3079,6 +3145,7 @@ private struct AppServerRateLimitCache {
     let createdAt: Date
     let state: State
     let lastSuccessfulSnapshot: RateLimitSnapshot?
+    let diagnostic: QuotaReadDiagnostic
 
     enum State {
         case success(RateLimitSnapshot)
@@ -3114,7 +3181,7 @@ private struct AppServerRateLimitResponse: Decodable {
 }
 
 private struct AppServerRateLimitResult: Decodable {
-    let rateLimits: AppServerRateLimitSnapshot
+    let rateLimits: AppServerRateLimitSnapshot?
     let rateLimitsByLimitId: [String: AppServerRateLimitSnapshot]?
 }
 

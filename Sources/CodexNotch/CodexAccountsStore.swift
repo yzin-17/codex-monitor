@@ -85,6 +85,7 @@ struct CodexAccountState {
     @Published private(set) var accounts: [CodexAccount]
     @Published private(set) var states: [UUID: CodexAccountState] = [:]
     @Published private(set) var currentLocalAccountID: String?
+    @Published private(set) var localIdentityReadable = false
     @Published private(set) var localIdentityChangedAt: Date?
     @Published private(set) var localQuotaAvailability: CodexLocalQuotaAvailability = .unknown
     @Published private(set) var quotaSourcePreference: RateLimitSourcePreference = .localFirst
@@ -102,11 +103,11 @@ struct CodexAccountState {
     private var timer: Timer?
     private var localIdentityWatcher: CodexFileWatcher?
     private var localIdentityPollTimer: Timer?
-    private var lastLocalAuthModificationDate: Date?
     private var localIdentityInitialized = false
     private var hasReceivedLocalQuotaSnapshot = false
     private var localQuotaUsage: CodexAccountUsage?
     private var localQuotaOrigin: LocalRateLimitOrigin?
+    private var localQuotaSnapshot: UsageSnapshot?
     private var localIdleRefreshInterval: TimeInterval = 6
     private let automaticStart: Bool
     init(defaults: UserDefaults = .standard, vault: CodexAccountVault = .keychain,
@@ -160,6 +161,15 @@ struct CodexAccountState {
         persist(); lastError = nil; pump()
     }
     func cancelVerification(id: UUID) { verifications[id] = nil }
+    func reauthenticate(_ account: CodexAccount, credential: CodexCredentialImport) async throws {
+        guard let current = accounts.first(where: { $0.id == account.id }), current.revision == account.revision else {
+            throw CodexAccountError.superseded
+        }
+        guard !account.workspaceID.isEmpty, credential.workspaceID == account.workspaceID else {
+            throw CodexAccountError.accountMismatch
+        }
+        try await verifyAndSave(account, token: credential.accessToken)
+    }
     func remove(_ account: CodexAccount) throws {
         try vault.delete(account)
         cancelVerification(id: account.id) // 失败时不丢失可恢复的账户配置。
@@ -173,8 +183,8 @@ struct CodexAccountState {
         if enabled { refresh(id: id) }; pump()
     }
     func bindCurrentLocalAccount(to id: UUID) {
-        refreshLocalIdentity(force: true)
-        guard let currentLocalAccountID, !currentLocalAccountID.isEmpty else {
+        refreshLocalIdentity()
+        guard localIdentityReadable, let currentLocalAccountID, !currentLocalAccountID.isEmpty else {
             lastError = "未检测到当前本机 Codex 账号，无法绑定。"
             return
         }
@@ -211,7 +221,9 @@ struct CodexAccountState {
         quotaSourcePreference = sourcePreference
         hasReceivedLocalQuotaSnapshot = true
         localIdleRefreshInterval = idleRefreshInterval.isFinite ? max(1, idleRefreshInterval) : 6
-        localQuotaUsage = Self.localQuotaUsage(from: snapshot)
+        localQuotaSnapshot = snapshot
+        localQuotaUsage = snapshot.rateLimitAccountID != nil && snapshot.rateLimitAccountID == currentLocalAccountID
+            ? Self.localQuotaUsage(from: snapshot) : nil
         localQuotaOrigin = snapshot.rateLimitOrigin
         updateLocalQuotaAvailability(now: now, triggerImmediateFallback: true)
         if previousPreference != sourcePreference,
@@ -229,7 +241,7 @@ struct CodexAccountState {
         let localAvailability = matchesCurrent
             ? resolvedLocalQuotaAvailability(now: now)
             : .unavailable
-        let identitySettled = CodexAccountQuotaFallbackPolicy.localIdentityIsSettled(
+        let identitySettled = localIdentityReadable && CodexAccountQuotaFallbackPolicy.localIdentityIsSettled(
             changedAt: localIdentityChangedAt,
             now: now
         )
@@ -244,15 +256,18 @@ struct CodexAccountState {
                 } else if localAvailability == .unknown {
                     quotaUsage = nil
                     quotaSource = nil
-                } else if monitoringEnabled {
+                } else if monitoringEnabled, remote != nil {
                     quotaUsage = remote
                     quotaSource = remote == nil ? nil : .remoteFallback
+                } else if localQuotaSnapshot?.canDisplayQuotaHistory(accountID: currentLocalAccountID, now: now) == true {
+                    quotaUsage = localQuotaUsage
+                    quotaSource = localQuotaSource
                 } else {
                     quotaUsage = nil
                     quotaSource = nil
                 }
             case .localOnly:
-                if localAvailability == .available, let localQuotaUsage {
+                if localAvailability != .unknown, identitySettled, localQuotaSnapshot?.canDisplayQuotaHistory(accountID: currentLocalAccountID, now: now) == true, let localQuotaUsage {
                     quotaUsage = localQuotaUsage
                     quotaSource = localQuotaSource
                 } else {
@@ -284,7 +299,8 @@ struct CodexAccountState {
             remoteCapturedAt: remote?.capturedAt,
             remoteError: state?.error,
             isRefreshing: state?.isRefreshing == true,
-            isCurrentLocalAccount: matchesCurrent
+            isCurrentLocalAccount: matchesCurrent,
+            localWarning: localQuotaSnapshot?.quotaWarning(now: now, maximumAge: max(120, localIdleRefreshInterval * 2))
         )
     }
 
@@ -381,7 +397,7 @@ struct CodexAccountState {
     }
 
     private func resolvedLocalQuotaAvailability(now: Date) -> CodexLocalQuotaAvailability {
-        guard hasReceivedLocalQuotaSnapshot,
+        guard localIdentityReadable, hasReceivedLocalQuotaSnapshot,
               CodexAccountQuotaFallbackPolicy.localIdentityIsSettled(
                 changedAt: localIdentityChangedAt,
                 now: now
@@ -389,6 +405,8 @@ struct CodexAccountState {
         guard currentLocalAccountID?.isEmpty == false,
               let usage = localQuotaUsage,
               CodexAccountQuotaFallbackPolicy.remoteHasWeekly(usage) else { return .unavailable }
+        guard localQuotaSnapshot?.rateLimitDiagnostic?.failure == nil,
+              !usage.quotas.contains(where: { ($0.resetsAt ?? .distantFuture) <= now }) else { return .unavailable }
         if let localIdentityChangedAt, usage.capturedAt < localIdentityChangedAt { return .unavailable }
         let age = now.timeIntervalSince(usage.capturedAt)
         let maximumAge = max(120, localIdleRefreshInterval * 2)
@@ -443,7 +461,7 @@ struct CodexAccountState {
         timer.tolerance = min(30, seconds * 0.1); self.timer = timer
     }
     private func startLocalIdentityMonitoring() {
-        refreshLocalIdentity(force: true)
+        refreshLocalIdentity()
         scheduleLocalIdentityPoll()
     }
     private func scheduleLocalIdentityPoll() {
@@ -454,12 +472,15 @@ struct CodexAccountState {
         timer.tolerance = 1
         localIdentityPollTimer = timer
     }
-    private func refreshLocalIdentity(force: Bool = false) {
-        let values = try? localAuthURL.resourceValues(forKeys: [.isRegularFileKey, .contentModificationDateKey])
-        let modificationDate = values?.contentModificationDate
-        if !force, modificationDate == lastLocalAuthModificationDate { return }
-        lastLocalAuthModificationDate = modificationDate
-        let next = values?.isRegularFile == true ? CodexLocalAccountIdentity.readAccountID(from: localAuthURL) : nil
+    private func refreshLocalIdentity() {
+        // An atomic rewrite can preserve mtime; the bounded identity read is authoritative.
+        let next = CodexLocalAccountIdentity.readAccountID(from: localAuthURL)
+        localIdentityReadable = next != nil
+        guard let next else {
+            localQuotaAvailability = .unknown
+            installLocalIdentityWatcher()
+            return
+        }
         if next != currentLocalAccountID {
             let previous = currentLocalAccountID
             currentLocalAccountID = next
@@ -480,7 +501,7 @@ struct CodexAccountState {
     private func installLocalIdentityWatcher() {
         localIdentityWatcher?.cancel()
         localIdentityWatcher = CodexFileWatcher(path: localAuthURL.path) { [weak self] in
-            Task { @MainActor in self?.refreshLocalIdentity(force: true) }
+            Task { @MainActor in self?.refreshLocalIdentity() }
         }
     }
 }
