@@ -37,7 +37,8 @@ final class CodexUsageStore: @unchecked Sendable {
     private let stateDatabase: String
     private let logsDatabase: String
     private let sessionIndexPath: String
-    private let appServerExecutable: String?
+    private let appServerExecutableOverride: String?
+    private var discoveredAppServerExecutable: String?
     private let ripgrepCandidates: [String]
     private let calendar: Calendar
     private let sessionDecoder = CodexSessionEventDecoder()
@@ -68,7 +69,10 @@ final class CodexUsageStore: @unchecked Sendable {
         self.codexDirectory = codexDirectory
         self.ripgrepCandidates = ripgrepCandidates
         self.calendar = calendar
-        self.appServerExecutable = appServerExecutable ?? Self.resolveAppServerExecutable()
+        self.appServerExecutableOverride = appServerExecutable
+        self.discoveredAppServerExecutable = appServerExecutable == nil
+            ? CodexRuntimeLocator.executable(named: "codex")
+            : nil
         self.stateDatabase = Self.latestSQLiteDatabase(
             in: codexDirectory,
             prefix: "state_",
@@ -107,27 +111,6 @@ final class CodexUsageStore: @unchecked Sendable {
         }
 
         return candidates.max { $0.version < $1.version }?.path ?? fallbackPath
-    }
-
-    private static func resolveAppServerExecutable() -> String? {
-        let knownPaths = [
-            "/Applications/Codex.app/Contents/Resources/codex",
-            "/Applications/ChatGPT.app/Contents/Resources/codex"
-        ]
-        if let existing = knownPaths.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
-            return existing
-        }
-
-        let pathEntries = (ProcessInfo.processInfo.environment["PATH"] ?? "")
-            .split(separator: ":")
-            .map(String.init)
-        for directory in pathEntries {
-            let candidate = URL(fileURLWithPath: directory).appendingPathComponent("codex").path
-            if FileManager.default.isExecutableFile(atPath: candidate) {
-                return candidate
-            }
-        }
-        return nil
     }
 
     func loadSnapshot(
@@ -2548,6 +2531,25 @@ final class CodexUsageStore: @unchecked Sendable {
         }
     }
 
+    private func currentAppServerExecutable() -> String? {
+        if let appServerExecutableOverride {
+            return appServerExecutableOverride
+        }
+
+        cacheLock.lock()
+        let cached = discoveredAppServerExecutable
+        cacheLock.unlock()
+        if let cached, FileManager.default.isExecutableFile(atPath: cached) {
+            return cached
+        }
+
+        let discovered = CodexRuntimeLocator.executable(named: "codex")
+        cacheLock.lock()
+        discoveredAppServerExecutable = discovered
+        cacheLock.unlock()
+        return discovered
+    }
+
     private func loadAppServerRateLimits(now: Date, identity: String?) -> RateLimitSnapshot? {
         cacheLock.lock()
         let cached = appServerRateLimitCache
@@ -2576,8 +2578,13 @@ final class CodexUsageStore: @unchecked Sendable {
             previous?.diagnostic = .init(attemptedAt: now, failure: reason, usedCache: true)
             return previous
         }
-        guard let appServerExecutable, FileManager.default.fileExists(atPath: appServerExecutable) else { return failed(.runtimeMissing) }
-        guard FileManager.default.isExecutableFile(atPath: appServerExecutable) else { return failed(.runtimeNotExecutable) }
+        guard let appServerExecutable = currentAppServerExecutable(),
+              FileManager.default.fileExists(atPath: appServerExecutable) else {
+            return failed(.runtimeMissing)
+        }
+        guard FileManager.default.isExecutableFile(atPath: appServerExecutable) else {
+            return failed(.runtimeNotExecutable)
+        }
         do {
             let messages = appServerRateLimitInput().split(separator: "\n").map(String.init)
             var environment = ProcessInfo.processInfo.environment
