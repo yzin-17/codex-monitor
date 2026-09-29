@@ -53,7 +53,7 @@ import Testing
     #expect(!optedOutSettings.codexRadarEnabled)
 }
 
-@Test func codexTaskFilterCanRecognizeSanitizedUnnamedTasks() {
+@Test func codexTaskFilterRecognizesUnnamedAndAutoReviewTasks() {
     let named = CodexTask(
         id: "named",
         title: "正常任务",
@@ -70,9 +70,29 @@ import Testing
         tokenCount: 1,
         updatedAt: Date()
     )
+    let autoReview = CodexTask(
+        id: "auto-review",
+        title: "Guardian review",
+        status: .recent,
+        detailPrefix: "codex-auto-review",
+        tokenCount: 1,
+        updatedAt: Date(),
+        model: "codex-auto-review"
+    )
+    let prefixedAutoReview = CodexTask(
+        id: "prefixed-auto-review",
+        title: "Guardian review",
+        status: .recent,
+        detailPrefix: "openai/codex-auto-review",
+        tokenCount: 1,
+        updatedAt: Date(),
+        model: "openai/codex-auto-review"
+    )
 
-    #expect(named.title != TaskTitleSanitizer.fallback)
-    #expect(unnamed.title == TaskTitleSanitizer.fallback)
+    #expect(!named.isHiddenByTaskFilter)
+    #expect(unnamed.isHiddenByTaskFilter)
+    #expect(autoReview.isHiddenByTaskFilter)
+    #expect(prefixedAutoReview.isHiddenByTaskFilter)
 }
 
 private struct DetailPanelLaunchAtLoginManager: LaunchAtLoginManaging {

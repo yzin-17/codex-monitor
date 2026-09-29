@@ -1819,7 +1819,8 @@ final class CodexUsageStore: @unchecked Sendable {
                 tokenCount: max(thread.tokensUsed, tokenUsage.totalTokens),
                 tokenUsage: tokenUsage,
                 updatedAt: updatedAt,
-                activeSubagentCount: thread.activeSubagentCount
+                activeSubagentCount: thread.activeSubagentCount,
+                model: thread.model
             )
         }
 

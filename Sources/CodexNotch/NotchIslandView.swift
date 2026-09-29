@@ -552,7 +552,7 @@ struct DetailPanelView: View {
 
     private var filteredTasks: [CodexTask] {
         guard hideUnnamedTasks else { return snapshot.tasks }
-        return snapshot.tasks.filter { $0.title != TaskTitleSanitizer.fallback }
+        return snapshot.tasks.filter { !$0.isHiddenByTaskFilter }
     }
 
     private var displayedTasks: [CodexTask] {
@@ -891,7 +891,7 @@ struct DetailPanelView: View {
 
             HStack {
                 Spacer(minLength: 0)
-                Toggle("过滤未命名任务", isOn: $hideUnnamedTasks)
+                Toggle("过滤未命名及自动审查任务", isOn: $hideUnnamedTasks)
                     .toggleStyle(.switch)
                     .controlSize(.mini)
                     .font(.system(size: 9.5, weight: .semibold))
@@ -1432,7 +1432,7 @@ struct DetailPanelView: View {
 
     private var taskEmptyMessage: String {
         if hideUnnamedTasks, !snapshot.tasks.isEmpty, filteredTasks.isEmpty {
-            return "暂无可显示的已命名任务"
+            return "暂无可显示的任务"
         }
         return snapshot.errorMessage ?? "暂无 Codex 活动"
     }
