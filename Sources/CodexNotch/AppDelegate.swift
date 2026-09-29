@@ -184,6 +184,8 @@ final class NotchOverlayController {
     private var pendingDetailWorkItems: [DispatchWorkItem] = []
     private var latestDetailExpandedFrame: NSRect?
     private var isTopShellAnimating = false
+    private var hudDragStart: (mouseX: CGFloat, originX: CGFloat)?
+    private var hudDragPosition: Double?
     private var systemActivityResumeTimer: Timer?
 
     private static let detailSettleDuration: TimeInterval = 0.12
@@ -328,6 +330,12 @@ final class NotchOverlayController {
             settings: settings,
             onSettings: { [weak self] in
                 self?.showSettings()
+            },
+            onHUDDragChanged: { [weak self] translation in
+                self?.moveHUDHorizontally(translation: translation)
+            },
+            onHUDDragEnded: { [weak self] in
+                self?.finishHUDHorizontalDrag()
             },
             preferences: settings.hudPreferences,
             codexAccounts: settings.codexAccounts
@@ -641,6 +649,8 @@ final class NotchOverlayController {
         let compact = usesCompactOverlay
         overlayState.usesCompactHUD = compact
         guard lastCompactMode != compact else { updateHUDFrame(); return }
+        hudDragStart = nil
+        hudDragPosition = nil
         lastCompactMode = compact
         cancelPendingDetailWorkItems()
         overlayState.isExpanded = false
@@ -669,7 +679,37 @@ final class NotchOverlayController {
         return FloatingHUDGeometry.frame(screen: screen.frame, menuBarHeight: MenuBarMetrics.height(for: screen),
             contentSize: .init(width: width + alertWidth + 16 + 9 + HUDRuntimeStatus.reservedWidth, height: 20),
             maximumWidth: settings.hudPreferences.value.normalized.maximumWidth,
-            position: settings.hudPreferences.value.normalized.horizontalPosition)
+            position: hudDragPosition ?? settings.hudPreferences.value.normalized.horizontalPosition)
+    }
+
+    private func moveHUDHorizontally(translation: CGFloat) {
+        guard usesCompactOverlay,
+              !isTopShellAnimating,
+              detailTransition.phase == .hidden || detailTransition.phase == .visible,
+              let screen = presentationScreen else { return }
+
+        let mouseX = NSEvent.mouseLocation.x
+        if hudDragStart == nil {
+            hudDragStart = (mouseX - translation, window.frame.minX)
+        }
+        guard let hudDragStart else { return }
+        let originX = hudDragStart.originX + mouseX - hudDragStart.mouseX
+        let position = FloatingHUDGeometry.position(
+            screen: screen.frame,
+            hudWidth: window.frame.width,
+            originX: originX
+        )
+        guard hudDragPosition != position else { return }
+        hudDragPosition = position
+        updateFrames()
+    }
+
+    private func finishHUDHorizontalDrag() {
+        hudDragStart = nil
+        guard let position = hudDragPosition else { return }
+        hudDragPosition = nil
+        settings.hudPreferences.value.horizontalPosition = position
+        updateFrames()
     }
 
     private func updateHUDFrame() {
@@ -750,6 +790,8 @@ final class NotchOverlayController {
     }
 
     private func synchronizeFramesForGeometryChange() {
+        hudDragStart = nil
+        hudDragPosition = nil
         applyPresentationMode()
         guard let screen = presentationScreen else {
             return

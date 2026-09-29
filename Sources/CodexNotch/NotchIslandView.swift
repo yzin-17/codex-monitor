@@ -50,6 +50,8 @@ struct NotchIslandView: View {
     @ObservedObject var overlayState: OverlayState
     @ObservedObject var settings: CodexNotchSettings
     let onSettings: () -> Void
+    let onHUDDragChanged: (CGFloat) -> Void
+    let onHUDDragEnded: () -> Void
     @State private var pulse = false
     @ObservedObject var preferences: HUDPreferences
     @ObservedObject var codexAccounts: CodexAccountsStore
@@ -70,6 +72,18 @@ struct NotchIslandView: View {
     }
 
     var body: some View {
+        if overlayState.usesCompactHUD {
+            hudContent.highPriorityGesture(
+                DragGesture(minimumDistance: 8)
+                    .onChanged { onHUDDragChanged($0.translation.width) }
+                    .onEnded { _ in onHUDDragEnded() }
+            )
+        } else {
+            hudContent
+        }
+    }
+
+    private var hudContent: some View {
         ConfigurableHUDView(preferences: preferences, accounts: codexAccounts, usage: viewModel,
             remote: remoteViewModel, newAPI: newAPIViewModel, subAPI: subAPIViewModel,
             settings: settings, publicInsights: viewModel.publicInsights, menuBar: overlayState.usesCompactHUD,

@@ -1,7 +1,7 @@
 import Foundation
 
 enum AppInfo {
-    static let version = "0.4.7"
+    static let version = "0.4.8"
 
     static var displayVersion: String {
         let bundleVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String

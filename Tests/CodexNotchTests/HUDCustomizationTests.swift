@@ -85,6 +85,56 @@ import Testing
         }
     }
 }
+@Test func draggedHUDPositionRoundTripsAndClampsAcrossScreens() {
+    for screen in [
+        CGRect(x: 0, y: 0, width: 1440, height: 900),
+        CGRect(x: -1920, y: -100, width: 1920, height: 1080)
+    ] {
+        for width: CGFloat in [160, 300] {
+            for position in [0.0, 0.25, 0.5, 0.75, 1.0] {
+                let frame = FloatingHUDGeometry.frame(
+                    screen: screen, menuBarHeight: 24,
+                    contentSize: CGSize(width: width, height: 20),
+                    maximumWidth: 360, position: position
+                )
+                let restored = FloatingHUDGeometry.position(
+                    screen: screen, hudWidth: frame.width, originX: frame.minX
+                )
+                #expect(abs(restored - position) < 0.0001)
+                #expect(frame.minY == screen.maxY - 24)
+                #expect(FloatingHUDGeometry.position(screen: screen, hudWidth: frame.width, originX: -10_000) == 0)
+                #expect(FloatingHUDGeometry.position(screen: screen, hudWidth: frame.width, originX: 10_000) == 1)
+            }
+        }
+    }
+}
+
+@Test @MainActor func draggedHUDPositionUsesExistingPersistence() throws {
+    let suite = "hud-drag-position-\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let preferences = HUDPreferences(defaults: defaults)
+    preferences.value.horizontalPosition = 0.73
+    #expect(HUDPreferences(defaults: defaults).value.horizontalPosition == 0.73)
+}
+
+@Test func expandedPanelFollowsDraggedHUDAnchor() {
+    let screen = CGRect(x: 0, y: 0, width: 1440, height: 900)
+    let visible = CGRect(x: 0, y: 24, width: 1440, height: 852)
+    let leftHUD = FloatingHUDGeometry.frame(
+        screen: screen, menuBarHeight: 24,
+        contentSize: CGSize(width: 180, height: 20), maximumWidth: 220, position: 0.25
+    )
+    let rightHUD = FloatingHUDGeometry.frame(
+        screen: screen, menuBarHeight: 24,
+        contentSize: CGSize(width: 180, height: 20), maximumWidth: 220, position: 0.75
+    )
+    let leftPanel = FloatingHUDGeometry.panel(screen: screen, visibleFrame: visible, anchor: leftHUD).frame
+    let rightPanel = FloatingHUDGeometry.panel(screen: screen, visibleFrame: visible, anchor: rightHUD).frame
+    #expect(rightPanel.minX > leftPanel.minX)
+    #expect(leftPanel.maxY == leftHUD.minY + 2)
+    #expect(rightPanel.maxY == rightHUD.minY + 2)
+}
 @Test func revealStartsInsideHUDAndKeepsTopEdgeAndFontSize() {
     let screen = CGRect(x: 0, y: 0, width: 1440, height: 900)
     let anchor = FloatingHUDGeometry.frame(screen: screen, menuBarHeight: 24, contentSize: .init(width: 170, height: 20), maximumWidth: 220, position: 0.5)

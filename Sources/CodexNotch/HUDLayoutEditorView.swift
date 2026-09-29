@@ -58,6 +58,8 @@ struct HUDLayoutEditorView: View {
                 Text("覆盖菜单栏的浮窗，无刘海占位；高度填满当前屏幕菜单栏。左侧运行状态固定保留，右侧按实际内容自适应宽度。")
                     .font(.caption).foregroundStyle(.secondary)
                 appearanceSlider("HUD 横向位置", value: $preferences.value.horizontalPosition, range: 0...1)
+                Text("也可以直接按住菜单栏 HUD 左右拖动。")
+                    .font(.caption).foregroundStyle(.secondary)
             } else {
                 Picker("刘海两侧布局", selection: notchDisplaySize) {
                     ForEach(NotchDisplaySize.allCases) { Text($0.label).tag($0) }

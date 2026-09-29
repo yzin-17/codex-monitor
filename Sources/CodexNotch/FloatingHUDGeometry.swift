@@ -3,6 +3,12 @@ import Foundation
 /// 非刘海模式仍是覆盖菜单栏的 NSPanel，而不是系统状态栏项目。
 /// 只改变窗口的裁剪区域；展开时内容保持最终尺寸和原字号，不缩放文字。
 enum FloatingHUDGeometry {
+    static func position(screen: CGRect, hudWidth: CGFloat, originX: CGFloat) -> Double {
+        let available = screen.width - hudWidth - 24
+        guard available.isFinite, available > 0, originX.isFinite else { return 0.5 }
+        return min(1, max(0, Double((originX - screen.minX - 12) / available)))
+    }
+
     static func frame(screen: CGRect, menuBarHeight: CGFloat, contentSize: CGSize,
                       maximumWidth: CGFloat, position: Double) -> CGRect {
         let barHeight = menuBarHeight.isFinite && menuBarHeight > 0 ? menuBarHeight : 24
