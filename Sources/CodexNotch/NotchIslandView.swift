@@ -1048,11 +1048,17 @@ struct DetailPanelView: View {
                         .foregroundStyle(.white.opacity(0.5))
                     Spacer(minLength: 0)
                     Menu {
-                        Picker("排序", selection: Binding(get: { codexRadarViewModel.scoreSort },
-                                                          set: { codexRadarViewModel.selectSort($0) })) {
-                            ForEach(CodexRadarScoreSort.allCases, id: \.self) { sort in
-                                Text(sort.title).tag(sort)
+                        ForEach(CodexRadarScoreSort.allCases, id: \.self) { sort in
+                            Button {
+                                codexRadarViewModel.selectSort(sort)
+                            } label: {
+                                if codexRadarViewModel.scoreSort == sort {
+                                    Label(sort.title, systemImage: "checkmark")
+                                } else {
+                                    Text(sort.title)
+                                }
                             }
+                            .accessibilityValue(codexRadarViewModel.scoreSort == sort ? "已选中" : "未选中")
                         }
                     } label: {
                         HStack(spacing: 6) {

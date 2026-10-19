@@ -87,6 +87,9 @@ struct CodexRadarClient: Sendable {
         request.setValue(url.path == "/" ? "text/html" : "application/json", forHTTPHeaderField: "Accept")
         request.setValue("codex-monitor/\(AppInfo.version)", forHTTPHeaderField: "User-Agent")
         request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        if url.path == Self.benchURL.path {
+            request.setValue("user-selected-v1", forHTTPHeaderField: "X-Radar-Bench-Selection")
+        }
         if let token {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }

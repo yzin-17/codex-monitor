@@ -64,6 +64,13 @@ import Testing
         #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
         #expect(!request.httpShouldHandleCookies)
         #expect(request.httpMethod == "GET")
+        if request.url?.path == CodexRadarClient.benchURL.path {
+            guard request.value(forHTTPHeaderField: "X-Radar-Bench-Selection") == "user-selected-v1" else {
+                return (Data(), HTTPURLResponse(url: request.url!, statusCode: 428, httpVersion: nil, headerFields: nil)!)
+            }
+        } else {
+            #expect(request.value(forHTTPHeaderField: "X-Radar-Bench-Selection") == nil)
+        }
         return (radarFixtureResponse(request), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
     }
     let read = try await client.fetchBench().decode(fetchedAt: radarScoreDate)

@@ -80,3 +80,19 @@
 0.4.9 的本地 `CODEX_MONITOR_SNAPSHOT_DIR=/tmp/codex-monitor-049-screenshots scripts/test.sh` 通过，306 项 Swift 测试及独立回归全部通过；日志为 `/tmp/codex-monitor-049-tests.log`。功能与最终菜单样式的双架构构建记录见上文；0.4.9 安装包由发布 CI 重新构建。
 
 发布记录：[Codex Monitor 0.4.9](https://github.com/yzin-17/codex-monitor/releases/tag/v0.4.9)。本机下载、替换与启动回执保留在忽略目录 `dist/qa/release-0.4.9/`，不把一次性安装材料提交到主分支。
+
+### 0.4.10：非默认档位请求前置条件
+
+0.4.9 安装启动后的首轮实际读取取得 1 个默认档位，另外 33 个档位均返回 HTTP 428；社区接口成功写入 43 个配置。该结果没有被当作全榜读取通过。
+
+官网 `radar-bench-display.mjs` 对显式模型档位读取设置 `X-Radar-Bench-Selection: user-selected-v1`；应用实现漏传该标记。对 `gpt-6-astra/low` 的无凭据 GET 补齐该标记后返回 HTTP 200、当前 schema 及有效分数，确认是请求前置条件遗漏。
+
+0.4.10 仅向固定雷达摘要端点补齐该请求头，测试替身模拟缺少标记时 HTTP 428，不携带账户凭据。版本声明与回归断言同步升级；本地验证和后续 CI 结果分别记录。
+
+用户在 0.4.9 的实际菜单中确认选项被放入子菜单；0.4.10 将菜单项改为直接显示“雷达分”和“社区体感分”，当前选项保留勾选标记，排序与持久化逻辑沿用既有实现。
+
+0.4.10 的 `scripts/test.sh` 通过：306 项 Swift 测试与独立回归全部通过，日志 `/tmp/codex-monitor-0410-tests.log`。随后直接菜单的原生界面与请求头前置条件替身补验通过，日志 `/tmp/codex-monitor-0410-native.log`，截图 `/tmp/codex-monitor-0410-screenshots/`；README 示例已同步。
+
+独立只读诊断直接使用当前 `CodexRadarClient`、当前绑定和生产解析器，通过无凭据 GET 实际读取官网配置：34 个绑定档位全部读取并解析成功，错误数为 0。日志 `/tmp/codex-monitor-0410-live-probe.log`。该在线结果与合成数据回归分开记录，不代表真实账户对账或未来数据一直可用。
+
+最终 0.4.10 的 `CODEX_NOTCH_SKIP_TESTS=1 scripts/build.sh` 通过，双架构编译、应用签名校验和 DMG 打包完成，日志 `/tmp/codex-monitor-0410-build.log`。最终一致性复核通过；发布 CI 和安装回执分别保留于 GitHub 与忽略目录 `dist/qa/release-0.4.10/`。
