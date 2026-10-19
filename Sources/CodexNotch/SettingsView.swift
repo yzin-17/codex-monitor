@@ -574,7 +574,7 @@ struct SettingsView: View {
                 }
                 .disabled(!settings.codexRadarEnabled || draft.codexRadarEnabled != settings.codexRadarEnabled || codexRadarViewModel.isRefreshing)
             }
-            if let checkedAt = codexRadarViewModel.snapshot.fetchedAt {
+            if let checkedAt = codexRadarViewModel.lastCheckedAt {
                 Text("最近检查：\(checkedAt.formatted(date: .abbreviated, time: .shortened))")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)

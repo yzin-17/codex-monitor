@@ -43,6 +43,22 @@ private let newsHTML = Data(#"""
     #expect(CodexRadarSnapshot.comprehensive(software: software, visual: visual.withState(.stale)).state == .stale)
 }
 
+@Test func codexRadarCompositePreservesDimensionErrorsAlongsideCachedScores() throws {
+    let software = try CodexRadarSnapshot.decode(data: softwareData(), fetchedAt: Date(), source: .publicMetrics)
+    let visual = try CodexRadarSnapshot.decode(data: visualData, fetchedAt: Date(), source: .publicVisual)
+    let composite = CodexRadarSnapshot.comprehensive(
+        software: software.withState(.stale, message: "CodexRadar HTTP 502；5 分钟后自动重试，可手动重试"),
+        visual: visual.withState(.stale, message: "连接超时；5 分钟后自动重试，可手动重试"))
+    #expect(composite.models.first?.score == 112.5)
+    #expect(composite.state == .stale)
+    #expect(composite.message?.contains("软件工程：CodexRadar HTTP 502") == true)
+    #expect(composite.message?.contains("视觉空间：连接超时") == true)
+    let persistenceWarning = CodexRadarSnapshot.comprehensive(
+        software: software.withState(.ready, message: "数据已获取，但本地缓存保存失败"), visual: visual)
+    #expect(persistenceWarning.state == .ready)
+    #expect(persistenceWarning.message?.contains("缓存保存失败") == true)
+}
+
 @Test func codexRadarCompositeDoesNotInventMissingCostsOrUseWrongEfforts() throws {
     let software = try CodexRadarSnapshot.decode(data: softwareData(cost: "null"), fetchedAt: Date(), source: .publicMetrics)
     let visual = try CodexRadarSnapshot.decode(data: visualData, fetchedAt: Date(), source: .publicVisual)
@@ -128,17 +144,21 @@ private let newsHTML = Data(#"""
         let model = context.model()
         try await wait(model)
         let originalNews = model.news
+        let originalFetchAt = model.snapshot.fetchedAt
         await context.transport.change(score: 140, failVisual: true, failNews: true)
         context.date.addTimeInterval(301)
         model.refreshNow()
         try await wait(model)
         #expect(model.snapshot.state == .stale)
-        #expect(model.snapshot.models.first?.score == 142.5)
+        #expect(model.snapshot.models.first?.score == 112.5)
         #expect(model.news == originalNews)
         #expect(model.newsMessage != nil)
+        #expect(model.lastCheckedAt == context.date)
+        #expect(model.snapshot.fetchedAt == originalFetchAt)
+        #expect(model.snapshot.message?.contains("gpt-second high：") == true)
         #expect(model.nextRefreshAt == context.date.addingTimeInterval(300))
         model.selectDimension(.software)
-        #expect(model.snapshot.state == .ready)
+        #expect(model.snapshot.state == .stale)
         #expect(model.snapshot.models.first?.score == 140)
         model.selectDimension(.visual)
         #expect(model.snapshot.state == .stale)
@@ -150,6 +170,8 @@ private let newsHTML = Data(#"""
         #expect(model.snapshot.state == .ready)
         #expect(model.newsMessage == nil)
         #expect(model.news?.fetchedAt == context.date)
+        #expect(model.lastCheckedAt == context.date)
+        #expect(model.snapshot.message == nil)
     }
 
     @Test func codexRadarTokenOnlyGoesToOptionalAuthorizedFeed() async throws {
@@ -159,12 +181,47 @@ private let newsHTML = Data(#"""
         let model = context.model()
         try await wait(model)
         let requests = await context.transport.requests
-        #expect(requests.count == 4)
+        #expect(requests.count == 6)
         let authorized = try #require(requests.first { $0.url?.path == CodexRadarClient.authorizedURL.path })
         #expect(authorized.value(forHTTPHeaderField: "Authorization") == "Bearer test-radar-token")
         #expect(requests.filter { $0.url?.path != authorized.url?.path }.allSatisfy { $0.value(forHTTPHeaderField: "Authorization") == nil })
         #expect(model.snapshot.models.first?.score == 112.5)
         #expect(model.snapshot.quotaRows.first?.tier == "Plus")
+    }
+
+    @Test func codexRadarCommunityFailurePreservesBothScoresAndSortingStaysLocal() async throws {
+        let context = try DimensionTestContext()
+        defer { context.cleanUp() }
+        let model = context.model()
+        try await wait(model)
+        let originalCommunity = model.community
+        let benchCalls = await context.transport.requests.filter { $0.url?.path == CodexRadarClient.benchURL.path }.count
+        await context.transport.change(score: 140, failVisual: false, failNews: false, failCommunity: true)
+        context.date.addTimeInterval(300)
+        model.refreshIfNeeded()
+        try await wait(model)
+        #expect(model.snapshot.state == .ready)
+        #expect(model.community?.ratings == originalCommunity?.ratings)
+        #expect(model.communityMessage?.contains("HTTP 503") == true)
+        #expect(await context.transport.requests.filter { $0.url?.path == CodexRadarClient.benchURL.path }.count == benchCalls)
+        let calls = await context.transport.requests.count
+        model.selectSort(.community)
+        #expect(model.combinedScores.first?.id == "gpt-second|high")
+        model.selectDimension(.science)
+        #expect(model.combinedScores.first?.radar.score == 50)
+        #expect(await context.transport.requests.count == calls)
+        await context.transport.change(score: 140, failVisual: false, failNews: false)
+        context.date.addTimeInterval(300)
+        model.refreshIfNeeded()
+        try await wait(model)
+        #expect(model.communityMessage == nil)
+        #expect(model.community?.fetchedAt == context.date)
+        let reloaded = context.model()
+        #expect(reloaded.scoreSort == .community)
+        #expect(reloaded.combinedScores.first?.id == "gpt-second|high")
+        context.settings.codexRadarEnabled = false
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(model.combinedScores.isEmpty)
     }
 
     private func wait(_ model: CodexRadarViewModel) async throws {
@@ -181,22 +238,26 @@ private actor DimensionTestTransport {
     private var score = 100.0
     private var failVisual = false
     private var failNews = false
-    func change(score: Double, failVisual: Bool, failNews: Bool) {
+    private var failCommunity = false
+    func change(score: Double, failVisual: Bool, failNews: Bool, failCommunity: Bool = false) {
         self.score = score; self.failVisual = failVisual; self.failNews = failNews
+        self.failCommunity = failCommunity
     }
     func send(_ request: URLRequest) throws -> (Data, URLResponse) {
         requests.append(request)
         let data: Data
         switch request.url?.path {
-        case CodexRadarClient.visualURL.path:
-            if failVisual { throw URLError(.timedOut) }
-            data = visualData
+        case CodexRadarClient.communityURL.path where failCommunity:
+            return (Data(), HTTPURLResponse(url: request.url!, statusCode: 503, httpVersion: nil, headerFields: nil)!)
+        case CodexRadarClient.benchURL.path:
+            if failVisual && request.url?.query?.contains("model=gpt-second&") == true { throw URLError(.timedOut) }
+            data = radarFixtureResponse(request, software: score)
         case "/":
             if failNews { throw URLError(.notConnectedToInternet) }
             data = newsHTML
         case CodexRadarClient.authorizedURL.path:
             data = Data(#"{"model_iq":{"quota_radar":{"rows":[{"tier":"Plus","five_h":20}]}}}"#.utf8)
-        default: data = softwareData(score: score)
+        default: data = radarFixtureResponse(request, software: score)
         }
         return (data, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
     }
@@ -208,7 +269,7 @@ private actor DimensionTestTransport {
     let directory: URL
     let settings: CodexNotchSettings
     let transport = DimensionTestTransport()
-    var date = ISO8601DateFormatter().date(from: "2026-09-08T01:30:00Z")!
+    var date = radarScoreDate
     init() throws {
         defaults = try #require(UserDefaults(suiteName: suite))
         directory = FileManager.default.temporaryDirectory.appendingPathComponent(suite)

@@ -2,7 +2,7 @@
 
 原生 macOS 刘海屏 / 菜单栏监测工具：贴着 MacBook 刘海（或菜单栏）常驻显示 Codex 运行状态与额度，点击展开成灵动岛式详情面板，把本机用量、性能、Skills、公开评分、社区预测和远程账号放在一个窗口里。
 
-![版本](https://img.shields.io/badge/版本-0.4.8-blue) ![平台](https://img.shields.io/badge/macOS-14%2B-lightgrey) ![Swift](https://img.shields.io/badge/Swift-6-orange) ![许可](https://img.shields.io/badge/License-MIT-green) ![架构](https://img.shields.io/badge/Arch-arm64%20%2F%20x86__64-lightgrey)
+![版本](https://img.shields.io/badge/版本-0.4.9-blue) ![平台](https://img.shields.io/badge/macOS-14%2B-lightgrey) ![Swift](https://img.shields.io/badge/Swift-6-orange) ![许可](https://img.shields.io/badge/License-MIT-green) ![架构](https://img.shields.io/badge/Arch-arm64%20%2F%20x86__64-lightgrey)
 
 项目以 [ALight777/codex-monitor](https://github.com/ALight777/codex-monitor) 原始源码为基线，在此基础上移植 [jackiemingnew/codex-monitor-macos](https://github.com/jackiemingnew/codex-monitor-macos) 的性能与 Skills 模块，并参考 [steipete/CodexBar](https://github.com/steipete/CodexBar) 的 HUD 控件思路与 [JiaYang-BUAA/Codex-Desktop-Usage-Monitor-Windows](https://github.com/JiaYang-BUAA/Codex-Desktop-Usage-Monitor-Windows) 的续跑状态机。**本项目不是从零原创**，来源与许可边界见 [NOTICE.md](NOTICE.md)。
 
@@ -90,14 +90,15 @@
 
 ### Codex Radar
 
-- 三个评分维度：综合智能、软件工程能力、视觉空间推理，默认综合智能并记住上次选择，切换不发起网络请求。
-- 综合智能按官网规则，对同一模型档位按有效题量加权 IQ、平均费用与平均耗时；视觉空间显示覆盖题数。
+- 使用官网当前的 150 分制雷达总分，可切换软件工程、视觉空间、终端系统和科学研究四个维度；总分直接读取官网结果。
+- 同一模型与推理档位的卡片并列展示雷达分和 10 分制社区体感分，显示题目覆盖率、近 24 小时投票数，支持按任一分数排序；无评分保持缺失。
+- 记住维度与排序选择，切换不发起网络请求。旧基准缓存保留并明确标记，不混入当前雷达榜。
 - 展示官网最新公告新闻，可打开来源原文。
-- 三个维度与新闻分别缓存；单来源失败保留其最后有效数据并标记，其他来源正常更新。
-- 每小时及北京时间 08:20 / 14:20 自动检查，失败 5 分钟重试。
+- 雷达、社区体感与新闻分别缓存；单来源失败保留其最后有效数据并显示具体错误，其他来源正常更新。“最近检查”在请求成功或失败后均更新，评分数据时间保持来源时间。
+- 雷达与新闻每小时检查，雷达也在北京时间 08:20 / 14:20 检查；社区体感每 5 分钟检查。失败 5 分钟重试，手动失败可立即重试。
 - 数据来自 [Codex 雷达](https://codexradar.com) 公开接口，可选 Token 仅用于补充授权接口提供的套餐额度。
 
-![Codex Radar 页：三维评分与官网公告](docs/screenshots/radar-tab.png)
+![Codex Radar 页：雷达分、社区体感分与官网公告](docs/screenshots/radar-tab.png)
 
 ### 重置预测
 

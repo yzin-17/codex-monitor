@@ -2,6 +2,8 @@
 
 验收时间：2026-09-07，Asia/Shanghai。
 
+> 下方原验收记录保留其历史口径。2026-10-20 的当前实现与接口核查见本文末节及[当前规格](../../docs/specs/2026-10-20-radar-community-scores.md)。
+
 ## 根因证据
 
 - 本机原缓存与实时读取的 `https://codexradar.com/current.json` 内容一致；旧摘要 `model_iq.updated_at` 为 `2026-09-06T15:06:03+08:00`，说明刷新请求成功但旧数据源未跟随官网众测更新。
@@ -41,3 +43,40 @@
 | --- | --- |
 | codex-monitor-0.1.16-arm64.dmg | `a4c43cb917d9e3853acb147c879f79a652a8efe5c201292c1bbe992406cc5470` |
 | codex-monitor-0.1.16-amd64.dmg | `b4b946c0d809c04e3a092b61e52a821964b7af72e4bf664c406cb979ad910ab0` |
+
+## 2026-10-20：检查时间、当前雷达与社区体感
+
+### 官网公开接口核查
+
+- 本机软件工程缓存最后成功获取于 10 月 5 日 13:50，视觉缓存最后成功获取于 10 月 9 日 09:03；新闻仍在 10 月 20 日更新。当前旧评分接口分别返回 HTTP 502，不据此断言此前整个期间均为同一故障。
+- 首页主榜加载 `/assets/radar-bench-ui.mjs?v=bench-detail-metrics-v2`，由 `/assets/radar-bench-display.mjs?v=bench-detail-metrics-v1` 读取公开绑定和评分摘要。旧软件工程接口仍出现在另一处预览逻辑，旧视觉接口未出现在首页。
+- 无凭据 GET `/data/radar-bench-binding.json` 返回 HTTP 200，当前基准为 `radar-bench-final64-20261004`，覆盖四个来源共 64 题。这里只核对接口语义，不执行源码或补丁哈希检查。
+- 无凭据 GET `/api/radar-bench-score?model=gpt-6.1-sol&effort=low&view=summary` 返回 HTTP 200，响应 schema 为 `radar-bench-public-summary-v6-150-details`、满分 150，包含官网总分、四维分数与覆盖率。这是一个模型档位的公开读取证据，不代表全部档位可用。
+- 无凭据 GET `/api/model-ratings` 返回 HTTP 200，响应为近 24 小时的 10 分制投票均分与票数。未提交投票，未携带 Cookie 或账户凭据。
+
+### 实现与验证边界
+
+- 最近检查与成功获取时间分离；失败也更新检查时间，取消或关闭后的旧结果不写回。综合页保留具体错误，旧基准缓存明确标识。
+- 当前雷达分直接使用新契约，按模型档位独立保留缓存；社区体感分独立读取、缓存和报错。卡片精确关联模型与推理档位，按任一分数排序，缺失排后。
+- 社区每 5 分钟读取一次，不因此重复请求尚未过期的全榜雷达；雷达请求并发最多 3 个，仅访问固定公开端点。
+- 首轮刷新诊断定向测试 26 项通过，随后新评分解析与公开端点边界测试 4 项通过。新卡片集成首轮发现缓存标记改变后旧断言仍要求卡片整体不变，已改为检查分数、覆盖和数据时间不变，并单独断言缓存标记。
+- 完整测试：`CODEX_MONITOR_SNAPSHOT_DIR=/tmp/codex-radar-20261020-screenshots scripts/test.sh` 通过，306 项 Swift 测试及独立回归程序全部通过。命令日志位于 `/tmp/codex-radar-20261020-tests.log`。
+- 原生截图：已人工检查 Codex、性能、Skills、远程功能关闭时的回退页，以及雷达同卡评分、社区排序、HTTP 502 与旧缓存。截图位于 `/tmp/codex-radar-20261020-screenshots/`；README 示例已更新为 `docs/screenshots/radar-tab.png`，其中模型和分数均为合成数据。
+- 构建：`CODEX_NOTCH_SKIP_TESTS=1 scripts/build.sh` 通过，arm64 与 amd64 Release 编译、应用签名校验及 DMG 打包均完成。跳过的是上一项已通过的重复测试。日志位于 `/tmp/codex-radar-20261020-build.log`；产物为 `dist/codex-monitor-0.4.8-arm64.dmg`、`dist/codex-monitor-0.4.8-amd64.dmg` 和 `dist/CodexMonitor.app`。
+- 最终一致性复核：代码、AC1–AC6、任务、README 与验收记录一致，`git diff --check` 通过。在线证据限定为上文的公开接口读取，本地完整测试使用合成输入；未宣称完成所有真实模型档位的在线对账。
+- 本轮不安装、不提交、不推送，不修改真实缓存或账户数据。原生截图使用合成数据和替身网络；真实账号对账、发布及已安装应用验收不由这些结果代替。
+
+### 排序控件样式复核
+
+- 排序入口统一为面板内的深色按钮样式：10 点灰色文字、28 点高度、7 点圆角、细描边及右侧小箭头。使用按钮式原生菜单保留完整标签样式，排序逻辑与选中状态沿用现有实现。
+- 本轮 `scripts/test.sh` 的 306 项 Swift 测试及独立回归通过，日志为 `/tmp/codex-radar-menu-20261020-tests.log`。最终菜单样式另行通过原生页面测试，日志为 `/tmp/codex-radar-menu-20261020-native.log`；不重复执行未受样式影响的业务回归。
+- 已人工检查雷达分排序、社区体感分排序两张最终原生截图。截图目录为 `/tmp/codex-radar-menu-20261020-screenshots/`，README 图片已同步为最终样式。
+- 最终样式的 `CODEX_NOTCH_SKIP_TESTS=1 scripts/build.sh` 已通过，arm64、amd64 编译、签名校验及 DMG 打包完成，日志为 `/tmp/codex-radar-menu-20261020-build.log`。未安装、提交或推送。
+
+### 0.4.9 发布授权与证据边界
+
+上述记录是功能实施阶段的验收快照。用户随后授权更新版本、提交推送、从 GitHub 下载最新发布包并替换本地应用。版本声明同步更新 `VERSION`、`AppInfo.version`、README 徽章和独立回归断言；`main` 推送后的 CI、发布记录及安装回执与本地测试分开保留。
+
+0.4.9 的本地 `CODEX_MONITOR_SNAPSHOT_DIR=/tmp/codex-monitor-049-screenshots scripts/test.sh` 通过，306 项 Swift 测试及独立回归全部通过；日志为 `/tmp/codex-monitor-049-tests.log`。功能与最终菜单样式的双架构构建记录见上文；0.4.9 安装包由发布 CI 重新构建。
+
+发布记录：[Codex Monitor 0.4.9](https://github.com/yzin-17/codex-monitor/releases/tag/v0.4.9)。本机下载、替换与启动回执保留在忽略目录 `dist/qa/release-0.4.9/`，不把一次性安装材料提交到主分支。

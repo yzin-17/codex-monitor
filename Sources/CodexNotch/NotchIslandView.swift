@@ -1042,8 +1042,48 @@ struct DetailPanelView: View {
                     }
                 }
 
-                if let fetchedAt = radar.fetchedAt {
-                    Text("最近检查：\(fetchedAt.formatted(date: .abbreviated, time: .shortened))")
+                HStack(spacing: 8) {
+                    Text(radar.dataSource == .publicBench ? "雷达分 /150 · 社区体感 /10" : "旧基准评分 · 社区体感 /10")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.5))
+                    Spacer(minLength: 0)
+                    Menu {
+                        Picker("排序", selection: Binding(get: { codexRadarViewModel.scoreSort },
+                                                          set: { codexRadarViewModel.selectSort($0) })) {
+                            ForEach(CodexRadarScoreSort.allCases, id: \.self) { sort in
+                                Text(sort.title).tag(sort)
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text("按\(codexRadarViewModel.scoreSort.title)排序")
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 8, weight: .semibold))
+                        }
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.65))
+                        .padding(.horizontal, 10)
+                        .frame(height: 28)
+                        .background(Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 7))
+                        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.white.opacity(0.08), lineWidth: 1))
+                    }
+                    .menuStyle(.button)
+                    .buttonStyle(.plain)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .accessibilityLabel("评分排序")
+                    .accessibilityValue(codexRadarViewModel.scoreSort.title)
+                }
+
+                if let checkedAt = codexRadarViewModel.lastCheckedAt {
+                    Text("最近检查：\(checkedAt.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.45))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                if let community = codexRadarViewModel.community {
+                    Text("社区体感 · 近 24 小时投票 · 数据更新于\(Formatters.relativeAge(community.updatedAt))前")
                         .font(.system(size: 9, weight: .medium))
                         .foregroundStyle(.white.opacity(0.45))
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1054,8 +1094,11 @@ struct DetailPanelView: View {
                 if let message = radar.message {
                     inlineWarningMessage(message)
                 }
+                if let message = codexRadarViewModel.communityMessage {
+                    inlineWarningMessage(message)
+                }
 
-                if radar.models.isEmpty {
+                if codexRadarViewModel.combinedScores.isEmpty {
                     HStack {
                         Text(radar.state == .loading ? "正在读取模型数据" : "暂无模型评分数据")
                             .font(.system(size: 10, weight: .semibold))
@@ -1068,8 +1111,9 @@ struct DetailPanelView: View {
                         columns: [GridItem(.flexible(), spacing: 7), GridItem(.flexible(), spacing: 7)],
                         spacing: 7
                     ) {
-                        ForEach(radar.models) { model in
-                            RadarModelCard(model: model, usesAverages: radar.dataSource.usesAverages)
+                        ForEach(codexRadarViewModel.combinedScores) { score in
+                            RadarModelCard(model: score.radar, usesAverages: radar.dataSource.usesAverages,
+                                           community: score.community, currentBenchmark: radar.dataSource == .publicBench)
                         }
                     }
                 }
@@ -1903,6 +1947,14 @@ private struct RadarSummaryCell: View {
 private struct RadarModelCard: View {
     let model: CodexRadarModelScore
     let usesAverages: Bool
+    let community: CodexRadarCommunitySnapshot.Rating?
+    let currentBenchmark: Bool
+
+    private var sampleText: String {
+        if let sampleLabel = model.sampleLabel { return sampleLabel }
+        if let passed = model.passed, let tasks = model.tasks { return "\(passed)/\(tasks)" }
+        return "暂无评分"
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -1918,20 +1970,32 @@ private struct RadarModelCard: View {
                         .foregroundStyle(.white.opacity(0.36))
                 }
             }
-            HStack(spacing: 8) {
-                Text(model.score.map { String(format: "%.1f", $0) } ?? "--")
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
-                    .foregroundStyle(Color(red: 0.61, green: 0.95, blue: 0.68))
-                Spacer(minLength: 0)
-                if let sampleLabel = model.sampleLabel {
-                    Text(sampleLabel)
-                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(currentBenchmark || model.score == nil ? "雷达分" : "旧基准评分")
+                        .font(.system(size: 8.5, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.5))
+                    Text(model.score.map { String(format: "%.1f", $0) } ?? "--")
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundStyle(Color(red: 0.61, green: 0.95, blue: 0.68))
+                    Text(sampleText)
+                        .font(.system(size: 8, weight: .medium))
                         .foregroundStyle(.white.opacity(0.42))
-                } else if let passed = model.passed, let tasks = model.tasks {
-                    Text("\(passed)/\(tasks)")
-                        .font(.system(size: 9, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.42))
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Rectangle().fill(Color.white.opacity(0.08)).frame(width: 1, height: 43)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("社区体感")
+                        .font(.system(size: 8.5, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.5))
+                    Text(community?.average.map { String(format: "%.1f", $0) } ?? "暂无评分")
+                        .font(.system(size: community?.average == nil ? 11 : 15, weight: .bold, design: .rounded))
+                        .foregroundStyle(Color(red: 0.67, green: 0.80, blue: 0.97))
+                    Text(community.map { "\($0.count) 票 · 24h" } ?? "-- 票 · 24h")
+                        .font(.system(size: 8, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.42))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             if model.costUSD != nil || model.wallTime != nil {
                 HStack(spacing: 6) {
@@ -1948,7 +2012,7 @@ private struct RadarModelCard: View {
             }
         }
         .padding(.horizontal, 9)
-        .frame(height: 66)
+        .frame(height: 100)
         .background(Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)

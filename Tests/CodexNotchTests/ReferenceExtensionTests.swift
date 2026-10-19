@@ -251,6 +251,60 @@ private func referenceCatalog(at now: Date) throws -> SkillCatalogSnapshot {
         window.close()
     }
 
+    // 使用生产刷新流程制造 HTTP 502，确认检查时间与旧缓存时间分开。
+    let radarCache = FileManager.default.temporaryDirectory.appendingPathComponent("radar-render-\(UUID())")
+    defer { try? FileManager.default.removeItem(at: radarCache) }
+    let cachedAt = Date().addingTimeInterval(-15 * 86400)
+    for (subdirectory, source, payload) in [
+        ("", "publicMetrics", #"{"schema":3,"benchmark_id":"deep-swe","source_updated_at":"2026-10-03T16:00:00Z","points":[{"model":"gpt-example","effort":"max","iq":100,"total":300}]}"#),
+        ("visual", "publicVisual", #"{"schema":1,"benchmark_id":"pompeii-adjacency","source_updated_at":"2026-10-03T16:00:00Z","points":[{"model":"gpt-example","effort":"max","iq":150,"valid_tasks":100}]}"#)
+    ] {
+        let directory = radarCache.appendingPathComponent(subdirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data(payload.utf8).write(to: directory.appendingPathComponent("current.json"))
+        try JSONSerialization.data(withJSONObject: ["source": source, "fetchedAt": cachedAt.timeIntervalSinceReferenceDate])
+            .write(to: directory.appendingPathComponent("metadata.json"))
+    }
+    let radarFailure = CodexRadarViewModel(settings: settings, client: CodexRadarClient { request in
+        (Data(), HTTPURLResponse(url: request.url!, statusCode: 502, httpVersion: nil, headerFields: nil)!)
+    }, cacheDirectory: radarCache, selectionDefaults: defaults)
+    for _ in 0..<100 {
+        if !radarFailure.isRefreshing { break }
+        try await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(!radarFailure.isRefreshing)
+    #expect(radarFailure.lastCheckedAt != nil)
+    #expect(radarFailure.snapshot.fetchedAt == cachedAt)
+    #expect(radarFailure.snapshot.message?.contains("雷达接口：CodexRadar HTTP 502") == true)
+    let radarFailureView = DetailPanelView(viewModel: usage, remoteViewModel: remote, newAPIViewModel: newAPI,
+        subAPIViewModel: subAPI, codexRadarViewModel: radarFailure, performanceViewModel: perf,
+        skillInsights: skills, overlayState: overlay, settings: settings, onSettings: {},
+        onLocalRefresh: {}, onRemoteRefresh: {}, onNewAPIRefresh: {}, onSubAPIRefresh: {},
+        onCodexRadarRefresh: {}, initialPage: .codexRadar)
+    try await captureCustomization(AnyView(radarFailureView), size: .init(width: 680, height: 746),
+                                   name: "radar-refresh-failure", output: output)
+    let pairedRadar = CodexRadarViewModel(settings: settings, client: CodexRadarClient { request in
+        (radarFixtureResponse(request), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+    }, cacheDirectory: radarCache.appendingPathComponent("paired"), selectionDefaults: defaults, now: { radarScoreDate })
+    for _ in 0..<100 {
+        if !pairedRadar.isRefreshing { break }
+        try await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(pairedRadar.snapshot.state == .ready)
+    #expect(pairedRadar.combinedScores.first?.community?.average == 8.5)
+    let pairedView = DetailPanelView(viewModel: usage, remoteViewModel: remote, newAPIViewModel: newAPI,
+        subAPIViewModel: subAPI, codexRadarViewModel: pairedRadar, performanceViewModel: perf,
+        skillInsights: skills, overlayState: overlay, settings: settings, onSettings: {},
+        onLocalRefresh: {}, onRemoteRefresh: {}, onNewAPIRefresh: {}, onSubAPIRefresh: {},
+        onCodexRadarRefresh: {}, initialPage: .codexRadar)
+    try await captureCustomization(AnyView(pairedView), size: .init(width: 680, height: 746),
+                                   name: "radar-combined-scores", output: output)
+    pairedRadar.selectSort(.community)
+    #expect(pairedRadar.combinedScores.first?.id == "gpt-second|high")
+    try await captureCustomization(AnyView(pairedView), size: .init(width: 680, height: 746),
+                                   name: "radar-community-sort", output: output)
+    settings.codexRadarEnabled = false
+
     // 自定义布局与提供商页也走同一生产 View；仅注入合成数据及内存凭据库。
     let syntheticAuthRoot = FileManager.default.temporaryDirectory.appendingPathComponent("ReferenceAuth-\(UUID())")
     try FileManager.default.createDirectory(at: syntheticAuthRoot, withIntermediateDirectories: true)

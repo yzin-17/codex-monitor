@@ -6,34 +6,50 @@ enum CodexRadarDataSource: String, Codable, Equatable, Sendable {
     case publicMetrics
     case publicVisual
     case publicComposite
+    case publicBench
 
     var label: String {
         switch self {
         case .authorizedAPI: "授权 API"
         case .publicSummary: "旧版摘要"
-        case .publicMetrics, .publicVisual, .publicComposite: "官网众测"
+        case .publicMetrics, .publicVisual, .publicComposite: "旧基准缓存"
+        case .publicBench: "官网雷达"
         }
     }
 
-    var usesAverages: Bool { self == .publicMetrics || self == .publicVisual || self == .publicComposite }
+    var usesAverages: Bool { self == .publicMetrics || self == .publicVisual || self == .publicComposite || self == .publicBench }
 }
 
 enum CodexRadarDimension: String, CaseIterable, Sendable {
-    case comprehensive, software, visual
+    case comprehensive, software, visual, terminal, science
 
     var title: String {
         switch self {
-        case .comprehensive: "综合智能"
+        case .comprehensive: "雷达总分"
         case .software: "软件工程能力"
         case .visual: "视觉空间推理"
+        case .terminal: "终端与系统操作"
+        case .science: "科学研究"
         }
     }
 
     var shortTitle: String {
         switch self {
-        case .comprehensive: "综合智能"
+        case .comprehensive: "雷达总分"
         case .software: "软件工程"
         case .visual: "视觉空间"
+        case .terminal: "终端系统"
+        case .science: "科学研究"
+        }
+    }
+
+    var benchSource: String? {
+        switch self {
+        case .comprehensive: nil
+        case .software: "deepswe"
+        case .visual: "pompeii"
+        case .terminal: "tb4"
+        case .science: "science"
         }
     }
 }
@@ -220,9 +236,17 @@ struct CodexRadarSnapshot: Equatable, Sendable {
         var result = CodexRadarSnapshot.loading
         result.dataSource = .publicComposite
         result.status = CodexRadarDimension.comprehensive.title
+        let details = [
+            software.message.map { "软件工程：\($0)" },
+            visual.message.map { "视觉空间：\($0)" }
+        ].compactMap { $0 }
+        func message(_ summary: String? = nil) -> String? {
+            let lines = details + [summary].compactMap { $0 }
+            return lines.isEmpty ? nil : lines.joined(separator: "\n")
+        }
         guard software.dataSource == .publicMetrics, visual.dataSource == .publicVisual,
               software.hasData, visual.hasData else {
-            return result.withState(.error, message: "综合智能需要软件工程和视觉空间两个维度的有效数据")
+            return result.withState(.error, message: message("综合智能需要软件工程和视觉空间两个维度的有效数据"))
         }
         let visualByID = Dictionary(visual.models.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         result.models = software.models.compactMap { left in
@@ -250,8 +274,9 @@ struct CodexRadarSnapshot: Equatable, Sendable {
         result.monitoredAt = [software.monitoredAt, visual.monitoredAt].compactMap { $0 }.min()
         result.fetchedAt = [software.fetchedAt, visual.fetchedAt].compactMap { $0 }.min()
         let stale = software.state != .ready || visual.state != .ready
-        if result.models.isEmpty { return result.withState(.error, message: "暂无同时完成两个维度评测的模型档位") }
-        return result.withState(stale ? .stale : .ready, message: stale ? "部分维度未更新，综合智能沿用其最后有效数据" : nil)
+        if result.models.isEmpty { return result.withState(.error, message: message("暂无同时完成两个维度评测的模型档位")) }
+        return result.withState(stale ? .stale : .ready,
+                                message: message(stale ? "部分维度未更新，综合智能沿用其最后有效数据" : nil))
     }
 }
 
