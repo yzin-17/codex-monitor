@@ -29,7 +29,10 @@ import Testing
 }
 
 @MainActor private func captureProgressView<V: View>(_ view: V, size: CGSize, name: String) async throws {
-    let host = NSHostingView(rootView: view.environment(\.colorScheme, .dark))
+    // 固定捕获视口，避免 NSHostingView 按内容固有尺寸缩小无边框窗口。
+    let host = NSHostingView(rootView: view.frame(width: size.width, height: size.height, alignment: .topLeading)
+        .background(Color.black).environment(\.colorScheme, .dark))
+    host.sizingOptions = []
     host.appearance = NSAppearance(named: .darkAqua)
     host.frame = NSRect(origin: .zero, size: size)
     let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
@@ -40,6 +43,7 @@ import Testing
     host.layoutSubtreeIfNeeded()
     try await Task.sleep(for: .milliseconds(250))
     host.layoutSubtreeIfNeeded(); host.displayIfNeeded()
+    #expect(host.bounds.size == size)
     let bitmap = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
     host.cacheDisplay(in: host.bounds, to: bitmap)
     #expect(bitmap.pixelsWide >= Int(size.width))
@@ -110,7 +114,7 @@ import Testing
     }.padding(12).frame(width: 520).background(Color.black)
     try await captureProgressView(list, size: .init(width: 520, height: 218), name: "task-row-long-title")
     try await captureProgressView(TaskProgressPanel(store: store, threadID: id, close: {}).background(Color.black),
-                                  size: .init(width: 492, height: 450), name: "task-progress")
+                                  size: .init(width: 460, height: 450), name: "task-progress")
 }
 
 @Test @MainActor func tokenSpeedHUDRendersFreshEstimatedAndStaleStates() async throws {

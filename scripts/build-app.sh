@@ -103,11 +103,13 @@ PLIST
 build_arch() {
   local swift_arch="$1"
   local dmg_arch="$2"
-  local build_dir="$ROOT_DIR/.build/$swift_arch-apple-macosx/release"
+  local build_dir
   local staged_app="$PACKAGE_STAGE_DIR/$dmg_arch/$APP_NAME.app"
   local dmg_path="$DIST_DIR/$PACKAGE_NAME-$APP_VERSION-$dmg_arch.dmg"
 
   swift build -c release --arch "$swift_arch"
+  build_dir="$(swift build -c release --arch "$swift_arch" --show-bin-path)"
+  lipo -verify_arch "$swift_arch" "$build_dir/CodexNotch"
   create_app_bundle "$build_dir/CodexNotch" "$staged_app"
 
   rm -rf "$DMG_STAGE_DIR"
@@ -121,8 +123,9 @@ build_arch "arm64" "arm64"
 build_arch "x86_64" "amd64"
 
 case "$(uname -m)" in
-  x86_64) create_app_bundle "$ROOT_DIR/.build/x86_64-apple-macosx/release/CodexNotch" "$APP_DIR" ;;
-  *) create_app_bundle "$ROOT_DIR/.build/arm64-apple-macosx/release/CodexNotch" "$APP_DIR" ;;
+  # 新 Swift 构建系统可能共用 Products 目录，使用已分架构保存的副本。
+  x86_64) create_app_bundle "$PACKAGE_STAGE_DIR/amd64/$APP_NAME.app/Contents/MacOS/CodexNotch" "$APP_DIR" ;;
+  *) create_app_bundle "$PACKAGE_STAGE_DIR/arm64/$APP_NAME.app/Contents/MacOS/CodexNotch" "$APP_DIR" ;;
 esac
 
 rm -rf "$DMG_STAGE_DIR" "$PACKAGE_STAGE_DIR"

@@ -68,10 +68,13 @@ func startupAndAppearanceRenderWithoutChangingStartupOrRefreshing() async throws
     for (tab, name) in [(SettingsTab.launch, "settings-startup"), (.appearance, "settings-appearance")] {
         let view = SettingsView(settings: settings, remoteViewModel: remote, newAPIViewModel: newAPI,
             subAPIViewModel: subAPI, codexRadarViewModel: radar, onRefresh: { refreshes += 1 }, initialTab: tab)
-        let host = NSHostingView(rootView: view.environment(\.colorScheme, .dark))
+        let host = NSHostingView(rootView: view.frame(width: 900, height: 780)
+            .background(Color(nsColor: .windowBackgroundColor)).environment(\.colorScheme, .dark))
+        host.sizingOptions = []
         host.appearance = NSAppearance(named: .darkAqua)
         host.frame = NSRect(x: 0, y: 0, width: 900, height: 780)
         let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.appearance = NSAppearance(named: .darkAqua)
         window.isReleasedWhenClosed = false
         window.contentView = host
         defer { window.orderOut(nil); window.contentView = nil; window.close() }

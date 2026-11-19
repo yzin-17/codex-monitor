@@ -143,7 +143,8 @@ private func waitForFixtureStart(_ marker: URL, timeout: Duration = .seconds(10)
     defer { try? FileManager.default.removeItem(at: root) }
     let fixture = try makeLoginFixture(in: root, complete: true)
     var opened: [URL] = []
-    let credentials = try await CodexBrowserLoginClient(executablePath: fixture.path, timeout: 3).login { opened.append($0); return true }
+    // 此用例验证协议与凭据清理；并发原生截图会占用主线程，不以三秒调度预算代替协议断言。
+    let credentials = try await CodexBrowserLoginClient(executablePath: fixture.path, timeout: 30).login { opened.append($0); return true }
     #expect(opened.count == 1)
     #expect(credentials.accessToken == "synthetic-access" && credentials.workspaceID == "synthetic-workspace")
     let usedHome = try String(contentsOf: root.appendingPathComponent("used-home"), encoding: .utf8)
