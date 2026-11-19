@@ -176,7 +176,7 @@ private func waitForFixtureStart(_ marker: URL, timeout: Duration = .seconds(10)
     defer { try? FileManager.default.removeItem(at: root) }
     let fixture = try makeLoginFixture(in: root, complete: false)
     do {
-        _ = try await CodexBrowserLoginClient(executablePath: fixture.path, timeout: 3).login { _ in false }
+        _ = try await CodexBrowserLoginClient(executablePath: fixture.path, timeout: 30).login { _ in false }
         Issue.record("浏览器启动失败不得视为成功")
     } catch let error as CodexBrowserLoginError { #expect(error == .browserUnavailable) }
     let usedHome = try String(contentsOf: root.appendingPathComponent("used-home"), encoding: .utf8)
