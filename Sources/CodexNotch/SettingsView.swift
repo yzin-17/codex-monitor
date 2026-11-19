@@ -43,13 +43,14 @@ private enum RefreshPreset: String, CaseIterable, Identifiable {
     }
 }
 
-private enum SettingsTab: String, CaseIterable, Identifiable {
+enum SettingsTab: String, CaseIterable, Identifiable {
     case codex
     case codexRadar
     case remoteCodex
     case newAPI
     case subAPI
     case launch
+    case appearance
     case about
 
     var id: String { rawValue }
@@ -67,7 +68,9 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
         case .subAPI:
             "Sub2API"
         case .launch:
-            "启动与外观"
+            "启动"
+        case .appearance:
+            "外观"
         case .about:
             "关于"
         }
@@ -86,7 +89,9 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
         case .subAPI:
             "person.2.fill"
         case .launch:
-            "gearshape.fill"
+            "power"
+        case .appearance:
+            "paintpalette.fill"
         case .about:
             "info.circle.fill"
         }
@@ -245,6 +250,7 @@ struct SettingsView: View {
     let onRefresh: () -> Void
 
     @State private var draft = SettingsDraft()
+    @StateObject private var hudLayoutEditingSession = HUDLayoutEditingSession()
     @State private var selectedPreset: RefreshPreset = .balanced
     @State private var selectedTab: SettingsTab = .codex
     @State private var remoteCategory: RemoteSourceCategory = .codex
@@ -254,6 +260,24 @@ struct SettingsView: View {
     @State private var deleteCandidate: AccountDeleteCandidate?
     @State private var remoteSourceEditorContext: RemoteSourceEditorContext?
     @State private var remoteSourceDeleteCandidate: RemoteSourceDeleteCandidate?
+
+    init(
+        settings: CodexNotchSettings,
+        remoteViewModel: RemoteMonitorViewModel,
+        newAPIViewModel: BalanceMonitorViewModel,
+        subAPIViewModel: BalanceMonitorViewModel,
+        codexRadarViewModel: CodexRadarViewModel,
+        onRefresh: @escaping () -> Void,
+        initialTab: SettingsTab = .codex
+    ) {
+        self.settings = settings
+        self.remoteViewModel = remoteViewModel
+        self.newAPIViewModel = newAPIViewModel
+        self.subAPIViewModel = subAPIViewModel
+        self.codexRadarViewModel = codexRadarViewModel
+        self.onRefresh = onRefresh
+        _selectedTab = State(initialValue: initialTab)
+    }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -457,7 +481,9 @@ struct SettingsView: View {
                 keychainError: settings.subAPIKeychainError
             )
         case .launch:
-            launchAndAppearanceContent
+            launchSettingsContent
+        case .appearance:
+            appearanceSettingsContent
         case .about:
             aboutContent
         }
@@ -662,15 +688,37 @@ struct SettingsView: View {
     }
 
     @ViewBuilder
-    private var launchAndAppearanceContent: some View {
+    private var appearanceSettingsContent: some View {
         HUDLayoutEditorView(preferences: settings.hudPreferences, accounts: settings.codexAccounts,
             remote: remoteViewModel, newAPI: newAPIViewModel, subAPI: subAPIViewModel,
             notchDisplaySize: Binding(get: { settings.notchDisplaySize }, set: { settings.notchDisplaySize = $0; draft.notchDisplaySize = $0 }),
             notchAdjustment: Binding(get: { settings.notchWidthAdjustment }, set: { settings.notchWidthAdjustment = $0; draft.notchWidthAdjustment = $0 }),
             legacySource: Binding(get: { settings.notchDisplaySource }, set: { settings.notchDisplaySource = $0; draft.notchDisplaySource = $0 }),
-            pulseEnabled: $draft.enablePulse)
+            pulseEnabled: $draft.enablePulse,
+            editingSession: hudLayoutEditingSession)
 
-        Section("启动与外观") {
+        Section("运行状态动画") {
+            Toggle(isOn: $draft.enablePulse) {
+                HelpLabel(title: "运行指示灯动画", help: "控制运行中状态点和外部提醒状态点是否带轻微呼吸动画。关闭可进一步降低功耗，点击下方“保存”后生效。")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var launchSettingsContent: some View {
+        Section("启动") {
+            Toggle(isOn: $draft.launchAtLoginEnabled) {
+                HelpLabel(title: "开机自启", help: "登录 macOS 后自动启动 codex监测。保存时才会调用系统启动项接口。")
+            }
+
+            if let error = settings.launchAtLoginError {
+                Text("开机自启设置失败：\(error)")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.red.opacity(0.85))
+            }
+        }
+
+        Section("凭据存储") {
             Picker(selection: $draft.secretStorageMode) {
                 ForEach(SecretStorageMode.allCases) { mode in
                     Text(mode.label).tag(mode)
@@ -683,19 +731,6 @@ struct SettingsView: View {
             Text("本机数据库会把密钥保存到当前用户的 Application Support 目录，仅当前 macOS 用户可读写。")
                 .font(.system(size: 10.5, weight: .medium))
                 .foregroundStyle(.secondary)
-
-            Toggle(isOn: $draft.launchAtLoginEnabled) {
-                HelpLabel(title: "开机自启", help: "登录 macOS 后自动启动 codex监测。保存时才会调用系统启动项接口。")
-            }
-            Toggle(isOn: $draft.enablePulse) {
-                HelpLabel(title: "运行指示灯动画", help: "控制运行中状态点和外部提醒状态点是否带轻微呼吸动画。关闭可进一步降低功耗。")
-            }
-
-            if let error = settings.launchAtLoginError {
-                Text("开机自启设置失败：\(error)")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.red.opacity(0.85))
-            }
 
             if let error = settings.secretStorageError {
                 Text("密钥存储切换失败：\(error)")
@@ -1890,7 +1925,7 @@ struct SettingsView: View {
 
     private func refreshSelectedTab() {
         switch selectedTab {
-        case .codex, .launch, .about:
+        case .codex, .launch, .appearance, .about:
             onRefresh()
         case .codexRadar:
             codexRadarViewModel.refreshNow()

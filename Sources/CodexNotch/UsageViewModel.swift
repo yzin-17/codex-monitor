@@ -28,6 +28,12 @@ final class UsageViewModel: ObservableObject {
     @Published private(set) var conversationCostDetails: [String: ConversationCostDetails] = [:]
     @Published private(set) var conversationCostLoadingKeys: Set<String> = []
     @Published private(set) var conversationCostErrors: [String: String] = [:]
+    @Published private(set) var tokenRateSummary: TokenRateSummary = .unavailable
+
+    lazy var taskProgress = TaskProgressStore(codexHome: store.conversationDataDirectory.path,
+        automatic: !isPreviewMode, storageDirectory: isPreviewMode
+            ? FileManager.default.temporaryDirectory.appendingPathComponent("codex-monitor-preview-\(UUID())") : nil)
+    private lazy var tokenRates = CodexTokenRateStore(automatic: !isPreviewMode)
 
     lazy var publicInsights = PublicInsightsStore(defaults: settings.preferenceStore, automatic: !isPreviewMode)
     lazy var cliResume = CLIResumeStore(home: store.conversationDataDirectory,
@@ -36,6 +42,8 @@ final class UsageViewModel: ObservableObject {
 
     func shutdownExtensions() async {
         cancelConversationCostWork(clearDetails: false)
+        taskProgress.stop()
+        tokenRates.stop()
         publicInsights.stop()
         await cliResume.shutdown()
     }
@@ -122,6 +130,9 @@ final class UsageViewModel: ObservableObject {
             hasLoadedUsageTotals = true
             return
         }
+        tokenRates.$summary
+            .sink { [weak self] value in self?.tokenRateSummary = value }
+            .store(in: &cancellables)
         refresh(bypassFastCache: true)
         refreshWatchPaths()
         observeSettings()
@@ -397,6 +408,7 @@ final class UsageViewModel: ObservableObject {
                 mergedSnapshot.usage30d = self.snapshot.usage30d
                 mergedSnapshot.usageToday = self.snapshot.usageToday
                 self.snapshot = mergedSnapshot
+                self.tokenRates.setTasks(mergedSnapshot.tasks)
                 if snapshotLoadSucceeded {
                     self.prefetchConversationCosts(for: self.snapshot.tasks)
                 }
@@ -711,6 +723,7 @@ final class UsageViewModel: ObservableObject {
 
     private func installFileWatchers(for paths: [String]) {
         let normalizedPaths = Array(Set(paths.filter { !$0.isEmpty })).sorted()
+        tokenRates.setPaths(normalizedPaths)
         guard normalizedPaths != watchedPaths else {
             return
         }
@@ -741,6 +754,7 @@ final class UsageViewModel: ObservableObject {
     }
 
     private func scheduleFileChangeRefresh(refreshWatchPaths: Bool) {
+        tokenRates.refresh()
         let now = Date()
         let burstStartedAt = fileChangeBurstStartedAt ?? now
         fileChangeBurstStartedAt = burstStartedAt

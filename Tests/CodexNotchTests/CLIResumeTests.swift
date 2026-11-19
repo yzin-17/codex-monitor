@@ -180,7 +180,8 @@ private func makeResumeProcessFixture(_ root: URL, appServer: Bool) throws -> UR
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }
     let executable = try makeResumeProcessFixture(root, appServer: true)
-    let result = try await CLIResumeTransport(executablePath: executable.path, inspectTimeout: 3).lastTurn(home: root, context: resumeFixture().context)
+    // 原生截图与本测试并发占用主线程；此处验证协议，不验证三秒内的调度时延。
+    let result = try await CLIResumeTransport(executablePath: executable.path, inspectTimeout: 30).lastTurn(home: root, context: resumeFixture().context)
     #expect(result.0 == "turn-fixture" && result.1 && result.2 == "failed")
 }
 @Test @MainActor func cliRunnerActuallyPassesExactSessionAndPromptWithoutShell() async throws {
@@ -203,7 +204,7 @@ private func makeResumeProcessFixture(_ root: URL, appServer: Bool) throws -> UR
     let identity = try CLIResumeNativeFiles.auth(home: root).0
     let ticket = CLIResumeTicket(context: context, identity: identity, turnID: "turn-fixture", observedAt: Date(),
         blockedWindows: [], message: "继续测试 $(不要作为 shell 执行)", sandbox: "read-only")
-    try await CLIResumeTransport(executablePath: executable.path, runTimeout: 3).run(home: root, ticket: ticket, onStarted: {})
+    try await CLIResumeTransport(executablePath: executable.path, runTimeout: 30).run(home: root, ticket: ticket, onStarted: {})
     let args = try String(contentsOf: root.appendingPathComponent("arguments"), encoding: .utf8)
     #expect(args.contains(resumeThread))
     #expect(!args.contains(ticket.message) && !args.contains("--last"))

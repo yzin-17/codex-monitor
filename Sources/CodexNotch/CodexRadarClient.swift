@@ -9,6 +9,7 @@ struct CodexRadarClient: Sendable {
     static let bindingURL = URL(string: "https://codexradar.com/data/radar-bench-binding.json")!
     static let benchURL = URL(string: "https://codexradar.com/api/radar-bench-score")!
     static let communityURL = URL(string: "https://codexradar.com/api/model-ratings")!
+    static let currentRoundURL = URL(string: "https://codexradar.com/data/codex-four-task-results.json")!
 
     let publicEndpoint: URL
     let authorizedEndpoint: URL
@@ -50,6 +51,10 @@ struct CodexRadarClient: Sendable {
         try await request(url: Self.communityURL, token: nil)
     }
 
+    func fetchCurrentRound() async throws -> Data {
+        try await request(url: Self.currentRoundURL, token: nil)
+    }
+
     func fetchBench() async throws -> CodexRadarBenchBatch {
         let binding = try JSONDecoder().decode(CodexRadarBenchBinding.self,
                                               from: await request(url: Self.bindingURL, token: nil))
@@ -57,6 +62,7 @@ struct CodexRadarClient: Sendable {
         var results: [CodexRadarSelection: Result<Data, Error>] = [:]
         await withTaskGroup(of: (CodexRadarSelection, Result<Data, Error>).self) { group in
             var iterator = binding.model_efforts.makeIterator()
+            var unavailable: (any Error)?
             func add(_ selection: CodexRadarSelection) {
                 group.addTask {
                     do {
@@ -71,7 +77,17 @@ struct CodexRadarClient: Sendable {
             for _ in 0..<3 { if let selection = iterator.next() { add(selection) } }
             for await (selection, result) in group {
                 results[selection] = result
-                if !Task.isCancelled, let next = iterator.next() { add(next) }
+                if case .failure(let error) = result,
+                   let failure = error as? CodexRadarClientError, failure.isServiceUnavailable {
+                    unavailable = error
+                }
+                if !Task.isCancelled, unavailable == nil, let next = iterator.next() { add(next) }
+            }
+            // 同一旧源已返回网关错误/限流时，不继续排队请求剩余模型。
+            if let unavailable {
+                for selection in binding.model_efforts where results[selection] == nil {
+                    results[selection] = .failure(unavailable)
+                }
             }
         }
         try Task.checkCancellation()
@@ -98,7 +114,8 @@ struct CodexRadarClient: Sendable {
             throw CodexRadarClientError.invalidResponse
         }
         guard response.statusCode == 200 else {
-            throw CodexRadarClientError.httpStatus(response.statusCode)
+            throw CodexRadarClientError.httpStatus(response.statusCode,
+                retryAfter: Self.retryAfter(response.value(forHTTPHeaderField: "Retry-After")))
         }
         if token == nil, let cacheStatus = response.value(forHTTPHeaderField: "X-Codex-Cache")?.uppercased(),
            cacheStatus.hasPrefix("STALE") || cacheStatus == "ERROR" {
@@ -125,7 +142,7 @@ struct CodexRadarClient: Sendable {
                   let effort = items.first(where: { $0.name == "effort" })?.value else { return false }
             return CodexRadarSelection(model: model, effort: effort).isSupported
         }
-        if [Self.bindingURL.path, Self.communityURL.path, "/"].contains(url.path) { return url.query == nil }
+        if [Self.bindingURL.path, Self.communityURL.path, Self.currentRoundURL.path, "/"].contains(url.path) { return url.query == nil }
         return [Self.publicURL.path, Self.visualURL.path].contains(url.path)
             && (url.query == nil || url.query == "refresh=1")
     }
@@ -137,12 +154,22 @@ struct CodexRadarClient: Sendable {
         defer { session.finishTasksAndInvalidate() }
         return try await session.data(for: request)
     }
+
+    static func retryAfter(_ value: String?, now: Date = Date()) -> TimeInterval? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return nil }
+        if let seconds = Double(value), seconds.isFinite, seconds >= 0 { return seconds }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+        return formatter.date(from: value).map { max(0, $0.timeIntervalSince(now)) }
+    }
 }
 
 enum CodexRadarClientError: LocalizedError {
     case disallowedURL
     case invalidResponse
-    case httpStatus(Int)
+    case httpStatus(Int, retryAfter: TimeInterval? = nil)
     case emptyResponse
     case staleResponse
 
@@ -150,9 +177,19 @@ enum CodexRadarClientError: LocalizedError {
         switch self {
         case .disallowedURL: "CodexRadar 地址不受信任"
         case .invalidResponse: "CodexRadar 返回了无效响应"
-        case .httpStatus(let status): status == 401 ? "CodexRadar Token 无效或未授权" : "CodexRadar HTTP \(status)"
+        case .httpStatus(let status, _): status == 401 ? "CodexRadar Token 无效或未授权" : "CodexRadar HTTP \(status)"
         case .emptyResponse: "CodexRadar 返回空数据"
         case .staleResponse: "CodexRadar 暂时只返回过期缓存"
         }
+    }
+
+    var retryAfter: TimeInterval? {
+        if case .httpStatus(_, let interval) = self { return interval }
+        return nil
+    }
+
+    var isServiceUnavailable: Bool {
+        if case .httpStatus(let status, _) = self { return status == 429 || (500...599).contains(status) }
+        return false
     }
 }

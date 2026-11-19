@@ -7,17 +7,20 @@ enum CodexRadarDataSource: String, Codable, Equatable, Sendable {
     case publicVisual
     case publicComposite
     case publicBench
+    case publicCurrentRound
 
     var label: String {
         switch self {
         case .authorizedAPI: "授权 API"
         case .publicSummary: "旧版摘要"
         case .publicMetrics, .publicVisual, .publicComposite: "旧基准缓存"
-        case .publicBench: "官网雷达"
+        case .publicBench: "旧 64 题基准"
+        case .publicCurrentRound: "官网四项总榜"
         }
     }
 
-    var usesAverages: Bool { self == .publicMetrics || self == .publicVisual || self == .publicComposite || self == .publicBench }
+    var usesAverages: Bool { self == .publicMetrics || self == .publicVisual || self == .publicComposite || usesRadarScale }
+    var usesRadarScale: Bool { self == .publicBench || self == .publicCurrentRound }
 }
 
 enum CodexRadarDimension: String, CaseIterable, Sendable {

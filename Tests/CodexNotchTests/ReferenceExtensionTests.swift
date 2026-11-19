@@ -265,6 +265,10 @@ private func referenceCatalog(at now: Date) throws -> SkillCatalogSnapshot {
         try JSONSerialization.data(withJSONObject: ["source": source, "fetchedAt": cachedAt.timeIntervalSinceReferenceDate])
             .write(to: directory.appendingPathComponent("metadata.json"))
     }
+    let roundData = radarCurrentRoundFixture()
+    let cachedRound = try CodexRadarCurrentRound.decode(roundData, fetchedAt: cachedAt)
+    try JSONEncoder().encode(CodexRadarCurrentRoundCache(data: roundData, round: cachedRound))
+        .write(to: radarCache.appendingPathComponent("four-task-v2.json"))
     let radarFailure = CodexRadarViewModel(settings: settings, client: CodexRadarClient { request in
         (Data(), HTTPURLResponse(url: request.url!, statusCode: 502, httpVersion: nil, headerFields: nil)!)
     }, cacheDirectory: radarCache, selectionDefaults: defaults)
@@ -275,7 +279,7 @@ private func referenceCatalog(at now: Date) throws -> SkillCatalogSnapshot {
     #expect(!radarFailure.isRefreshing)
     #expect(radarFailure.lastCheckedAt != nil)
     #expect(radarFailure.snapshot.fetchedAt == cachedAt)
-    #expect(radarFailure.snapshot.message?.contains("雷达接口：CodexRadar HTTP 502") == true)
+    #expect(radarFailure.snapshot.message?.contains("当前总榜未更新：CodexRadar HTTP 502") == true)
     let radarFailureView = DetailPanelView(viewModel: usage, remoteViewModel: remote, newAPIViewModel: newAPI,
         subAPIViewModel: subAPI, codexRadarViewModel: radarFailure, performanceViewModel: perf,
         skillInsights: skills, overlayState: overlay, settings: settings, onSettings: {},

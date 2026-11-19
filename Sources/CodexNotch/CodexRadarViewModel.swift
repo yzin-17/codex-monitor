@@ -25,10 +25,20 @@ final class CodexRadarViewModel: ObservableObject {
     private var authorizedSnapshot: CodexRadarSnapshot?
     private var benchCache: CodexRadarBenchCache?
     private var benchCacheMessage: String?
-    private var benchDue: Bool {
-        benchCache == nil || !(benchCache?.errors.isEmpty ?? true)
-            || CodexRadarRefreshPolicy.shouldRefresh(lastFetchAt: benchCache?.entries.map(\.fetchedAt).min(), now: now())
+    private var currentRound: CodexRadarCurrentRound?
+    private var currentRoundCache: CodexRadarCurrentRoundCache?
+    private var currentRoundMessage: String?
+    private enum Feed: CaseIterable, Hashable, Sendable { case currentRound, bench, community, news, authorized }
+    private enum FeedResult: Sendable {
+        case currentRound(Result<Data, Error>)
+        case bench(Result<CodexRadarBenchBatch, Error>)
+        case community(Result<Data, Error>)
+        case news(Result<Data, Error>)
+        case authorized(Result<Data, Error>)
     }
+    private var failures: Set<Feed> = []
+    private var retryDates: [Feed: Date] = [:]
+    private var serverRetryDates: [Feed: Date] = [:]
     private var refreshTimer: Timer?
     private var settingsTimer: Timer?
     private var refreshTask: Task<Void, Never>?
@@ -37,7 +47,6 @@ final class CodexRadarViewModel: ObservableObject {
     private var observedEnabled: Bool
     private var observedToken: String
     private var lastManualRefreshAt: Date?
-    private var retryAt: Date?
 
     init(
         settings: CodexNotchSettings,
@@ -101,18 +110,38 @@ final class CodexRadarViewModel: ObservableObject {
 
     func refreshIfNeeded() {
         guard settings.codexRadarEnabled else { return }
-        if let retryAt, now() < retryAt {
-            scheduleNextRefresh()
-            return
-        }
-        if retryAt != nil || benchDue || news == nil || community == nil
-            || community.map({ now().timeIntervalSince($0.fetchedAt) >= 300 || now() < $0.fetchedAt }) == true
-            || (!settings.codexRadarAPIToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && authorizedSnapshot == nil)
-            || CodexRadarRefreshPolicy.shouldRefresh(lastFetchAt: oldestFetchAt, now: now()) {
+        if activeFeeds.contains(where: { needsRefresh($0, manual: false) }) {
             refreshFromNetwork()
         } else {
             scheduleNextRefresh()
         }
+    }
+
+    private var activeFeeds: [Feed] {
+        settings.codexRadarAPIToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? [.currentRound, .bench, .community, .news] : Feed.allCases
+    }
+
+    private func fetchDate(_ feed: Feed) -> Date? {
+        switch feed {
+        case .currentRound: currentRound?.fetchedAt
+        case .bench: oldestFetchAt
+        case .community: community?.fetchedAt
+        case .news: news?.fetchedAt
+        case .authorized: authorizedSnapshot?.fetchedAt
+        }
+    }
+
+    private func needsRefresh(_ feed: Feed, manual: Bool) -> Bool {
+        let date = now()
+        if let limitedUntil = serverRetryDates[feed], date < limitedUntil { return false }
+        if manual { return true }
+        if let retry = retryDates[feed] { return date >= retry }
+        if failures.contains(feed) { return true }
+        if feed == .community {
+            return community.map { date < $0.fetchedAt || date.timeIntervalSince($0.fetchedAt) >= 300 } ?? true
+        }
+        return CodexRadarRefreshPolicy.shouldRefresh(lastFetchAt: fetchDate(feed), now: date)
     }
 
     private func loadCacheAndSchedule(forceRefresh: Bool = false) {
@@ -136,6 +165,12 @@ final class CodexRadarViewModel: ObservableObject {
         visualSnapshot = loaded(cacheDirectory.appendingPathComponent("visual"))
         benchCache = CodexRadarCache.loadValue(CodexRadarBenchCache.self, name: "bench.json", from: cacheDirectory)
         benchCacheMessage = nil
+        currentRoundCache = CodexRadarCache.loadValue(CodexRadarCurrentRoundCache.self,
+            name: "four-task-v2.json", from: cacheDirectory)
+        currentRound = try? currentRoundCache?.validatedRound()
+        if currentRound == nil { currentRoundCache = nil }
+        currentRoundMessage = nil
+        failures = benchCache?.errors.isEmpty == false ? [.bench] : []
         community = CodexRadarCache.loadValue(CodexRadarCommunitySnapshot.self, name: "community.json", from: cacheDirectory)
         communityMessage = community.map {
             now().timeIntervalSince($0.fetchedAt) >= 300 || now().timeIntervalSince($0.updatedAt) > 3600
@@ -143,7 +178,7 @@ final class CodexRadarViewModel: ObservableObject {
         } ?? nil
         news = CodexRadarCache.loadNews(from: cacheDirectory)
         newsMessage = nil
-        lastCheckedAt = [benchCache?.checkedAt, community?.fetchedAt, softwareSnapshot.fetchedAt,
+        lastCheckedAt = [currentRound?.fetchedAt, benchCache?.checkedAt, community?.fetchedAt, softwareSnapshot.fetchedAt,
                          visualSnapshot.fetchedAt, news?.fetchedAt].compactMap { $0 }.max()
         updateDisplayedSnapshot()
         if forceRefresh { refreshFromNetwork() }
@@ -152,7 +187,19 @@ final class CodexRadarViewModel: ObservableObject {
 
     private func updateDisplayedSnapshot() {
         guard settings.codexRadarEnabled else { snapshot = .disabled; return }
-        if let benchCache, !benchCache.entries.isEmpty {
+        if selectedDimension == .comprehensive {
+            if let currentRound {
+                let cached = failures.contains(.currentRound)
+                    || CodexRadarRefreshPolicy.shouldRefresh(lastFetchAt: currentRound.fetchedAt, now: now())
+                snapshot = currentRound.snapshot(cached: cached,
+                    message: currentRoundMessage ?? (cached ? "当前总榜缓存已过期，正在后台更新" : nil))
+            } else {
+                snapshot = .loading
+                snapshot.dataSource = .publicCurrentRound
+                snapshot = snapshot.withState(failures.contains(.currentRound) ? .error : .loading,
+                    message: currentRoundMessage ?? "正在读取官网当前四项总榜")
+            }
+        } else if let benchCache, !benchCache.entries.isEmpty {
             snapshot = benchCache.snapshot(for: selectedDimension, failure: nil)
             if snapshot.state == .ready,
                CodexRadarRefreshPolicy.shouldRefresh(lastFetchAt: oldestFetchAt, now: now()) {
@@ -162,7 +209,7 @@ final class CodexRadarViewModel: ObservableObject {
             switch selectedDimension {
             case .software: snapshot = softwareSnapshot
             case .visual: snapshot = visualSnapshot
-            case .comprehensive: snapshot = .comprehensive(software: softwareSnapshot, visual: visualSnapshot)
+            case .comprehensive: break
             case .terminal, .science: snapshot = .loading
             }
             let failure = benchCache?.snapshot(for: selectedDimension, failure: nil).message
@@ -172,10 +219,10 @@ final class CodexRadarViewModel: ObservableObject {
                 snapshot = benchCache.snapshot(for: selectedDimension, failure: nil)
             }
         }
-        if isRefreshing && snapshot.models.isEmpty {
+        if isRefreshing && snapshot.models.isEmpty && snapshot.state != .error {
             snapshot = snapshot.withState(.loading, message: "正在读取此维度的评分")
         }
-        if let benchCacheMessage {
+        if selectedDimension != .comprehensive, let benchCacheMessage {
             snapshot.message = [snapshot.message, benchCacheMessage].compactMap { $0 }.joined(separator: "\n")
         }
         if let authorizedSnapshot {
@@ -194,6 +241,8 @@ final class CodexRadarViewModel: ObservableObject {
 
     private func refreshFromNetwork(manual: Bool = false) {
         guard settings.codexRadarEnabled, !isRefreshing else { return }
+        let feeds = activeFeeds.filter { needsRefresh($0, manual: manual) }
+        guard !feeds.isEmpty else { scheduleNextRefresh(); return }
         refreshTimer?.invalidate()
         nextRefreshAt = nil
         isRefreshing = true
@@ -202,73 +251,131 @@ final class CodexRadarViewModel: ObservableObject {
         let currentGeneration = generation
         let token = settings.codexRadarAPIToken.trimmingCharacters(in: .whitespacesAndNewlines)
         let client = client
-        let readBench = manual || benchDue
-        let readCommunity = manual || community == nil || communityMessage != nil
-            || community.map { now().timeIntervalSince($0.fetchedAt) >= 300 || now() < $0.fetchedAt } == true
-        let readNews = manual || newsMessage != nil
-            || CodexRadarRefreshPolicy.shouldRefresh(lastFetchAt: news?.fetchedAt, now: now())
-        let readAuthorized = !token.isEmpty && (manual || authorizedSnapshot?.state != .ready
-            || CodexRadarRefreshPolicy.shouldRefresh(lastFetchAt: authorizedSnapshot?.fetchedAt, now: now()))
         refreshTask = Task { [weak self] in
-            async let bench: Result<CodexRadarBenchBatch, Error>? = readBench ? Self.capture { try await client.fetchBench() } : nil
-            async let communityResult: Result<Data, Error>? = readCommunity ? Self.capture { try await client.fetchCommunity() } : nil
-            async let newsResult: Result<Data, Error>? = readNews ? Self.capture { try await client.fetchNews() } : nil
-            async let authorized: Result<Data, Error>? = readAuthorized ? Self.capture { try await client.fetch(token: token).data } : nil
-            let results = await (bench, communityResult, newsResult, authorized)
+            await withTaskGroup(of: FeedResult.self) { group in
+                for feed in feeds {
+                    group.addTask {
+                        switch feed {
+                        case .currentRound: .currentRound(await Self.capture { try await client.fetchCurrentRound() })
+                        case .bench: .bench(await Self.capture { try await client.fetchBench() })
+                        case .community: .community(await Self.capture { try await client.fetchCommunity() })
+                        case .news: .news(await Self.capture { try await client.fetchNews() })
+                        case .authorized: .authorized(await Self.capture { try await client.fetch(token: token).data })
+                        }
+                    }
+                }
+                // 各来源完成即发布；旧评分源的慢请求不阻塞总榜、社区或新闻。
+                for await result in group {
+                    guard let self, !Task.isCancelled, currentGeneration == self.generation else { continue }
+                    self.apply(result, fetchedAt: self.now())
+                    self.updateDisplayedSnapshot()
+                }
+            }
             guard let self, !Task.isCancelled, currentGeneration == self.generation else { return }
-            let fetchedAt = self.now()
-            self.lastCheckedAt = fetchedAt
-            if let result = results.0 {
-                do {
-                    let read = try result.get().decode(fetchedAt: fetchedAt)
-                    self.benchCache = .merging(read, previous: self.benchCache, checkedAt: fetchedAt)
-                } catch {
-                    let message = ((error as? LocalizedError)?.errorDescription ?? error.localizedDescription).redactedForDisplay
-                    self.benchCache = .init(entries: self.benchCache?.entries ?? [], checkedAt: fetchedAt,
-                                            errors: ["雷达接口": message])
-                }
-                self.benchCacheMessage = nil
-                do { try CodexRadarCache.saveValue(self.benchCache!, name: "bench.json", to: self.cacheDirectory) }
-                catch { self.benchCacheMessage = "评分已获取，但本地缓存保存失败" }
-            }
-            if let result = results.1 {
-                do {
-                    self.community = try CodexRadarCommunitySnapshot.decode(result.get(), fetchedAt: fetchedAt)
-                    self.communityMessage = fetchedAt.timeIntervalSince(self.community!.updatedAt) > 3600
-                        ? "社区体感接口返回旧数据，以下为过期的 24 小时投票快照" : nil
-                    do { try CodexRadarCache.saveValue(self.community!, name: "community.json", to: self.cacheDirectory) }
-                    catch { self.communityMessage = "社区体感分已获取，但本地缓存保存失败" }
-                } catch {
-                    let message = ((error as? LocalizedError)?.errorDescription ?? error.localizedDescription).redactedForDisplay
-                    self.communityMessage = "社区体感分未更新：\(message)；5 分钟后自动重试，可手动重试"
-                }
-            }
-            var failed = !(self.benchCache?.errors.isEmpty ?? true) || self.communityMessage != nil
-            if let result = results.3 {
-                let authorizedResult = self.applyScores(result, source: .authorizedAPI, previous: self.authorizedSnapshot ?? .loading,
-                                                         directory: self.cacheDirectory.appendingPathComponent("authorized"), fetchedAt: fetchedAt)
-                self.authorizedSnapshot = authorizedResult.snapshot
-                failed = failed || !authorizedResult.succeeded
-            }
-            if let result = results.2 { do {
-                self.news = try CodexRadarNewsParser.decode(result.get(), fetchedAt: fetchedAt)
-                self.newsMessage = nil
-                do { try CodexRadarCache.saveNews(self.news!, to: self.cacheDirectory) }
-                catch { self.newsMessage = "新闻已获取，但本地缓存保存失败" }
-            } catch {
-                failed = true
-                let message = ((error as? LocalizedError)?.errorDescription ?? error.localizedDescription).redactedForDisplay
-                self.newsMessage = "新闻暂未更新：\(message)；5 分钟后自动重试，可手动重试"
-            } }
-            failed = failed || self.newsMessage != nil
             self.isRefreshing = false
             self.refreshTask = nil
-            self.retryAt = failed ? fetchedAt.addingTimeInterval(CodexRadarRefreshPolicy.retryInterval) : nil
-            if failed { self.lastManualRefreshAt = nil }
-            else if manual { self.lastManualRefreshAt = fetchedAt }
+            if !self.failures.isEmpty { self.lastManualRefreshAt = nil }
+            else if manual { self.lastManualRefreshAt = self.now() }
             self.updateDisplayedSnapshot()
             self.scheduleNextRefresh()
         }
+    }
+
+    private func record(_ feed: Feed, succeeded: Bool, at date: Date, retryAfter: TimeInterval? = nil) {
+        if succeeded {
+            failures.remove(feed)
+            retryDates.removeValue(forKey: feed)
+            serverRetryDates.removeValue(forKey: feed)
+        } else {
+            failures.insert(feed)
+            let delay = max(CodexRadarRefreshPolicy.retryInterval, retryAfter ?? 0)
+            retryDates[feed] = date.addingTimeInterval(delay)
+            if let retryAfter, retryAfter > 0 {
+                serverRetryDates[feed] = date.addingTimeInterval(retryAfter)
+            } else {
+                serverRetryDates.removeValue(forKey: feed)
+            }
+        }
+    }
+
+    private func apply(_ result: FeedResult, fetchedAt: Date) {
+        lastCheckedAt = fetchedAt
+        switch result {
+        case .currentRound(let result):
+            do {
+                let data = try result.get()
+                let round = try CodexRadarCurrentRound.decode(data, fetchedAt: fetchedAt)
+                currentRound = round
+                currentRoundCache = .init(data: data, round: round)
+                currentRoundMessage = nil
+                record(.currentRound, succeeded: true, at: fetchedAt)
+                do { try CodexRadarCache.saveValue(currentRoundCache!, name: "four-task-v2.json", to: cacheDirectory) }
+                catch { currentRoundMessage = "当前总榜已获取，但本地缓存保存失败" }
+            } catch {
+                record(.currentRound, succeeded: false, at: fetchedAt, retryAfter: (error as? CodexRadarClientError)?.retryAfter)
+                let retained = currentRound == nil ? "暂无当前总榜缓存" : "保留最近成功的当前总榜缓存"
+                currentRoundMessage = "当前总榜未更新：\(message(error))；\(retained)；\(retryText(.currentRound))"
+            }
+        case .bench(let result):
+            var retryAfter: TimeInterval?
+            do {
+                let batch = try result.get()
+                retryAfter = batch.retryAfter
+                benchCache = .merging(batch.decode(fetchedAt: fetchedAt), previous: benchCache, checkedAt: fetchedAt)
+            } catch {
+                retryAfter = (error as? CodexRadarClientError)?.retryAfter
+                benchCache = .init(entries: benchCache?.entries ?? [], checkedAt: fetchedAt,
+                                   errors: ["旧基准评分源": message(error)])
+            }
+            record(.bench, succeeded: benchCache?.errors.isEmpty == true, at: fetchedAt, retryAfter: retryAfter)
+            benchCacheMessage = failures.contains(.bench) ? retryText(.bench) : nil
+            do { try CodexRadarCache.saveValue(benchCache!, name: "bench.json", to: cacheDirectory) }
+            catch {
+                benchCacheMessage = [benchCacheMessage, "旧基准评分缓存保存失败"].compactMap { $0 }.joined(separator: "；")
+            }
+        case .community(let result):
+            do {
+                community = try CodexRadarCommunitySnapshot.decode(result.get(), fetchedAt: fetchedAt)
+                let stale = fetchedAt.timeIntervalSince(community!.updatedAt) > 3600
+                communityMessage = stale ? "社区体感接口返回旧数据，以下为过期的 24 小时投票快照" : nil
+                record(.community, succeeded: !stale, at: fetchedAt)
+                do { try CodexRadarCache.saveValue(community!, name: "community.json", to: cacheDirectory) }
+                catch { communityMessage = "社区体感分已获取，但本地缓存保存失败" }
+            } catch {
+                record(.community, succeeded: false, at: fetchedAt, retryAfter: (error as? CodexRadarClientError)?.retryAfter)
+                communityMessage = "社区体感分未更新：\(message(error))；\(retryText(.community))"
+            }
+        case .news(let result):
+            do {
+                news = try CodexRadarNewsParser.decode(result.get(), fetchedAt: fetchedAt)
+                newsMessage = nil
+                record(.news, succeeded: true, at: fetchedAt)
+                do { try CodexRadarCache.saveNews(news!, to: cacheDirectory) }
+                catch { newsMessage = "新闻已获取，但本地缓存保存失败" }
+            } catch {
+                record(.news, succeeded: false, at: fetchedAt, retryAfter: (error as? CodexRadarClientError)?.retryAfter)
+                newsMessage = "新闻暂未更新：\(message(error))；\(retryText(.news))"
+            }
+        case .authorized(let result):
+            let applied = applyScores(result, source: .authorizedAPI, previous: authorizedSnapshot ?? .loading,
+                                      directory: cacheDirectory.appendingPathComponent("authorized"), fetchedAt: fetchedAt)
+            authorizedSnapshot = applied.snapshot
+            let retryAfter: TimeInterval?
+            if case .failure(let error) = result { retryAfter = (error as? CodexRadarClientError)?.retryAfter }
+            else { retryAfter = nil }
+            record(.authorized, succeeded: applied.succeeded, at: fetchedAt, retryAfter: retryAfter)
+        }
+    }
+
+    private func message(_ error: any Error) -> String {
+        ((error as? LocalizedError)?.errorDescription ?? error.localizedDescription).redactedForDisplay
+    }
+
+    private func retryText(_ feed: Feed) -> String {
+        if let until = serverRetryDates[feed], until > now() {
+            return "上游要求等待至 \(until.formatted(date: .omitted, time: .standard)) 后重试"
+        }
+        return "5 分钟后自动重试，可手动重试"
     }
 
     private func applyScores(_ result: Result<Data, Error>, source: CodexRadarDataSource,
@@ -305,7 +412,9 @@ final class CodexRadarViewModel: ObservableObject {
         observedToken = token
         cancelRefresh()
         authorizedSnapshot = nil
-        retryAt = nil
+        retryDates.removeAll()
+        serverRetryDates.removeAll()
+        failures.removeAll()
         lastManualRefreshAt = nil
         refreshTimer?.invalidate()
         nextRefreshAt = nil
@@ -327,9 +436,13 @@ final class CodexRadarViewModel: ObservableObject {
         guard settings.codexRadarEnabled, !isRefreshing else { return }
         refreshTimer?.invalidate()
         let date = now()
-        let next = CodexRadarRefreshPolicy.nextRefresh(after: date, lastFetchAt: oldestFetchAt, retryAt: retryAt)
-        let communityNext = community?.fetchedAt.addingTimeInterval(300) ?? date
-        let scheduled = retryAt == nil ? min(next, communityNext) : next
+        let scheduled = activeFeeds.map { feed -> Date in
+            if let retry = retryDates[feed] { return max(date, retry) }
+            if let limited = serverRetryDates[feed], limited > date { return limited }
+            if needsRefresh(feed, manual: false) { return date }
+            if feed == .community { return community?.fetchedAt.addingTimeInterval(300) ?? date }
+            return CodexRadarRefreshPolicy.nextRefresh(after: date, lastFetchAt: fetchDate(feed))
+        }.min() ?? date.addingTimeInterval(300)
         nextRefreshAt = scheduled
         let interval = max(1, scheduled.timeIntervalSince(date))
         let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in

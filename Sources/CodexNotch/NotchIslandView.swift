@@ -538,12 +538,14 @@ struct DetailPanelView: View {
         }
         .onDisappear {
             viewModel.cancelConversationCostPrefetch()
+            viewModel.taskProgress.setPresentationVisible(false)
             performanceViewModel.setDetailVisible(false)
         }
     }
 
     private func synchronizeExtensionVisibility() {
         let visible = overlayState.detailPresentationPhase.showsContent
+        viewModel.taskProgress.setPresentationVisible(visible && selectedPage == .codex)
         performanceViewModel.setDetailVisible(visible && selectedPage == .performance)
         if visible && selectedPage == .codex {
             viewModel.prefetchConversationCosts(for: snapshot.tasks)
@@ -944,6 +946,7 @@ struct DetailPanelView: View {
                                     )
                                 },
                                 resumeStore: viewModel.cliResume,
+                                progressStore: viewModel.taskProgress,
                                 codexAccounts: codexAccounts.accounts,
                                 onToggle: { expandedTaskID = expandedTaskID == task.id ? nil : task.id })
                         }
@@ -1043,7 +1046,7 @@ struct DetailPanelView: View {
                 }
 
                 HStack(spacing: 8) {
-                    Text(radar.dataSource == .publicBench ? "雷达分 /150 · 社区体感 /10" : "旧基准评分 · 社区体感 /10")
+                    Text(radar.dataSource.usesRadarScale ? "雷达分 /150 · 社区体感 /10" : "旧基准评分 · 社区体感 /10")
                         .font(.system(size: 9, weight: .medium))
                         .foregroundStyle(.white.opacity(0.5))
                     Spacer(minLength: 0)
@@ -1119,7 +1122,7 @@ struct DetailPanelView: View {
                     ) {
                         ForEach(codexRadarViewModel.combinedScores) { score in
                             RadarModelCard(model: score.radar, usesAverages: radar.dataSource.usesAverages,
-                                           community: score.community, currentBenchmark: radar.dataSource == .publicBench)
+                                           community: score.community, currentBenchmark: radar.dataSource.usesRadarScale)
                         }
                     }
                 }
@@ -1644,7 +1647,7 @@ private struct RefreshIcon: View {
     }
 }
 
-private struct TaskRow: View {
+struct TaskRow: View {
     let task: CodexTask
     let now: Date
     let isExpanded: Bool
@@ -1656,14 +1659,15 @@ private struct TaskRow: View {
     let onConversationCostLoad: () -> Void
     let onConversationCostRefresh: () -> Void
     let resumeStore: CLIResumeStore
+    let progressStore: TaskProgressStore
     let codexAccounts: [CodexAccount]
     let onToggle: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 8) {
-                Button(action: onToggle) {
-                    VStack(alignment: .leading, spacing: 5) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Button(action: onToggle) {
                         HStack(spacing: 6) {
                             Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                                 .font(.system(size: 8, weight: .bold)).frame(width: 9)
@@ -1672,12 +1676,19 @@ private struct TaskRow: View {
                                 .foregroundStyle(.white.opacity(0.92))
                                 .lineLimit(1)
                                 .truncationMode(.tail)
-                                .layoutPriority(1)
                                 .help(task.title)
                             Spacer(minLength: 4)
                             Text(task.status.label)
                                 .font(.system(size: 10, weight: .bold)).foregroundStyle(statusColor)
+                                .lineLimit(1)
+                                .fixedSize(horizontal: true, vertical: false)
+                                .layoutPriority(2)
                         }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(isExpanded ? "收起" : "展开")对话费用：\(task.title)")
+                    .help("查看主代理与子代理费用明细")
                         HStack(spacing: 6) {
                             Text(task.displayDetail(now: now))
                                 .font(.system(size: 10, weight: .medium))
@@ -1688,12 +1699,12 @@ private struct TaskRow: View {
                                     .padding(.horizontal, 5).padding(.vertical, 2)
                                     .background(statusColor.opacity(0.11), in: RoundedRectangle(cornerRadius: 4))
                             }
+                            Spacer(minLength: 0)
+                            TaskProgressButton(store: progressStore, threadID: task.id)
+                                .fixedSize(horizontal: true, vertical: false)
+                                .layoutPriority(1)
                         }
-                    }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("\(isExpanded ? "收起" : "展开")对话费用：\(task.title)")
-                .help("查看主代理与子代理费用明细")
+                }.frame(maxWidth: .infinity, alignment: .leading)
                 TokenUsageTrigger(title: "\(task.title) Token 构成",
                     tokenText: displayedTokenText,
                     summary: displayedConversationCost.usage,

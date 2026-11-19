@@ -1,6 +1,25 @@
 import AppKit
 import SwiftUI
 
+/// 设置窗口持有编辑会话，外观页销毁、重建时仍保留当前布局草稿。
+@MainActor
+final class HUDLayoutEditingSession: ObservableObject {
+    private struct Draft {
+        let layoutID: String
+        let layout: HUDLayout
+    }
+
+    @Published private var draft: Draft?
+
+    func layout(for layoutID: String) -> HUDLayout? {
+        draft?.layoutID == layoutID ? draft?.layout : nil
+    }
+
+    func update(_ layout: HUDLayout?, for layoutID: String) {
+        draft = layout.map { Draft(layoutID: layoutID, layout: $0.normalized) }
+    }
+}
+
 struct HUDLayoutEditorView: View {
     @ObservedObject var preferences: HUDPreferences
     @ObservedObject var accounts: CodexAccountsStore
@@ -12,11 +31,40 @@ struct HUDLayoutEditorView: View {
     var legacySource: Binding<NotchDisplaySource> = .constant(.codex)
     var pulseEnabled: Binding<Bool> = .constant(true)
 
-    @State private var draftLayout: HUDLayout?
+    @StateObject private var editingSession: HUDLayoutEditingSession
     @State private var ruleDraft: HUDRuleDraft?
     @State private var renamePresented = false
     @State private var renameText = ""
     @State private var hasNotch = (NSScreen.main?.safeAreaInsets.top ?? 0) > 0
+
+    init(
+        preferences: HUDPreferences,
+        accounts: CodexAccountsStore,
+        remote: RemoteMonitorViewModel,
+        newAPI: BalanceMonitorViewModel,
+        subAPI: BalanceMonitorViewModel,
+        notchDisplaySize: Binding<NotchDisplaySize> = .constant(.standard),
+        notchAdjustment: Binding<NotchPointAdjustment> = .constant(0),
+        legacySource: Binding<NotchDisplaySource> = .constant(.codex),
+        pulseEnabled: Binding<Bool> = .constant(true),
+        editingSession: HUDLayoutEditingSession? = nil
+    ) {
+        self.preferences = preferences
+        self.accounts = accounts
+        self.remote = remote
+        self.newAPI = newAPI
+        self.subAPI = subAPI
+        self.notchDisplaySize = notchDisplaySize
+        self.notchAdjustment = notchAdjustment
+        self.legacySource = legacySource
+        self.pulseEnabled = pulseEnabled
+        _editingSession = StateObject(wrappedValue: editingSession ?? HUDLayoutEditingSession())
+    }
+
+    private var draftLayout: HUDLayout? {
+        get { editingSession.layout(for: preferences.value.activeLayoutID) }
+        nonmutating set { editingSession.update(newValue, for: preferences.value.activeLayoutID) }
+    }
 
     private var activeLayout: HUDLayout { preferences.value.activeLayout.normalized }
     private var layout: HUDLayout { (draftLayout ?? activeLayout).normalized }
@@ -295,7 +343,7 @@ struct HUDLayoutEditorView: View {
     }
 
     private var previewData: HUDEntityData {
-        HUDEntityData(
+        var value = HUDEntityData(
             providerID: "local",
             provider: "Codex",
             account: "本机 Codex",
@@ -308,11 +356,14 @@ struct HUDLayoutEditorView: View {
             costToday: "≈1.20 USD",
             cost30d: "≈12.30 USD"
         )
+        value.tokenRate = .init(value: 68.4, measuredAt: Date(), measuredCount: 1, activeCount: 1)
+        return value
     }
 
     private func previewData(for source: String) -> HUDEntityData {
         var value = previewData
         value.account = sourceLabel(source)
+        if source != "local" && source != "legacy" { value.tokenRate = nil }
         if source.hasPrefix("remote:") { value.providerID = "gateway"; value.provider = "网关" }
         else if source.hasPrefix("newapi:") { value.providerID = "newapi"; value.provider = "NewAPI" }
         else if source.hasPrefix("subapi:") { value.providerID = "subapi"; value.provider = "Sub2API" }
@@ -538,7 +589,9 @@ private struct HUDConditionalEditor: View {
                     }
                     .frame(width: 62)
                     TextField("阈值", value: $rule.predicates[i].threshold, format: .number).frame(width: 64)
-                    Text(rule.predicates[i].metric.isQuota || rule.predicates[i].metric.isPace
+                    Text(rule.predicates[i].metric == .tokensPerSecond
+                         ? "token/s"
+                         : rule.predicates[i].metric.isQuota || rule.predicates[i].metric.isPace
                          ? "%"
                          : rule.predicates[i].metric.group == "费用" ? "USD" : "小时")
                         .font(.caption)
@@ -549,7 +602,7 @@ private struct HUDConditionalEditor: View {
             Button("添加条件") { rule.predicates.append(.init()) }.disabled(rule.predicates.count >= 8)
             branch("满足时显示", selection: $rule.thenMetric)
             branch("否则显示", selection: $rule.elseMetric)
-            Text("阈值时间单位为小时；费用单位为 USD。数据缺失或过期时显示 —，不会误判为不满足。可选择“隐藏”让条件不成立时不占位置。")
+            Text("时间阈值单位为小时，费用为 USD，Token 速度为 token/s。数据缺失或过期时显示 —，不会误判为不满足。可选择“隐藏”让条件不成立时不占位置。")
                 .font(.caption).foregroundStyle(.secondary)
             HStack {
                 Spacer()
