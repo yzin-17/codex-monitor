@@ -60,6 +60,8 @@ create_app_bundle() {
   mkdir -p "$macos_dir" "$resources_dir"
   cp "$binary_path" "$macos_dir/CodexNotch"
   cp "$ROOT_DIR/Resources/AppIcon.icns" "$resources_dir/AppIcon.icns"
+  cp "$ROOT_DIR/NOTICE.md" "$resources_dir/NOTICE.md"
+  cp -R "$ROOT_DIR/licenses" "$resources_dir/licenses"
 
   cat > "$contents_dir/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

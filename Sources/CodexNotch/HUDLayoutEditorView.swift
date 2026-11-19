@@ -363,6 +363,7 @@ struct HUDLayoutEditorView: View {
     private func previewData(for source: String) -> HUDEntityData {
         var value = previewData
         value.account = sourceLabel(source)
+        if source != "local" && source != "legacy" { value.tokenRate = nil }
         if source.hasPrefix("remote:") { value.providerID = "gateway"; value.provider = "网关" }
         else if source.hasPrefix("newapi:") { value.providerID = "newapi"; value.provider = "NewAPI" }
         else if source.hasPrefix("subapi:") { value.providerID = "subapi"; value.provider = "Sub2API" }

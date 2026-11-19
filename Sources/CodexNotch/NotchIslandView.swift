@@ -538,12 +538,14 @@ struct DetailPanelView: View {
         }
         .onDisappear {
             viewModel.cancelConversationCostPrefetch()
+            viewModel.taskProgress.setPresentationVisible(false)
             performanceViewModel.setDetailVisible(false)
         }
     }
 
     private func synchronizeExtensionVisibility() {
         let visible = overlayState.detailPresentationPhase.showsContent
+        viewModel.taskProgress.setPresentationVisible(visible && selectedPage == .codex)
         performanceViewModel.setDetailVisible(visible && selectedPage == .performance)
         if visible && selectedPage == .codex {
             viewModel.prefetchConversationCosts(for: snapshot.tasks)

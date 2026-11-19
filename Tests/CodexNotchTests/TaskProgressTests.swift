@@ -181,3 +181,31 @@ private func progressTemporaryDirectory() throws -> URL {
                       "documentRealPath": "/synthetic/a.md", "scope": ["kind": "document"]]]]]])
     #expect(throws: (any Error).self) { try TaskProgressImport.candidates(data: mismatch, threadID: "exact-thread") }
 }
+
+@Test @MainActor func taskProgressStopsHiddenPanelObservationAndRefreshesWhenReopened() async throws {
+    let directory = try progressTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let file = directory.appendingPathComponent("tasks.md")
+    try Data("- [ ] Task".utf8).write(to: file)
+    let store = TaskProgressStore(codexHome: directory.path, storageDirectory: directory,
+                                  reader: .init(stabilityNanoseconds: 0))
+    defer { store.stop() }
+    try store.replaceBindings(threadID: "thread", with: [.init(id: UUID(), path: file.path, scope: .document)])
+    store.retain(threadID: "thread")
+    await store.refreshAndWait(threadID: "thread")
+    #expect(store.summary(for: "thread").completed == 0)
+
+    store.setPresentationVisible(false)
+    try Data("- [x] Task".utf8).write(to: file, options: .atomic)
+    // 隐藏的行仍可能被 SwiftUI 保留/重建，不应恢复后台文件读取。
+    store.retain(threadID: "thread")
+    try await Task.sleep(for: .milliseconds(180))
+    #expect(store.summary(for: "thread").completed == 0)
+
+    store.setPresentationVisible(true)
+    for _ in 0..<100 {
+        if store.summary(for: "thread").completed == 1 { break }
+        try await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(store.summary(for: "thread").completed == 1)
+}

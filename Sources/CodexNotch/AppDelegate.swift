@@ -561,9 +561,11 @@ final class NotchOverlayController {
         }
 
         if let localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown], handler: { [weak self] event in
-            if event.keyCode == 53 {
+            if event.keyCode == 53, let self,
+               OverlayInteractionPolicy.shouldHandleEscape(eventWindow: event.window ?? NSApp.keyWindow,
+                   hud: self.window, detail: self.detailWindow, modal: NSApp.modalWindow) {
                 Task { @MainActor in
-                    self?.overlayState.isExpanded = false
+                    self.overlayState.isExpanded = false
                 }
                 return nil
             }
@@ -576,9 +578,15 @@ final class NotchOverlayController {
         }
 
         if let localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown], handler: { [weak self] event in
+            // 在事件发生时判断 modalWindow，避免文件选择框已结束后再误判其最后一次点击。
+            if let self, OverlayInteractionPolicy.isAuxiliaryWindow(event.window,
+                hud: self.window, detail: self.detailWindow, modal: NSApp.modalWindow) {
+                return event
+            }
             Task { @MainActor in
-                self?.closeIfClickIsOutside()
-                self?.restorePanelOrdering()
+                guard let self else { return }
+                self.closeIfClickIsOutside(eventWindow: event.window)
+                self.restorePanelOrdering()
             }
             return event
         }) {
@@ -586,15 +594,13 @@ final class NotchOverlayController {
         }
     }
 
-    private func closeIfClickIsOutside() {
+    private func closeIfClickIsOutside(eventWindow: NSWindow? = nil) {
         guard overlayState.isExpanded else {
             return
         }
 
-        let location = NSEvent.mouseLocation
-        if window.frame.contains(location) || detailWindow.frame.contains(location) {
-            return
-        }
+        guard OverlayInteractionPolicy.shouldDismissForClick(at: NSEvent.mouseLocation,
+            eventWindow: eventWindow, hud: window, detail: detailWindow, modal: NSApp.modalWindow) else { return }
         overlayState.isExpanded = false
     }
 

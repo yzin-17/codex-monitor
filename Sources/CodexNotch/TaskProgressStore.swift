@@ -20,6 +20,7 @@ final class TaskProgressStore: ObservableObject {
     }
     private let automatic: Bool
     private let reader: TaskProgressReader
+    private var presentationVisible = true
     private var visibleThreads: [String: Int] = [:]
     private var watchers: [String: DispatchSourceFileSystemObject] = [:]
     private var pollTimer: Timer?
@@ -61,8 +62,21 @@ final class TaskProgressStore: ObservableObject {
 
     func retain(threadID: String) {
         visibleThreads[threadID, default: 0] += 1
-        refresh(threadID: threadID)
+        if presentationVisible { refresh(threadID: threadID) }
         updateObservation()
+    }
+
+    // 详情 NSPanel 会 orderOut 而不卸载 SwiftUI 行，不能只依赖 onDisappear。
+    func setPresentationVisible(_ visible: Bool) {
+        guard presentationVisible != visible else { return }
+        presentationVisible = visible
+        if !visible {
+            debounce?.cancel(); debounce = nil
+            workers.values.forEach { $0.cancel() }; workers.removeAll()
+            for thread in Array(generations.keys) { generations[thread, default: 0] += 1 }
+        }
+        updateObservation()
+        if visible { refreshVisible() }
     }
 
     func release(threadID: String) {
@@ -144,6 +158,7 @@ final class TaskProgressStore: ObservableObject {
     func openSource(_ binding: TaskProgressBinding) { NSWorkspace.shared.open(URL(fileURLWithPath: binding.path)) }
 
     func stop() {
+        presentationVisible = false
         debounce?.cancel(); debounce = nil
         workers.values.forEach { $0.cancel() }; workers.removeAll()
         for thread in Array(generations.keys) { generations[thread, default: 0] += 1 }
@@ -153,7 +168,7 @@ final class TaskProgressStore: ObservableObject {
     }
 
     private func updateObservation() {
-        let paths = Set(visibleThreads.keys.flatMap { bindings(for: $0).map(\.path) })
+        let paths = presentationVisible ? Set(visibleThreads.keys.flatMap { bindings(for: $0).map(\.path) }) : []
         Task { await reader.retain(paths: paths) }
         guard automatic else { return }
         let directories = Set(paths.map { URL(fileURLWithPath: $0).deletingLastPathComponent().path })
@@ -176,6 +191,7 @@ final class TaskProgressStore: ObservableObject {
     }
 
     private func scheduleRefresh() {
+        guard presentationVisible else { return }
         debounce?.cancel()
         debounce = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 80_000_000)
@@ -185,6 +201,7 @@ final class TaskProgressStore: ObservableObject {
     }
 
     private func refreshVisible() {
+        guard presentationVisible else { return }
         for thread in visibleThreads.keys where workers[thread] == nil { refresh(threadID: thread) }
     }
 

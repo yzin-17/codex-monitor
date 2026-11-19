@@ -54,7 +54,7 @@ func startupAndAppearanceRenderWithoutChangingStartupOrRefreshing() async throws
         secretStores: SecretStoreFactory(keychain: MemorySecretStore(), database: MemorySecretStore()),
         launchAtLoginManager: login, loadSecretsSynchronously: true)
     settings.codexAccounts = CodexAccountsStore(defaults: defaults,
-        vault: .init(read: { _, _ in nil }, write: { _, _ in }, delete: { _ in }),
+        vault: .init(read: { _, _ in throw CodexAccountError.missingCredential }, write: { _, _ in }, delete: { _ in }),
         client: .init(fetch: { _ in throw URLError(.notConnectedToInternet) }),
         automaticStart: false, localAuthURL: directory.appendingPathComponent("auth.json"))
     let remote = RemoteMonitorViewModel(settings: settings)
