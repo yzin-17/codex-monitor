@@ -109,7 +109,8 @@ build_arch() {
 
   swift build -c release --arch "$swift_arch"
   build_dir="$(swift build -c release --arch "$swift_arch" --show-bin-path)"
-  lipo -verify_arch "$swift_arch" "$build_dir/CodexNotch"
+  # Apple lipo 的 -verify_arch 接收架构列表，先传入二进制路径以兼容旧工具链。
+  lipo "$build_dir/CodexNotch" -verify_arch "$swift_arch"
   create_app_bundle "$build_dir/CodexNotch" "$staged_app"
 
   rm -rf "$DMG_STAGE_DIR"
