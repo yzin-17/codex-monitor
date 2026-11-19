@@ -158,7 +158,7 @@ private let radarMetrics = Data(#"""
         #expect(model.snapshot.fetchedAt == nil)
         #expect(model.snapshot.displayUpdatedAt == nil)
         #expect(model.snapshot.state == .error)
-        #expect(model.snapshot.message?.contains("雷达接口：CodexRadar HTTP 502") == true)
+        #expect(model.snapshot.message?.contains("当前总榜未更新：CodexRadar HTTP 502") == true)
         #expect(model.communityMessage?.contains("HTTP 502") == true)
         #expect(model.newsMessage?.contains("HTTP 502") == true)
         #expect(model.nextRefreshAt == context.date.addingTimeInterval(300))
@@ -334,7 +334,8 @@ private let radarVisualMetrics = Data(#"""
 """#.utf8)
 
 private func radarResponseData(_ request: URLRequest) -> Data {
-    if [CodexRadarClient.bindingURL.path, CodexRadarClient.benchURL.path, CodexRadarClient.communityURL.path].contains(request.url?.path ?? "") {
+    if [CodexRadarClient.bindingURL.path, CodexRadarClient.benchURL.path, CodexRadarClient.communityURL.path,
+        CodexRadarClient.currentRoundURL.path].contains(request.url?.path ?? "") {
         return radarFixtureResponse(request)
     }
     switch request.url?.path {

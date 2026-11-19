@@ -17,7 +17,7 @@ enum MonitorPanelAnimation: String, Codable, CaseIterable, Identifiable, Sendabl
 enum HUDMetric: String, Codable, CaseIterable, Identifiable, Sendable {
     case icon, provider, account, state // state 仅用于旧配置迁移，运行状态不属于自定义区域。
     case fiveHour, primary, weekly, scopedWeekly, automatic, primaryLane, secondaryLane, tertiaryLane
-    case primaryPace, weeklyPace, scopedPace, automaticPace, usageBar, tokensToday
+    case primaryPace, weeklyPace, scopedPace, automaticPace, usageBar, tokensToday, tokensPerSecond
     case resetCountdown, resetTime, primaryCountdown, weeklyCountdown, scopedCountdown
     case primaryResetTime, weeklyResetTime, scopedResetTime, runsOut, runsOutCompact
     case balance, costToday, cost30d, separatorDot, space, hidden, conditional
@@ -31,7 +31,7 @@ enum HUDMetric: String, Codable, CaseIterable, Identifiable, Sendable {
         case .fiveHour: "5 小时额度 %"; case .primary: "会话 %"; case .weekly: "每周 %"; case .scopedWeekly: "范围每周 %"; case .automatic: "自动 %"
         case .primaryLane: "第一额度 %"; case .secondaryLane: "第二额度 %"; case .tertiaryLane: "第三额度 %"
         case .primaryPace: "会话节奏"; case .weeklyPace: "每周节奏"; case .scopedPace: "范围每周节奏"; case .automaticPace: "自动节奏"
-        case .usageBar: "用量条"; case .tokensToday: "今日 Token"
+        case .usageBar: "用量条"; case .tokensToday: "今日 Token"; case .tokensPerSecond: "Token 速度"
         case .resetCountdown: "重置倒计时 · 自动"; case .resetTime: "重置时间 · 自动"
         case .primaryCountdown: "会话重置倒计时"; case .weeklyCountdown: "每周重置倒计时"; case .scopedCountdown: "范围每周倒计时"
         case .primaryResetTime: "会话重置时间"; case .weeklyResetTime: "每周重置时间"; case .scopedResetTime: "范围每周时间"
@@ -44,7 +44,7 @@ enum HUDMetric: String, Codable, CaseIterable, Identifiable, Sendable {
         switch self {
         case .icon, .provider, .account, .state: "身份"
         case .fiveHour, .primary, .weekly, .scopedWeekly, .automatic, .primaryLane, .secondaryLane, .tertiaryLane,
-             .primaryPace, .weeklyPace, .scopedPace, .automaticPace, .usageBar, .tokensToday: "用量"
+             .primaryPace, .weeklyPace, .scopedPace, .automaticPace, .usageBar, .tokensToday, .tokensPerSecond: "用量"
         case .balance, .costToday, .cost30d: "费用"
         case .separatorDot, .space, .hidden: "布局"
         case .conditional: "条件"
@@ -55,6 +55,7 @@ enum HUDMetric: String, Codable, CaseIterable, Identifiable, Sendable {
         switch self {
         case .icon: "scope"; case .provider: "textformat"; case .account: "person.crop.circle"; case .state: "circle.fill"
         case .usageBar: "chart.bar.fill"; case .tokensToday: "number"
+        case .tokensPerSecond: "speedometer"
         case .space: "arrow.left.and.right"; case .separatorDot: "circle.fill"; case .hidden: "eye.slash"; case .conditional: "arrow.triangle.branch"
         case .primaryPace, .weeklyPace, .scopedPace, .automaticPace: "gauge.with.dots.needle.50percent"
         case .resetCountdown, .primaryCountdown, .weeklyCountdown, .scopedCountdown: "timer"
@@ -68,7 +69,7 @@ enum HUDMetric: String, Codable, CaseIterable, Identifiable, Sendable {
     var isPace: Bool { [.primaryPace, .weeklyPace, .scopedPace, .automaticPace].contains(self) }
     var isCountdown: Bool { [.resetCountdown, .primaryCountdown, .weeklyCountdown, .scopedCountdown].contains(self) }
     var isAbsoluteReset: Bool { [.resetTime, .primaryResetTime, .weeklyResetTime, .scopedResetTime].contains(self) }
-    var isNumeric: Bool { isQuota || isPace || isCountdown || [.runsOut, .runsOutCompact, .costToday, .cost30d].contains(self) }
+    var isNumeric: Bool { isQuota || isPace || isCountdown || [.runsOut, .runsOutCompact, .costToday, .cost30d, .tokensPerSecond].contains(self) }
     static func parse(_ raw: String) -> Self? {
         let core = HUDLayoutToken.core(raw)
         return Self(rawValue: String(core.split(separator: ":").first ?? ""))

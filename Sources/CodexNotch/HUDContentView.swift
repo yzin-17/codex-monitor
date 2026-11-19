@@ -124,6 +124,8 @@ struct HUDMetricStrip: View {
                     .fixedSize(horizontal: true, vertical: false)
             }
             .fixedSize(horizontal: true, vertical: false)
+            .frame(minWidth: metric == .tokensPerSecond ? Self.tokenRateWidth(fontSize: fontSize) : nil,
+                   alignment: .trailing)
         }
     }
 
@@ -133,11 +135,18 @@ struct HUDMetricStrip: View {
             guard let metric = itemData.resolvedMetric(raw: raw, layout: layout, now: now) else { return nil }
             if [.space, .hidden, .separatorDot].contains(metric) { return nil }
             let source = HUDLayoutToken.sourceID(raw).map { " [\($0)]" } ?? " [本机 Codex]"
-            return metric.title + source + "：" + itemData.text(metric, remaining: remaining, now: now)
+            let detail = metric == .tokensPerSecond ? "\n" + (itemData.tokenRate ?? .unavailable).explanation(at: now) : ""
+            return metric.title + source + "：" + itemData.text(metric, remaining: remaining, now: now) + detail
         }
         return (data.warning.map { "注意：\($0)\n" } ?? "")
             + entries.joined(separator: "\n")
             + "\n节奏/预计用尽仅按本窗口平均速度估算；缺少可靠窗口数据时显示 —。"
+    }
+
+    private static func tokenRateWidth(fontSize: CGFloat) -> CGFloat {
+        ("≈999.9 token/s" as NSString).size(withAttributes: [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: fontSize, weight: .semibold)
+        ]).width
     }
 
     /// 与渲染使用同一字段/条件/空格宽度，避免靠整行缩放挤入菜单栏。
@@ -167,7 +176,8 @@ struct HUDMetricStrip: View {
                 if metric == .usageBar { return sum + 26 }
                 let value = metric.map { itemData.display($0, remaining: remaining, now: now) } ?? .init(value: "—")
                 let label = value.label.isEmpty ? 0 : (value.label as NSString).size(withAttributes: [.font: labelFont]).width + 4
-                return sum + label + (value.value as NSString).size(withAttributes: [.font: font]).width
+                let width = label + (value.value as NSString).size(withAttributes: [.font: font]).width
+                return sum + (metric == .tokensPerSecond ? max(width, tokenRateWidth(fontSize: size)) : width)
             } + CGFloat(max(0, visible.count - 1)) * 5
         }.max() ?? 0
     }

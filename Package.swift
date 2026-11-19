@@ -10,9 +10,13 @@ let package = Package(
     products: [
         .executable(name: "CodexNotch", targets: ["CodexNotch"])
     ],
+    dependencies: [
+        .package(url: "https://github.com/swiftlang/swift-markdown.git", exact: "0.5.0")
+    ],
     targets: [
         .executableTarget(
             name: "CodexNotch",
+            dependencies: [.product(name: "Markdown", package: "swift-markdown")],
             path: "Sources/CodexNotch",
             linkerSettings: [
                 .linkedLibrary("sqlite3")

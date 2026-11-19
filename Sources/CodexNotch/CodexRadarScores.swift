@@ -128,6 +128,13 @@ struct CodexRadarBenchBatch: Sendable {
     let binding: CodexRadarBenchBinding
     let results: [CodexRadarSelection: Result<Data, Error>]
 
+    var retryAfter: TimeInterval? {
+        results.values.compactMap { result in
+            guard case .failure(let error) = result else { return nil }
+            return (error as? CodexRadarClientError)?.retryAfter
+        }.max()
+    }
+
     func decode(fetchedAt: Date) -> CodexRadarBenchRead {
         var entries: [CodexRadarBenchEntry] = []
         var errors: [String: String] = [:]
@@ -166,13 +173,21 @@ struct CodexRadarBenchCache: Codable, Sendable {
         var result = CodexRadarSnapshot.loading
         result.dataSource = .publicBench
         result.status = dimension.title
-        result.models = entries.map { $0.card(for: dimension, cached: errors[$0.selection.id] != nil || errors["雷达接口"] != nil) }
+        result.models = entries.map {
+            $0.card(for: dimension, cached: errors[$0.selection.id] != nil
+                    || errors["雷达接口"] != nil || errors["旧基准评分源"] != nil)
+        }
         result.monitoredAt = entries.compactMap(\.updatedAt).min()
         result.fetchedAt = entries.map(\.fetchedAt).min()
-        var messages = errors.sorted { $0.key < $1.key }.map { "\($0.key.replacingOccurrences(of: "|", with: " "))：\($0.value)" }
+        let groups = Dictionary(grouping: errors.keys, by: { errors[$0]! })
+        var messages = groups.keys.sorted().map { error in
+            let selections = groups[error]!.sorted().map { $0.replacingOccurrences(of: "|", with: " ") }
+            if selections.count == 1 { return "\(selections[0])：\(error)" }
+            return "旧基准评分源暂不可用：\(error)（影响 \(selections.count) 个配置）\n受影响配置：\(selections.joined(separator: "、"))"
+        }
         if let failure { messages.insert(failure, at: 0) }
         let failed = !messages.isEmpty
-        if failed { messages.append("雷达分未全部更新，保留已有缓存；5 分钟后自动重试，可手动重试") }
+        if failed { messages.append("旧基准评分未全部更新，保留已有缓存") }
         return result.withState(entries.isEmpty ? .error : (failed ? .stale : .ready),
                                 message: messages.isEmpty ? nil : messages.joined(separator: "\n"))
     }
