@@ -8,7 +8,8 @@ enum TaskProgressParser {
 
     static func parse(_ source: String, scope: TaskProgressScope = .document) throws -> TaskProgressTasks {
         guard source.utf8.count <= maximumBytes else { throw TaskProgressError.invalid("文档超过 2 MiB 限制。") }
-        let lineCount = source.split(separator: "\n", omittingEmptySubsequences: false).count
+        let sourceLines = source.components(separatedBy: "\n")
+        let lineCount = sourceLines.count
         guard lineCount <= 50_000 else { throw TaskProgressError.invalid("文档超过 50000 行限制。") }
         let document = Document(parsing: source)
         let sections = try sections(in: document, lastLine: lineCount)
@@ -21,6 +22,12 @@ enum TaskProgressParser {
         }
         var items: [TaskProgressItem] = []
         var diagnostics: [String] = []
+        func details(start: Int, end: Int?, title: String) -> (String, Int, String?) {
+            let last = min(lineCount, max(start, end ?? start))
+            let raw = sourceLines[(start - 1)..<last].joined(separator: "\n")
+            let identifier = match(#"^([A-Za-z]+\d+(?:[._-][A-Za-z0-9]+)*)(?:\s*[：:]\s*|\s+)"#, title)?[1]
+            return (raw, last, identifier)
+        }
         func add(_ item: TaskProgressItem) throws {
             guard items.count < maximumTasks else { throw TaskProgressError.invalid("叶子任务超过 5000 项限制。") }
             items.append(item)
@@ -44,8 +51,10 @@ enum TaskProgressParser {
                     let title = own.isEmpty ? (cells.dropFirst().first(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) ?? "(无标题任务)") : own
                     let checked = match[1].lowercased() == "x"
                     let state = explicitState(([own] + Array(cells.dropFirst())).flatMap { $0.components(separatedBy: "\n") }, checked: checked)
+                    let detail = details(start: line, end: row.range?.upperBound.line, title: title)
                     try add(TaskProgressItem(id: "table:\(line)", title: stripTaskID(title), checked: checked, line: line,
-                                             groups: headingGroups(line), status: state.status, conflict: state.conflict))
+                                             groups: headingGroups(line), status: state.status, conflict: state.conflict,
+                                             rawText: detail.0, endLine: detail.1, explicitID: detail.2))
                 }
                 return
             }
@@ -73,8 +82,10 @@ enum TaskProgressParser {
                         }
                     }
                     let state = explicitState(lines, checked: checkbox == .checked)
+                    let detail = details(start: line, end: item.range?.upperBound.line, title: title)
                     try add(TaskProgressItem(id: "list:\(line)", title: stripTaskID(title), checked: checkbox == .checked,
-                                             line: line, groups: headingGroups(line) + groups, status: state.status, conflict: state.conflict))
+                                             line: line, groups: headingGroups(line) + groups, status: state.status, conflict: state.conflict,
+                                             rawText: detail.0, endLine: detail.1, explicitID: detail.2))
                 }
             }
             for child in node.children { try walk(child, groups: nextGroups, depth: depth + 1) }

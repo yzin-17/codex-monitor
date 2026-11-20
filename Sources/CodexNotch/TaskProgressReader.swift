@@ -11,6 +11,8 @@ actor TaskProgressReader {
         let version: String
         let source: String
         let readAt: Date
+        let sourceBytes: Int
+        var accessedAt: Date
         var scopes: [TaskProgressScope: TaskProgressTasks]
     }
     private var cache: [String: Cache] = [:]
@@ -29,6 +31,7 @@ actor TaskProgressReader {
                 let tasks = try previous.scopes[scope] ?? TaskProgressParser.parse(previous.source, scope: scope)
                 if previous.scopes.count >= 128, previous.scopes[scope] == nil { previous.scopes.removeAll(keepingCapacity: true) }
                 previous.scopes[scope] = tasks
+                previous.accessedAt = Date()
                 cache[path] = previous
                 return TaskProgressFileRead(tasks: tasks, readAt: previous.readAt)
             }
@@ -47,10 +50,13 @@ actor TaskProgressReader {
                 guard before == (try version(url)) else { continue }
             }
             let date = Date()
-            if cache[path] == nil, cache.count >= 128, let oldest = cache.min(by: { $0.value.readAt < $1.value.readAt })?.key {
+            cache[path] = Cache(version: before, source: source, readAt: date, sourceBytes: data.count,
+                                accessedAt: date, scopes: [scope: tasks])
+            // 目录发现会检查不含任务的 Markdown；保留小文档缓存，同时限制总原文内存。
+            while cache.count > 1_024 || cache.values.reduce(0, { $0 + $1.sourceBytes }) > 16 * 1024 * 1024 {
+                guard let oldest = cache.filter({ $0.key != path }).min(by: { $0.value.accessedAt < $1.value.accessedAt })?.key else { break }
                 cache.removeValue(forKey: oldest)
             }
-            cache[path] = Cache(version: before, source: source, readAt: date, scopes: [scope: tasks])
             return TaskProgressFileRead(tasks: tasks, readAt: date)
         }
         throw TaskProgressError.unstable

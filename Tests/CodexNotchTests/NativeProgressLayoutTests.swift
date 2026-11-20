@@ -114,7 +114,7 @@ import Testing
     }.padding(12).frame(width: 520).background(Color.black)
     try await captureProgressView(list, size: .init(width: 520, height: 218), name: "task-row-long-title")
     try await captureProgressView(TaskProgressPanel(store: store, threadID: id, close: {}).background(Color.black),
-                                  size: .init(width: 460, height: 450), name: "task-progress")
+                                  size: .init(width: 460, height: 560), name: "task-progress")
 }
 
 @Test @MainActor func tokenSpeedHUDRendersFreshEstimatedAndStaleStates() async throws {
@@ -129,7 +129,7 @@ import Testing
     var fresh = HUDEntityData(); fresh.tokenRate = samples[0].1
     var unknown = HUDEntityData(); unknown.tokenRate = .unavailable
     #expect(HUDMetricStrip.measuredWidth(layout: layout, data: fresh, remaining: true, menuBar: false)
-        == HUDMetricStrip.measuredWidth(layout: layout, data: unknown, remaining: true, menuBar: false))
+        > HUDMetricStrip.measuredWidth(layout: layout, data: unknown, remaining: true, menuBar: false))
     let view = VStack(alignment: .leading, spacing: 16) {
         ForEach(Array(samples.enumerated()), id: \.offset) { _, entry in
             HStack {

@@ -165,14 +165,14 @@ private struct SettingsDraft: Equatable {
     var secretStorageMode: SecretStorageMode = .keychain
 
     @MainActor
-    init(settings: CodexNotchSettings) {
+    init(settings: CodexNotchSettings, pricing: TokenPricingSettings) {
         activeRefreshInterval = settings.activeRefreshInterval
         idleRefreshInterval = settings.idleRefreshInterval
         usageRefreshInterval = settings.usageRefreshInterval
         watcherRefreshInterval = settings.watcherRefreshInterval
         fileChangeRefreshMinimumGap = settings.fileChangeRefreshMinimumGap
         rateLimitSource = settings.rateLimitSource
-        pricing = TokenPricingUpdater.shared.settings
+        self.pricing = pricing
         showPeriodUsage = settings.showPeriodUsage
         showSparkQuota = settings.showSparkQuota
         skillInsightsEnabled = settings.skillInsightsEnabled
@@ -241,7 +241,7 @@ struct RateLimitSourcePicker: View {
 }
 
 struct SettingsView: View {
-    @ObservedObject private var pricingUpdater = TokenPricingUpdater.shared
+    @ObservedObject private var pricingUpdater: TokenPricingUpdater
     @ObservedObject var settings: CodexNotchSettings
     @ObservedObject var remoteViewModel: RemoteMonitorViewModel
     @ObservedObject var newAPIViewModel: BalanceMonitorViewModel
@@ -268,7 +268,8 @@ struct SettingsView: View {
         subAPIViewModel: BalanceMonitorViewModel,
         codexRadarViewModel: CodexRadarViewModel,
         onRefresh: @escaping () -> Void,
-        initialTab: SettingsTab = .codex
+        initialTab: SettingsTab = .codex,
+        pricingUpdater: TokenPricingUpdater = .shared
     ) {
         self.settings = settings
         self.remoteViewModel = remoteViewModel
@@ -276,6 +277,7 @@ struct SettingsView: View {
         self.subAPIViewModel = subAPIViewModel
         self.codexRadarViewModel = codexRadarViewModel
         self.onRefresh = onRefresh
+        _pricingUpdater = ObservedObject(wrappedValue: pricingUpdater)
         _selectedTab = State(initialValue: initialTab)
     }
 
@@ -360,7 +362,7 @@ struct SettingsView: View {
     }
 
     private var currentDraft: SettingsDraft {
-        SettingsDraft(settings: settings)
+        SettingsDraft(settings: settings, pricing: pricingUpdater.settings)
     }
 
     private var hasChanges: Bool {
@@ -438,6 +440,7 @@ struct SettingsView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier("settings-tab-" + tab.rawValue)
             }
 
             Spacer()

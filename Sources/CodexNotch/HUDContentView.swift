@@ -59,6 +59,9 @@ struct HUDRuntimeStatus: View {
 }
 
 struct HUDMetricStrip: View {
+    static let itemSpacing: CGFloat = 5
+    private static let labelSpacing: CGFloat = 4
+    private static func iconSize(menuBar: Bool) -> CGFloat { menuBar ? 11 : 12 }
     let layout: HUDLayout
     let data: HUDEntityData
     var remaining = true
@@ -72,7 +75,7 @@ struct HUDMetricStrip: View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
             VStack(alignment: .leading, spacing: menuBar && rows.count == 2 ? 0 : 2) {
                 ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
-                    HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    HStack(alignment: .firstTextBaseline, spacing: Self.itemSpacing) {
                         ForEach(Array(visible(row, at: context.date).enumerated()), id: \.offset) { _, raw in
                             cell(raw, now: context.date)
                         }
@@ -98,7 +101,7 @@ struct HUDMetricStrip: View {
         if metric == .space {
             Color.clear.frame(width: CGFloat(HUDLayout.spaceWidth(raw)), height: 1).accessibilityHidden(true)
         } else if metric == .icon {
-            OpenAIKnotIcon(size: menuBar ? 11 : 12)
+            OpenAIKnotIcon(size: Self.iconSize(menuBar: menuBar))
                 .foregroundStyle(MonitorTheme.textPrimary)
                 .accessibilityLabel("ChatGPT")
         } else if metric == .usageBar {
@@ -112,10 +115,10 @@ struct HUDMetricStrip: View {
         } else {
             let value = metric.map { itemData.display($0, remaining: remaining, now: now) }
                 ?? HUDDisplayValue(value: "—", tone: .tertiary)
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: Self.labelSpacing) {
                 if !value.label.isEmpty {
                     Text(value.label)
-                        .font(.system(size: max(7, fontSize - 1.5), weight: .semibold))
+                        .font(.system(size: max(7, fontSize - 1.5), weight: .semibold).monospacedDigit())
                         .foregroundStyle(MonitorTheme.textSecondary)
                         .fixedSize(horizontal: true, vertical: false)
                 }
@@ -124,8 +127,6 @@ struct HUDMetricStrip: View {
                     .fixedSize(horizontal: true, vertical: false)
             }
             .fixedSize(horizontal: true, vertical: false)
-            .frame(minWidth: metric == .tokensPerSecond ? Self.tokenRateWidth(fontSize: fontSize) : nil,
-                   alignment: .trailing)
         }
     }
 
@@ -143,12 +144,6 @@ struct HUDMetricStrip: View {
             + "\n节奏/预计用尽仅按本窗口平均速度估算；缺少可靠窗口数据时显示 —。"
     }
 
-    private static func tokenRateWidth(fontSize: CGFloat) -> CGFloat {
-        ("≈999.9 token/s" as NSString).size(withAttributes: [
-            .font: NSFont.monospacedDigitSystemFont(ofSize: fontSize, weight: .semibold)
-        ]).width
-    }
-
     /// 与渲染使用同一字段/条件/空格宽度，避免靠整行缩放挤入菜单栏。
     @MainActor static func measuredWidth(
         layout: HUDLayout,
@@ -161,7 +156,7 @@ struct HUDMetricStrip: View {
         let rows = layout.normalized.lines
         let size: CGFloat = menuBar && rows.count == 2 ? min(9, MenuBarMetrics.height() / 2.5) : 11
         let font = NSFont.monospacedDigitSystemFont(ofSize: size, weight: .semibold)
-        let labelFont = NSFont.systemFont(ofSize: max(7, size - 1.5), weight: .semibold)
+        let labelFont = NSFont.monospacedDigitSystemFont(ofSize: max(7, size - 1.5), weight: .semibold)
         return rows.map { row in
             let visible = row.filter { raw in
                 let itemData = dataForRaw?(raw) ?? data
@@ -172,13 +167,13 @@ struct HUDMetricStrip: View {
                 let itemData = dataForRaw?(raw) ?? data
                 let metric = itemData.resolvedMetric(raw: raw, layout: layout, now: now)
                 if metric == .space { return sum + CGFloat(HUDLayout.spaceWidth(raw)) }
-                if metric == .icon { return sum + (menuBar ? 13 : 14) }
+                if metric == .icon { return sum + iconSize(menuBar: menuBar) }
                 if metric == .usageBar { return sum + 26 }
                 let value = metric.map { itemData.display($0, remaining: remaining, now: now) } ?? .init(value: "—")
-                let label = value.label.isEmpty ? 0 : (value.label as NSString).size(withAttributes: [.font: labelFont]).width + 4
+                let label = value.label.isEmpty ? 0 : (value.label as NSString).size(withAttributes: [.font: labelFont]).width + labelSpacing
                 let width = label + (value.value as NSString).size(withAttributes: [.font: font]).width
-                return sum + (metric == .tokensPerSecond ? max(width, tokenRateWidth(fontSize: size)) : width)
-            } + CGFloat(max(0, visible.count - 1)) * 5
+                return sum + width
+            } + CGFloat(max(0, visible.count - 1)) * itemSpacing
         }.max() ?? 0
     }
 }

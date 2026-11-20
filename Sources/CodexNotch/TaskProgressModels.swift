@@ -36,6 +36,9 @@ struct TaskProgressItem: Equatable, Sendable, Identifiable {
     let groups: [String]
     var status: String? = nil
     var conflict = false
+    var rawText = ""
+    var endLine: Int? = nil
+    var explicitID: String? = nil
 }
 
 struct TaskProgressTasks: Equatable, Sendable {
@@ -46,11 +49,65 @@ struct TaskProgressTasks: Equatable, Sendable {
     var total: Int { items.count }
 }
 
+enum TaskProgressBindingOrigin: String, Codable, Sendable {
+    case manual, automatic
+}
+
 struct TaskProgressBinding: Codable, Equatable, Sendable, Identifiable {
     let id: UUID
     let path: String
     let scope: TaskProgressScope
+    var origin: TaskProgressBindingOrigin = .manual
     var name: String { URL(fileURLWithPath: path).lastPathComponent }
+
+    init(id: UUID, path: String, scope: TaskProgressScope, origin: TaskProgressBindingOrigin = .manual) {
+        self.id = id; self.path = path; self.scope = scope; self.origin = origin
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, path, scope, origin }
+    init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(UUID.self, forKey: .id)
+        path = try values.decode(String.self, forKey: .path)
+        scope = try values.decode(TaskProgressScope.self, forKey: .scope)
+        origin = try values.decodeIfPresent(TaskProgressBindingOrigin.self, forKey: .origin) ?? .manual
+    }
+}
+
+struct TaskProgressThreadSettings: Codable, Equatable, Sendable {
+    var autoBind = true
+    var scanWorkspace = true
+}
+
+struct TaskProgressCandidate: Equatable, Sendable, Identifiable {
+    var id: String { path }
+    let path: String
+    let origins: [TaskProgressDiscoveryOrigin]
+    let suggestedScope: TaskProgressScope
+    let tasks: TaskProgressTasks?
+    let status: TaskProgressSourceStatus
+    let message: String?
+    var name: String { URL(fileURLWithPath: path).lastPathComponent }
+    var canBind: Bool { status == .ready && (tasks?.total ?? 0) > 0 }
+    var reason: String {
+        origins.map { origin in
+            switch origin {
+            case .written: "任务创建或更新"
+            case .mentioned: "任务消息引用"
+            case .read: "任务读取过"
+            case .workspace: "项目任务目录"
+            }
+        }.joined(separator: " · ")
+    }
+}
+
+struct TaskProgressScanState: Equatable, Sendable {
+    var isScanning = false
+    var candidates: [TaskProgressCandidate] = []
+    var workspacePath: String? = nil
+    var message: String? = nil
+    var lastScannedAt: Date? = nil
+    var hasMore = false
 }
 
 enum TaskProgressSourceStatus: String, Sendable {
@@ -75,7 +132,7 @@ struct TaskProgressSummary: Equatable, Sendable {
     var partial: Bool { knownDocumentCount < documentCount }
     var fraction: Double? { total > 0 && !partial ? Double(completed) / Double(total) : nil }
     var label: String {
-        if documentCount == 0 { return "绑定任务清单" }
+        if documentCount == 0 { return "进度 —" }
         if knownDocumentCount == 0 { return "进度 —" }
         if total == 0 { return "无任务" + (partial ? " · 部分" : stale ? " · 缓存" : "") }
         return "\(completed)/\(total)" + (partial ? " · 部分" : stale ? " · 缓存" : "")

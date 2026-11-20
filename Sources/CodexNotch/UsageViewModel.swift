@@ -409,6 +409,7 @@ final class UsageViewModel: ObservableObject {
                 mergedSnapshot.usageToday = self.snapshot.usageToday
                 self.snapshot = mergedSnapshot
                 self.tokenRates.setTasks(mergedSnapshot.tasks)
+                self.taskProgress.setTasks(mergedSnapshot.tasks)
                 if snapshotLoadSucceeded {
                     self.prefetchConversationCosts(for: self.snapshot.tasks)
                 }
@@ -755,6 +756,7 @@ final class UsageViewModel: ObservableObject {
 
     private func scheduleFileChangeRefresh(refreshWatchPaths: Bool) {
         tokenRates.refresh()
+        taskProgress.sessionFilesChanged()
         let now = Date()
         let burstStartedAt = fileChangeBurstStartedAt ?? now
         fileChangeBurstStartedAt = burstStartedAt
@@ -928,7 +930,9 @@ final class UsageViewModel: ObservableObject {
                         tokenCount: task.tokenCount,
                         tokenUsage: task.tokenUsage,
                         updatedAt: task.updatedAt,
-                        activeSubagentCount: task.activeSubagentCount
+                        activeSubagentCount: task.activeSubagentCount,
+                        model: task.isAutoReview ? "codex-auto-review" : nil,
+                        rolloutPath: task.rolloutPath
                     )
                 }
             }

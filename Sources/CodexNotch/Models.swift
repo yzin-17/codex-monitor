@@ -303,6 +303,7 @@ struct CodexTask: Identifiable, Equatable {
     let updatedAt: Date
     let activeSubagentCount: Int
     let isAutoReview: Bool
+    let rolloutPath: String?
 
     var isHiddenByTaskFilter: Bool {
         title == TaskTitleSanitizer.fallback || isAutoReview
@@ -317,7 +318,8 @@ struct CodexTask: Identifiable, Equatable {
         tokenUsage: TokenUsageSummary? = nil,
         updatedAt: Date,
         activeSubagentCount: Int = 0,
-        model: String? = nil
+        model: String? = nil,
+        rolloutPath: String? = nil
     ) {
         self.id = id
         self.title = TaskTitleSanitizer.display(title)
@@ -328,6 +330,7 @@ struct CodexTask: Identifiable, Equatable {
         self.updatedAt = updatedAt
         self.activeSubagentCount = activeSubagentCount
         self.isAutoReview = model?.split(separator: "/").last == "codex-auto-review"
+        self.rolloutPath = rolloutPath
     }
 
     func displayDetail(now: Date = Date()) -> String {

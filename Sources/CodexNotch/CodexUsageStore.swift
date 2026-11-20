@@ -1820,7 +1820,8 @@ final class CodexUsageStore: @unchecked Sendable {
                 tokenUsage: tokenUsage,
                 updatedAt: updatedAt,
                 activeSubagentCount: thread.activeSubagentCount,
-                model: thread.model
+                model: thread.model,
+                rolloutPath: thread.rolloutPath.isEmpty ? nil : thread.rolloutPath
             )
         }
 

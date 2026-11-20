@@ -140,7 +140,7 @@ private func progressTemporaryDirectory() throws -> URL {
     #expect(store.snapshots[binding.id]?.status == .missing)
     #expect(store.snapshots[binding.id]?.cached == true)
     try store.replaceBindings(threadID: "thread-a", with: [])
-    #expect(store.summary(for: "thread-a").label == "绑定任务清单")
+    #expect(store.summary(for: "thread-a").label == "进度 —")
     #expect(store.snapshots[binding.id] == nil)
 }
 

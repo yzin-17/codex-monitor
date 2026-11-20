@@ -10,12 +10,15 @@ final class HUDLayoutEditingSession: ObservableObject {
     }
 
     @Published private var draft: Draft?
+    let sessionID = UUID()
+    private(set) var revision: UInt64 = 0
 
     func layout(for layoutID: String) -> HUDLayout? {
         draft?.layoutID == layoutID ? draft?.layout : nil
     }
 
     func update(_ layout: HUDLayout?, for layoutID: String) {
+        revision &+= 1
         draft = layout.map { Draft(layoutID: layoutID, layout: $0.normalized) }
     }
 }
@@ -35,6 +38,7 @@ struct HUDLayoutEditorView: View {
     @State private var ruleDraft: HUDRuleDraft?
     @State private var renamePresented = false
     @State private var renameText = ""
+    @State private var dropFeedback: String?
     @State private var hasNotch = (NSScreen.main?.safeAreaInsets.top ?? 0) > 0
 
     init(
@@ -70,6 +74,9 @@ struct HUDLayoutEditorView: View {
     private var layout: HUDLayout { (draftLayout ?? activeLayout).normalized }
     private var isDirty: Bool { draftLayout?.normalized != nil && draftLayout?.normalized != activeLayout }
     private var compactOverlay: Bool { preferences.value.mode.usesCompactOverlay(hasNotch: hasNotch) }
+    private var dragContext: HUDLayoutDragContext {
+        .init(sessionID: editingSession.sessionID, layoutID: preferences.value.activeLayoutID, revision: editingSession.revision)
+    }
 
     var body: some View {
         Group { presentationSection; layoutSection }
@@ -83,7 +90,10 @@ struct HUDLayoutEditorView: View {
                         next.conditionals[draft.id] = rule.normalized
                         edit(next)
                     } else {
-                        edit(next.addingConditional(rule, id: draft.id, sourceID: preferences.value.sourceID))
+                        let row = draft.targetRow ?? max(0, next.lines.count - 1)
+                        _ = commitDrop(HUDLayoutDrop.insertConditional(rule, id: draft.id,
+                            sourceID: draft.sourceID ?? preferences.value.sourceID, layout: next, row: row,
+                            before: draft.targetIndex ?? next.lines[row].count))
                     }
                     ruleDraft = nil
                 }, onCancel: { ruleDraft = nil })
@@ -179,25 +189,24 @@ struct HUDLayoutEditorView: View {
             preview
 
             ForEach(Array(layout.lines.enumerated()), id: \.offset) { row, values in
-                ScrollView(.horizontal) {
-                    HStack(spacing: 5) {
-                        ForEach(Array(values.enumerated()), id: \.offset) { index, raw in
-                            placedChip(raw, at: .init(row: row, index: index), count: values.count)
-                        }
-                        Color.clear.frame(width: 22, height: 26)
-                    }
-                    .padding(8)
-                    .frame(minWidth: 450, alignment: .leading)
-                }
+                HUDNativeLayoutRow(row: row, items: values.enumerated().map { index, raw in
+                    placedChip(raw, at: .init(row: row, index: index), count: values.count,
+                               occurrence: values.prefix(index).filter { $0 == raw }.count)
+                }, evaluate: { payload, index in
+                    HUDLayoutDrop.apply(payload, context: dragContext, layout: layout, row: row, before: index)
+                }, commit: commitDrop, feedback: { dropFeedback = $0 })
                 .frame(height: 58)
                 .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
                         .stroke(.secondary.opacity(0.4), style: StrokeStyle(lineWidth: 1, dash: [4]))
+                        .allowsHitTesting(false)
                 )
-                .contentShape(Rectangle())
-                .dropDestination(for: String.self) { items, _ in drop(items, row: row) }
                 .accessibilityLabel("自定义区域第 \(row + 1) 行")
+            }
+
+            if let dropFeedback {
+                Text(dropFeedback).font(.caption).foregroundStyle(.orange)
             }
 
             HStack {
@@ -209,14 +218,10 @@ struct HUDLayoutEditorView: View {
                     edit(next)
                 }
                 Spacer()
-                Label("拖到此处移除", systemImage: "trash")
-                    .padding(8)
-                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
-                    .dropDestination(for: String.self) { items, _ in
-                        guard let p = position(items.first) else { return false }
-                        edit(layout.removing(at: p))
-                        return true
-                    }
+                HUDNativeRemovalTarget(evaluate: { payload in
+                    HUDLayoutDrop.remove(payload, context: dragContext, layout: layout)
+                }, commit: commitDrop, feedback: { dropFeedback = $0 })
+                    .frame(width: 132, height: 32)
             }
 
             HStack {
@@ -225,6 +230,7 @@ struct HUDLayoutEditorView: View {
                 Button("保存布局", action: commitDraft)
                     .buttonStyle(.borderedProminent)
                     .disabled(!isDirty)
+                    .accessibilityIdentifier("hud-save-layout")
             }
 
             Picker("新增控件绑定到", selection: $preferences.value.sourceID) {
@@ -245,9 +251,11 @@ struct HUDLayoutEditorView: View {
                 Text(group).font(.caption).foregroundStyle(.secondary)
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 6)], alignment: .leading, spacing: 7) {
                     ForEach(HUDMetric.palette.filter { $0.group == group }) { metric in
-                        Button { add(metric) } label: { chipLabel(metric.title, metric: metric) }
-                            .buttonStyle(.plain)
-                            .draggable("metric:" + metric.rawValue)
+                        HUDNativeDragChip(label: AnyView(chipLabel(metric.title, metric: metric)),
+                            accessibilityLabel: metric.title + "，点击添加或拖到布局",
+                            identifier: "hud-palette:" + metric.rawValue,
+                            payload: { .init(context: dragContext, source: .palette(metric: metric, sourceID: preferences.value.sourceID)) },
+                            onClick: { add(metric) })
                             .help(metric == .space
                                   ? "点击添加一个 8 pt 空格；右键已放置的空格可调整宽度。"
                                   : metric == .icon
@@ -431,15 +439,15 @@ struct HUDLayoutEditorView: View {
     }
 
     private func edit(_ next: HUDLayout) {
+        dropFeedback = nil
         draftLayout = next.normalized
     }
 
     private func add(_ metric: HUDMetric) {
-        if metric == .conditional {
-            ruleDraft = .init()
-        } else {
-            edit(layout.inserting(metric, row: layout.lines.count - 1, sourceID: preferences.value.sourceID))
-        }
+        let row = layout.lines.count - 1
+        _ = commitDrop(HUDLayoutDrop.apply(
+            .init(context: dragContext, source: .palette(metric: metric, sourceID: preferences.value.sourceID)),
+            context: dragContext, layout: layout, row: row, before: layout.lines[row].count))
     }
 
     @ViewBuilder
@@ -466,7 +474,7 @@ struct HUDLayoutEditorView: View {
         }
     }
 
-    private func placedChip(_ raw: String, at p: HUDLayoutPosition, count: Int) -> some View {
+    private func placedChip(_ raw: String, at p: HUDLayoutPosition, count: Int, occurrence: Int) -> HUDLayoutChipDescription {
         let metric = HUDMetric.parse(raw) ?? .hidden
         let id = HUDLayoutToken.conditionalID(raw) ?? ""
         let baseTitle: String
@@ -476,73 +484,63 @@ struct HUDLayoutEditorView: View {
         let canBindSource = ![HUDMetric.icon, .space, .separatorDot, .hidden].contains(metric)
         let source = canBindSource ? sourceLabel(HUDLayoutToken.sourceID(raw) ?? "local") : nil
 
-        return Button { edit(layout.removing(at: p)) } label: {
-            chipLabel(baseTitle, metric: metric, source: source)
-        }
-        .buttonStyle(.plain)
-        .draggable("hud-slot:\(p.row):\(p.index)")
-        .contextMenu {
+        return HUDLayoutChipDescription(id: "\(p.row):\(raw):\(occurrence)",
+            label: AnyView(chipLabel(baseTitle, metric: metric, source: source)),
+            accessibilityLabel: metric == .icon ? "ChatGPT 图标，点击移除，拖动排序"
+                : baseTitle + "，绑定 " + (source ?? "无数据来源") + "，点击移除，拖动排序，右键设置",
+            payload: { .init(context: dragContext, source: .placed(row: p.row, index: p.index, raw: raw)) },
+            onClick: { edit(layout.removing(at: p)) }, menu: {
+            let menu = NSMenu()
+            menu.autoenablesItems = false
             if canBindSource {
-                Menu("绑定数据源") {
-                    ForEach(bindableSources) { source in
-                        Button(source.label) { edit(layout.settingSource(source.id, at: p)) }
-                    }
+                let sourceItem = NSMenuItem(title: "绑定数据源", action: nil, keyEquivalent: "")
+                let submenu = NSMenu()
+                submenu.autoenablesItems = false
+                for source in bindableSources {
+                    let item = hudLayoutMenuItem(source.label) { edit(layout.settingSource(source.id, at: p)) }
+                    item.state = source.id == (HUDLayoutToken.sourceID(raw) ?? "local") ? .on : .off
+                    submenu.addItem(item)
                 }
+                sourceItem.submenu = submenu
+                menu.addItem(sourceItem)
             }
             if metric == .space {
-                ForEach([4, 8, 12, 16, 24, 32, 48], id: \.self) { width in
-                    Button("空格宽度 \(width) pt") { edit(layout.settingSpace(width, at: p)) }
+                for width in [4, 8, 12, 16, 24, 32, 48] {
+                    menu.addItem(hudLayoutMenuItem("空格宽度 \(width) pt") { edit(layout.settingSpace(width, at: p)) })
                 }
             }
             if metric == .conditional, let rule = layout.conditionals[id] {
-                Button("编辑条件") { ruleDraft = .init(id: id, rule: rule, existing: true) }
+                menu.addItem(hudLayoutMenuItem("编辑条件") { ruleDraft = .init(id: id, rule: rule, existing: true) })
             }
-            Button("左移") { edit(layout.moving(from: p, toRow: p.row, before: p.index - 1)) }
-                .disabled(p.index == 0)
-            Button("右移") { edit(layout.moving(from: p, toRow: p.row, before: p.index + 2)) }
-                .disabled(p.index == count - 1)
-            Button(p.row == 0 ? "移到第二行" : "移到第一行") {
+            menu.addItem(hudLayoutMenuItem("左移", enabled: p.index > 0) { edit(layout.moving(from: p, toRow: p.row, before: p.index - 1)) })
+            menu.addItem(hudLayoutMenuItem("右移", enabled: p.index < count - 1) { edit(layout.moving(from: p, toRow: p.row, before: p.index + 2)) })
+            menu.addItem(hudLayoutMenuItem(p.row == 0 ? "移到第二行" : "移到第一行") {
+                let destination = 1 - p.row
+                if layout.lines.indices.contains(destination), layout.lines[destination].count >= HUDLayout.maximumItemsPerLine {
+                    dropFeedback = HUDLayoutDrop.fullRowMessage
+                    return
+                }
                 edit(layout.moving(from: p, toRow: 1 - p.row))
-            }
-            Button("移除") { edit(layout.removing(at: p)) }
-        }
-        .dropDestination(for: String.self) { items, _ in drop(items, row: p.row, before: p.index) }
-        .accessibilityLabel(metric == .icon
-                            ? "ChatGPT 图标，点击移除，拖动排序"
-                            : baseTitle + "，绑定 " + (source ?? "无数据来源") + "，点击移除，拖动排序，右键设置")
+            })
+            menu.addItem(hudLayoutMenuItem("移除") { edit(layout.removing(at: p)) })
+            return menu
+        })
     }
 
-    private func position(_ payload: String?) -> HUDLayoutPosition? {
-        guard let payload else { return nil }
-        let parts = payload.split(separator: ":")
-        guard parts.count == 3, parts[0] == "hud-slot", let r = Int(parts[1]), let i = Int(parts[2]) else {
-            return nil
-        }
-        return .init(row: r, index: i)
-    }
-
-    private func drop(_ items: [String], row: Int, before: Int? = nil) -> Bool {
-        if let p = position(items.first) {
-            edit(layout.moving(from: p, toRow: row, before: before))
+    private func commitDrop(_ result: HUDLayoutDropResult) -> Bool {
+        switch result {
+        case .layout(let next):
+            if next != layout { edit(next) }
+            else { dropFeedback = nil }
             return true
-        }
-        guard let raw = items.first,
-              raw.hasPrefix("metric:"),
-              let metric = HUDMetric(rawValue: String(raw.dropFirst(7))),
-              metric != .state else { return false }
-        if metric == .conditional {
-            ruleDraft = .init()
+        case .conditional(let row, let index, let sourceID):
+            dropFeedback = nil
+            ruleDraft = .init(targetRow: row, targetIndex: index, sourceID: sourceID)
             return true
+        case .rejected(let reason):
+            dropFeedback = reason
+            return false
         }
-        if row < layout.lines.count,
-           layout.lines[row].count >= HUDLayout.maximumItemsPerLine,
-           !layout.lines[row].contains(metric.rawValue) { return false }
-        var next = layout.inserting(metric, row: row, sourceID: preferences.value.sourceID)
-        if let before, let last = next.lines[row].indices.last {
-            next = next.moving(from: .init(row: row, index: last), toRow: row, before: before)
-        }
-        edit(next)
-        return true
     }
 }
 
@@ -550,6 +548,9 @@ private struct HUDRuleDraft: Identifiable {
     var id = UUID().uuidString
     var rule = HUDConditional()
     var existing = false
+    var targetRow: Int?
+    var targetIndex: Int?
+    var sourceID: String?
 }
 
 private struct HUDConditionalEditor: View {

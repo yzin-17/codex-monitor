@@ -7,6 +7,9 @@ import SwiftUI
 struct CodexNotchApp {
     static func main() {
         let arguments = CommandLine.arguments
+        #if DEBUG
+        if arguments.contains("--qa-hud-interaction") { exit(HUDNativeInteractionQA.run()) }
+        #endif
         let shouldPrintHumanSnapshot = arguments.contains("--print-snapshot") || arguments.contains("--print-fast-snapshot")
         let shouldPrintJSONSnapshot = arguments.contains("--print-snapshot-json") || arguments.contains("--print-fast-snapshot-json")
         if shouldPrintHumanSnapshot || shouldPrintJSONSnapshot {

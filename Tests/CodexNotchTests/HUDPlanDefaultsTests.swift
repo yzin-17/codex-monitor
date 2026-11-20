@@ -84,7 +84,7 @@ import Testing
         remaining: true,
         menuBar: true
     )
-    #expect(withIcon >= withoutIcon + 18)
+    #expect(abs(withIcon - withoutIcon - 16) < 0.001)
 }
 
 @Test func recentActivitySanitizesInternalTranscriptTitles() {

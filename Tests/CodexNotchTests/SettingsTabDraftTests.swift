@@ -46,6 +46,7 @@ func startupAndAppearanceRenderWithoutChangingStartupOrRefreshing() async throws
     let suite = "settings-tabs-\(UUID())"
     let defaults = try #require(UserDefaults(suiteName: suite))
     defer { defaults.removePersistentDomain(forName: suite) }
+    defaults.set(1, forKey: "legacyKeychainMigrationVersion")
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(suite)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: directory) }
@@ -61,13 +62,16 @@ func startupAndAppearanceRenderWithoutChangingStartupOrRefreshing() async throws
     let newAPI = BalanceMonitorViewModel(source: .newAPI, settings: settings)
     let subAPI = BalanceMonitorViewModel(source: .subAPI, settings: settings)
     let radar = CodexRadarViewModel(settings: settings, previewSnapshot: .disabled)
+    let pricing = TokenPricingUpdater(defaults: defaults, cacheURL: directory.appendingPathComponent("pricing.json"),
+        fetch: { _ in throw URLError(.notConnectedToInternet) })
     let output = ProcessInfo.processInfo.environment["CODEX_MONITOR_SNAPSHOT_DIR"].map { URL(fileURLWithPath: $0) }
     if let output { try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true) }
     var refreshes = 0
 
     for (tab, name) in [(SettingsTab.launch, "settings-startup"), (.appearance, "settings-appearance")] {
         let view = SettingsView(settings: settings, remoteViewModel: remote, newAPIViewModel: newAPI,
-            subAPIViewModel: subAPI, codexRadarViewModel: radar, onRefresh: { refreshes += 1 }, initialTab: tab)
+            subAPIViewModel: subAPI, codexRadarViewModel: radar, onRefresh: { refreshes += 1 }, initialTab: tab,
+            pricingUpdater: pricing)
         let host = NSHostingView(rootView: view.frame(width: 900, height: 780)
             .background(Color(nsColor: .windowBackgroundColor)).environment(\.colorScheme, .dark))
         host.sizingOptions = []

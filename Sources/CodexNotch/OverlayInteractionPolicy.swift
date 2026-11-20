@@ -6,6 +6,7 @@ enum OverlayInteractionPolicy {
     static func isAuxiliaryWindow(_ eventWindow: NSWindow?, hud: NSWindow, detail: NSWindow,
                                   modal: NSWindow?) -> Bool {
         guard let eventWindow, eventWindow !== hud, eventWindow !== detail else { return false }
+        if TaskProgressFloatingPanel.contains(eventWindow) { return true }
         if let modal, belongs(eventWindow, to: modal) { return true }
         return belongs(eventWindow, to: detail) || belongs(eventWindow, to: hud)
     }

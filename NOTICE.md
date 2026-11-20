@@ -17,6 +17,6 @@ ALight 固定快照没有单独 LICENSE。Jackie 随附 MIT 文本（含 ALight7
 
 测速计算核心 `ResponsePerformance.swift`、`GenerationRate.swift`、`OutputRate.swift` 移植自 [RyanZhangNTU/codex-pacer](https://github.com/RyanZhangNTU/codex-pacer)，固定提交 `d8152ae4dbe2eb16599c0a78277124459f66e074`，版权归 Codex Pacer contributors，MIT 许可原文保存在 `licenses/CodexPacer-MIT.txt`。本项目增加了本地日志适配、增量读取和 HUD 展示，没有引入 Pacer 的应用运行时或进度 MCP。
 
-任务进度的叶子复选框、章节范围、多文档汇总和异常缓存规则移植自用户仓库 [yzin-17/codex-task-lens](https://github.com/yzin-17/codex-task-lens)，固定提交 `0e4c67a90f809a8a2560eb7da0f812bf8fb90f1a`。本项目以 Swift 原生实现解析、文件监听、绑定与界面；该快照未提供独立 LICENSE，不为其杜撰许可声明。
+任务进度的叶子复选框、章节范围、多文档汇总、异常缓存、会话文档发现及清单／文档／设置界面组织参考用户仓库 [yzin-17/codex-task-lens](https://github.com/yzin-17/codex-task-lens)，固定提交 `0e4c67a90f809a8a2560eb7da0f812bf8fb90f1a`。本项目以 Swift 原生实现解析、文件监听、绑定与界面，并增加明确关联文档的自动绑定与手动排除规则；该快照未提供独立 LICENSE，不为其杜撰许可声明。
 
 Markdown AST 使用 [Swift Markdown 0.5.0](https://github.com/swiftlang/swift-markdown/tree/0.5.0)，遵循其 Apache License 2.0 with Runtime Library Exception；解析依赖为 Swift CMark。许可原文分别保存在 `licenses/Swift-Markdown-LICENSE.txt` 与 `licenses/Swift-CMark-COPYING.txt`。构建应用时将本说明及 `licenses` 一并放入应用资源目录。
