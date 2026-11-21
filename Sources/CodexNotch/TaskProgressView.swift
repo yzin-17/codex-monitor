@@ -10,22 +10,44 @@ struct TaskProgressButton: View {
 
     var body: some View {
         let summary = store.summary(for: threadID)
-        let scanning = store.discoveryState(for: threadID).isScanning
+        let scan = store.discoveryState(for: threadID)
         Button { presenter.toggle(store: store, threadID: threadID) } label: {
-            HStack(spacing: 5) {
-                TaskProgressRing(fraction: summary.fraction, warning: summary.stale || summary.partial, size: 13)
-                Text(summary.documentCount == 0 ? (scanning ? "扫描中" : "任务清单") : summary.label)
-                    .font(.system(size: 10, weight: .medium)).monospacedDigit().lineLimit(1)
-            }
+            TaskProgressIndicator(summary: summary, scan: scan)
             .fixedSize(horizontal: true, vertical: false)
             .foregroundStyle(summary.stale || summary.partial ? MonitorTheme.warning : MonitorTheme.textSecondary)
         }
         .buttonStyle(.plain)
         .background(TaskProgressAnchor(presenter: presenter))
         .help("查看任务文档进度、自动发现的清单与绑定范围")
-        .accessibilityLabel("展开任务清单，" + (summary.documentCount == 0 ? "尚未发现清单" : summary.label))
+        .accessibilityLabel("展开任务清单，" + TaskProgressIndicator.label(summary: summary, scan: scan))
         .onAppear { store.retain(threadID: threadID) }
         .onDisappear { store.release(threadID: threadID); presenter.closeIfUnpinned() }
+    }
+}
+
+struct TaskProgressIndicator: View {
+    let summary: TaskProgressSummary
+    let scan: TaskProgressScanState
+
+    static func label(summary: TaskProgressSummary, scan: TaskProgressScanState) -> String {
+        if summary.documentCount > 0 { return summary.label }
+        if scan.isScanning || scan.hasUnreadSessionRecords { return scan.readingLabel }
+        return scan.lastScannedAt == nil ? "任务清单" : "未关联"
+    }
+
+    var body: some View {
+        HStack(spacing: 5) {
+            if scan.isScanning {
+                ProgressView().controlSize(.mini).frame(width: 13, height: 13)
+            } else if summary.fraction != nil {
+                TaskProgressRing(fraction: summary.fraction, warning: summary.stale || summary.partial, size: 13)
+            } else {
+                Image(systemName: summary.stale || summary.partial ? "exclamationmark.triangle" : "checklist")
+                    .font(.system(size: 12)).frame(width: 13, height: 13)
+            }
+            Text(Self.label(summary: summary, scan: scan))
+                .font(.system(size: 10, weight: .medium)).monospacedDigit().lineLimit(1)
+        }
     }
 }
 
@@ -171,8 +193,12 @@ struct TaskProgressPanel: View {
                         VStack(spacing: 12) {
                             if scan.isScanning { ProgressView().controlSize(.small) }
                             else { Image(systemName: "checklist").font(.system(size: 28)).foregroundStyle(MonitorTheme.textTertiary) }
-                            Text(scan.isScanning ? "正在查找任务文档…" : "尚未发现可自动绑定的清单")
+                            Text(scan.isScanning ? "正在查找任务文档…" : scan.hasUnreadSessionRecords ? "会话记录尚未读完" : "尚未关联任务清单")
                                 .font(.system(size: 13, weight: .semibold))
+                            if scan.isScanning || scan.hasUnreadSessionRecords {
+                                Text(scan.readingLabel).font(.system(size: 11)).monospacedDigit()
+                                    .foregroundStyle(MonitorTheme.textSecondary)
+                            }
                             Text("会自动查找当前任务提到或更新的进度文档。也可以在“文档”中查看候选清单。")
                                 .font(.system(size: 11)).foregroundStyle(MonitorTheme.textSecondary)
                                 .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
@@ -655,8 +681,11 @@ private struct TaskProgressDocumentManager: View {
             HStack {
                 Text("可添加文档").font(.system(size: 12, weight: .semibold))
                 Spacer()
-                if scan.isScanning { ProgressView().controlSize(.mini) }
-                Button(scan.isScanning ? "扫描中…" : "重新扫描") { store.discover(threadID: threadID, force: true) }
+                if scan.isScanning {
+                    ProgressView().controlSize(.mini)
+                    Text(scan.readingLabel).font(.system(size: 10)).monospacedDigit()
+                }
+                Button(scan.hasUnreadSessionRecords ? "继续扫描" : "重新扫描") { store.discover(threadID: threadID, force: true) }
                     .buttonStyle(.plain).font(.system(size: 10)).disabled(scan.isScanning)
             }
             if let message = scan.message { notice(message) }

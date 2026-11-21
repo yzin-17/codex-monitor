@@ -29,6 +29,9 @@ struct TaskProgressDiscoveryResult: Sendable {
     let message: String?
     let hasMore: Bool
     var hasUnreadSessionRecords = false
+    var observedPaths: [String] = []
+    var sessionBytesRead: UInt64? = nil
+    var sessionTotalBytes: UInt64? = nil
 }
 
 /// 沿用 Task Lens 的只读发现方式，仅检查已经定位的会话文件，不另建全量 Codex 索引。
@@ -91,6 +94,9 @@ actor TaskProgressDiscoveryService {
         var messages: [String] = []
         var hasMore = false
         var hasUnreadSessionRecords = false
+        var observedPaths: [String] = []
+        var sessionBytesRead: UInt64?
+        var sessionTotalBytes: UInt64?
         if let path = rolloutPath, path.hasPrefix("/"), path.hasSuffix(".jsonl"),
            !threadID.isEmpty, threadID.utf8.count <= 128 {
             do {
@@ -100,6 +106,8 @@ actor TaskProgressDiscoveryService {
                 if let message = read.message { messages.append(message) }
                 hasMore = read.hasMore
                 hasUnreadSessionRecords = read.hasMore
+                sessionBytesRead = read.sessionBytesRead
+                sessionTotalBytes = read.sessionTotalBytes
             } catch {
                 messages.append("会话记录暂时不可读，可重试或手动选择文档。")
             }
@@ -111,10 +119,12 @@ actor TaskProgressDiscoveryService {
             for hint in found.hints { Self.merge(hint, into: &hints) }
             if let message = found.message { messages.append(message) }
             hasMore = hasMore || found.hasMore
+            observedPaths = found.observedPaths
         }
         return .init(hints: hints.sorted(by: Self.precedes), workspacePath: workspace,
                      message: messages.isEmpty ? nil : messages.joined(separator: " "), hasMore: hasMore,
-                     hasUnreadSessionRecords: hasUnreadSessionRecords)
+                     hasUnreadSessionRecords: hasUnreadSessionRecords, observedPaths: observedPaths,
+                     sessionBytesRead: sessionBytesRead, sessionTotalBytes: sessionTotalBytes)
     }
 
     func scanDirectory(path: String) async -> TaskProgressDiscoveryResult {
@@ -183,14 +193,15 @@ actor TaskProgressDiscoveryService {
         guard cursor.matched else {
             return .init(hints: [], workspacePath: nil,
                          message: unread ? "正在增量读取会话记录。" : "会话记录未包含匹配的任务标识，未使用其中的文档线索。",
-                         hasMore: unread)
+                         hasMore: unread, sessionBytesRead: cursor.offset, sessionTotalBytes: size)
         }
         var messages: [String] = []
         if unread { messages.append("正在增量读取会话记录。") }
         if cursor.clipped { messages.append("会话线索超过数量上限，保留最近的文档线索。") }
         if cursor.skipped > 0 { messages.append("已跳过无法解析或过大的日志行。") }
         return .init(hints: cursor.hints, workspacePath: cursor.cwd,
-                     message: messages.isEmpty ? nil : messages.joined(separator: " "), hasMore: unread)
+                     message: messages.isEmpty ? nil : messages.joined(separator: " "), hasMore: unread,
+                     sessionBytesRead: cursor.offset, sessionTotalBytes: size)
     }
 
     private func consume(_ bytes: Data, threadID: String, cursor: inout Cursor) {
@@ -278,10 +289,12 @@ actor TaskProgressDiscoveryService {
         var found: [TaskProgressDiscoveryHint] = []
         var visited = 0
         var incomplete = false
+        var observedPaths = Set([root.path])
         let deadline = ProcessInfo.processInfo.systemUptime + scanBudget
         func add(_ url: URL) {
-            guard Self.extensions.contains(url.pathExtension.lowercased()),
-                  let value = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey]),
+            guard Self.extensions.contains(url.pathExtension.lowercased()) else { return }
+            observedPaths.insert(url.path)
+            guard let value = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey]),
                   value.isRegularFile == true, value.isSymbolicLink != true else { return }
             Self.merge(.init(path: TaskProgressPath.canonical(url.path), origins: [.workspace]), into: &found)
         }
@@ -291,6 +304,7 @@ actor TaskProgressDiscoveryService {
         }
         let roots = conventionalOnly ? [root.appendingPathComponent("tasks"), root.appendingPathComponent("docs/tasks")] : [root]
         for directory in roots {
+            observedPaths.insert(directory.path)
             guard !incomplete, !Task.isCancelled,
                   let values = try? directory.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]),
                   values.isDirectory == true, values.isSymbolicLink != true,
@@ -306,6 +320,7 @@ actor TaskProgressDiscoveryService {
                 guard let value = try? file.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey]) else { continue }
                 if value.isSymbolicLink == true { walker.skipDescendants(); continue }
                 if value.isDirectory == true {
+                    observedPaths.insert(file.path)
                     if walker.level >= 32 { walker.skipDescendants(); incomplete = true }
                     continue
                 }
@@ -313,7 +328,8 @@ actor TaskProgressDiscoveryService {
             }
         }
         let result = TaskProgressDiscoveryResult(hints: found.sorted(by: Self.precedes), workspacePath: root.path,
-            message: incomplete ? "目录扫描达到数量、深度或时间上限，可选择更小的目录继续查找。" : nil, hasMore: incomplete)
+            message: incomplete ? "目录扫描达到数量、深度或时间上限，可选择更小的目录继续查找。" : nil,
+            hasMore: incomplete, observedPaths: observedPaths.sorted())
         directories[key] = .init(result: result, createdAt: Date())
         if directories.count > 16, let oldest = directories.min(by: { $0.value.createdAt < $1.value.createdAt })?.key {
             directories.removeValue(forKey: oldest)

@@ -3,6 +3,21 @@ import SwiftUI
 import Testing
 @testable import CodexNotch
 
+@Test @MainActor func taskProgressLabelsDistinguishScanningUnboundAndKnownCounts() {
+    let empty = TaskProgressSummary.summarize(bindings: [], snapshots: [:])
+    let waiting = TaskProgressScanState(lastScannedAt: Date())
+    #expect(TaskProgressIndicator.label(summary: empty, scan: waiting) == "未关联")
+    let scanning = TaskProgressScanState(isScanning: true, sessionBytesRead: 25, sessionTotalBytes: 100)
+    #expect(TaskProgressIndicator.label(summary: empty, scan: scanning) == "扫描中 · 25%")
+    let pending = TaskProgressScanState(hasUnreadSessionRecords: true, sessionBytesRead: 25, sessionTotalBytes: 100)
+    #expect(TaskProgressIndicator.label(summary: empty, scan: pending) == "待续读 · 25%")
+    let known = TaskProgressSummary(completed: 2, total: 5, documentCount: 1, knownDocumentCount: 1, stale: false)
+    #expect(TaskProgressIndicator.label(summary: known, scan: scanning) == "2/5")
+    let partial = TaskProgressSummary(completed: 2, total: 5, documentCount: 2, knownDocumentCount: 1, stale: false)
+    #expect(partial.fraction == nil)
+    #expect(TaskProgressIndicator.label(summary: partial, scan: waiting) == "2/5 · 部分")
+}
+
 @Test @MainActor func taskProgressThreeTabsRenderWithAutomaticAndCandidateDocuments() async throws {
     guard let path = ProcessInfo.processInfo.environment["CODEX_MONITOR_SNAPSHOT_DIR"] else { return }
     _ = NSApplication.shared

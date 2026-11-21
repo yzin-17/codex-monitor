@@ -108,6 +108,15 @@ struct TaskProgressScanState: Equatable, Sendable {
     var message: String? = nil
     var lastScannedAt: Date? = nil
     var hasMore = false
+    var hasUnreadSessionRecords = false
+    var sessionBytesRead: UInt64? = nil
+    var sessionTotalBytes: UInt64? = nil
+
+    var readingLabel: String {
+        let label = isScanning ? "扫描中" : "待续读"
+        guard let read = sessionBytesRead, let total = sessionTotalBytes, total > 0 else { return label }
+        return "\(label) · \(Int(min(1, Double(read) / Double(total)) * 100))%"
+    }
 }
 
 enum TaskProgressSourceStatus: String, Sendable {

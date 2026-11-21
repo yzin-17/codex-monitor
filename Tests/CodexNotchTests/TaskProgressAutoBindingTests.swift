@@ -9,13 +9,13 @@ private struct AutoProgressFixture {
     let thread = "33333333-3333-4333-8333-333333333333"
     let store: TaskProgressStore
 
-    init(automatic: Bool = false) throws {
+    init(automatic: Bool = false, discovery: TaskProgressDiscoveryService = .init()) throws {
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("monitor-auto-progress-\(UUID())")
             .resolvingSymlinksInPath()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         log = directory.appendingPathComponent("rollout-33333333-3333-4333-8333-333333333333.jsonl")
         store = TaskProgressStore(codexHome: directory.appendingPathComponent("source").path, automatic: automatic,
-            storageDirectory: directory.appendingPathComponent("state"), reader: .init(stabilityNanoseconds: 0))
+            storageDirectory: directory.appendingPathComponent("state"), reader: .init(stabilityNanoseconds: 0), discovery: discovery)
         try Self.row("session_meta", ["id": thread, "cwd": directory.path]).write(to: log)
         store.setTasks([task()])
     }
@@ -42,6 +42,107 @@ private struct AutoProgressFixture {
         var data = try JSONSerialization.data(withJSONObject: ["type": type, "payload": payload])
         data.append(0x0A); return data
     }
+}
+
+@Test @MainActor func taskDiscoveryWaitsForChangesAfterHistoryIsCaughtUp() async throws {
+    let fixture = try AutoProgressFixture()
+    defer { fixture.remove() }
+    fixture.store.setTasks([fixture.task(status: .recent)])
+    await fixture.store.discoverAndWait(threadID: fixture.thread)
+    let completed = fixture.store.discoveryState(for: fixture.thread)
+    #expect(completed.lastScannedAt != nil && !completed.isScanning)
+    for _ in 0..<3 { await fixture.store.discoverAndWait(threadID: fixture.thread) }
+    fixture.store.retainPanel(threadID: fixture.thread)
+    await fixture.store.discoverAndWait(threadID: fixture.thread)
+    fixture.store.releasePanel(threadID: fixture.thread)
+    #expect(fixture.store.discoveryState(for: fixture.thread) == completed)
+    let file = try fixture.document("notes/appended.md")
+    try fixture.mention("notes/appended.md")
+    await fixture.store.discoverAndWait(threadID: fixture.thread)
+    #expect(fixture.store.bindings(for: fixture.thread).map(\.path) == [file.path])
+    // 自动绑定写入存储可能改变项目根目录，先收敛这次真实变化。
+    await fixture.store.discoverAndWait(threadID: fixture.thread)
+    let settled = fixture.store.discoveryState(for: fixture.thread)
+    await fixture.store.discoverAndWait(threadID: fixture.thread)
+    #expect(fixture.store.discoveryState(for: fixture.thread) == settled)
+    await fixture.store.discoverAndWait(threadID: fixture.thread, force: true)
+    #expect(fixture.store.discoveryState(for: fixture.thread).lastScannedAt != settled.lastScannedAt)
+}
+
+@Test @MainActor func taskDiscoveryDetectsNestedDirectoryAndMissingDocumentChanges() async throws {
+    let fixture = try AutoProgressFixture()
+    defer { fixture.remove() }
+    _ = try fixture.document("tasks/nested/notes.md", source: "# 说明\n")
+    try fixture.mention("notes/missing.md")
+    await fixture.store.discoverAndWait(threadID: fixture.thread)
+    #expect(fixture.store.discoveryState(for: fixture.thread).candidates.first?.status == .missing)
+    let candidate = try fixture.document("tasks/nested/new.md")
+    await fixture.store.discoverAndWait(threadID: fixture.thread)
+    #expect(fixture.store.discoveryState(for: fixture.thread).candidates.contains { $0.path == candidate.path && $0.canBind })
+    let restored = try fixture.document("notes/missing.md")
+    await fixture.store.discoverAndWait(threadID: fixture.thread)
+    #expect(fixture.store.bindings(for: fixture.thread).map(\.path) == [restored.path])
+    // 相同字节数的原位修改仍须识别，不能把时间戳截成整数秒。
+    try "- [x] 已完成\n- [x] 待验证\n".write(to: restored, atomically: false, encoding: .utf8)
+    await fixture.store.discoverAndWait(threadID: fixture.thread)
+    await fixture.store.refreshAndWait(threadID: fixture.thread)
+    #expect(fixture.store.summary(for: fixture.thread).completed == 2)
+}
+
+@Test @MainActor func taskDiscoveryPollingAndUnrelatedEventsKeepCompletedHistoryIdle() async throws {
+    let fixture = try AutoProgressFixture(automatic: true)
+    defer { fixture.remove() }
+    fixture.store.setTasks([fixture.task(status: .recent)])
+    fixture.store.retain(threadID: fixture.thread)
+    await fixture.store.discoverAndWait(threadID: fixture.thread)
+    let completed = fixture.store.discoveryState(for: fixture.thread)
+    #expect(completed.lastScannedAt != nil)
+    fixture.store.sessionFilesChanged()
+    fixture.store.setTasks([fixture.task(status: .recent)])
+    // 跨过真实的 5 秒兜底轮询，确认不会周期性重新发布扫描状态。
+    try await Task.sleep(for: .milliseconds(5_300))
+    #expect(fixture.store.discoveryState(for: fixture.thread) == completed)
+    fixture.store.release(threadID: fixture.thread)
+}
+
+@Test @MainActor func taskDirectoryScanAndUnchangedDiscoveryFinishWithoutLeavingScanningState() async throws {
+    let fixture = try AutoProgressFixture()
+    defer { fixture.remove() }
+    let file = try fixture.document("selected/progress.md")
+    await fixture.store.discoverAndWait(threadID: fixture.thread)
+    // 手动目录读取、候选解析和不需要重扫的元数据检查可以同时结束。
+    for _ in 0..<3 {
+        async let directory: Void = fixture.store.scanDirectory(path: file.deletingLastPathComponent().path, threadID: fixture.thread)
+        await fixture.store.discoverAndWait(threadID: fixture.thread)
+        await directory
+        await fixture.store.discoverAndWait(threadID: fixture.thread)
+        #expect(!fixture.store.discoveryState(for: fixture.thread).isScanning)
+        #expect(fixture.store.discoveryState(for: fixture.thread).candidates.contains { $0.path == file.path })
+    }
+}
+
+@Test @MainActor func taskDiscoveryContinuesUnchangedLargeLogsAndClearsScanningOnStop() async throws {
+    let fixture = try AutoProgressFixture(discovery: .init(maximumReadBytes: 256))
+    defer { fixture.remove() }
+    let file = try fixture.document("progress.md")
+    try fixture.append("event_msg", ["type": "agent_message", "message": String(repeating: "x", count: 4_000)])
+    try fixture.mention("progress.md")
+    await fixture.store.discoverAndWait(threadID: fixture.thread)
+    let partial = fixture.store.discoveryState(for: fixture.thread)
+    #expect(!partial.isScanning && partial.hasUnreadSessionRecords)
+    #expect((partial.sessionBytesRead ?? 0) < (partial.sessionTotalBytes ?? 0))
+    #expect(partial.readingLabel.hasPrefix("待续读 · "))
+    for _ in 0..<4 {
+        await fixture.store.discoverAndWait(threadID: fixture.thread)
+        if !fixture.store.discoveryState(for: fixture.thread).hasUnreadSessionRecords { break }
+    }
+    #expect(!fixture.store.discoveryState(for: fixture.thread).hasUnreadSessionRecords)
+    #expect(fixture.store.bindings(for: fixture.thread).map(\.path) == [file.path])
+    fixture.store.discover(threadID: fixture.thread, force: true)
+    fixture.store.stop()
+    #expect(!fixture.store.discoveryState(for: fixture.thread).isScanning)
+    await Task.yield()
+    #expect(!fixture.store.discoveryState(for: fixture.thread).isScanning)
 }
 
 @Test @MainActor func taskAutoBindingDiscoversSessionDocumentsAndLeavesDirectoryMatchesAsCandidates() async throws {

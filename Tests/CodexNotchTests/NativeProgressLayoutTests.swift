@@ -7,7 +7,8 @@ import Testing
 @Test func tokenSpeedHUDRemainsSourceBoundAndUsesFreshSamplesForConditions() {
     let now = Date()
     var data = HUDEntityData()
-    #expect(data.text(.tokensPerSecond, remaining: true, now: now) == "— token/s")
+    let direct = HUDLayout(lines: [["tokensPerSecond"]])
+    #expect(data.resolvedMetric(raw: "tokensPerSecond", layout: direct, now: now) == nil)
     #expect(data.numeric(.tokensPerSecond, now: now) == nil)
     data.tokenRate = .init(value: 68.4, measuredAt: now, measuredCount: 1, activeCount: 2)
     #expect(data.text(.tokensPerSecond, remaining: true, now: now) == "68.4 token/s")
@@ -15,6 +16,8 @@ import Testing
     #expect(data.numeric(.tokensPerSecond, remaining: false, now: now) == 68.4)
     #expect(data.display(.tokensPerSecond, remaining: true, now: now.addingTimeInterval(16)).tone == .tertiary)
     #expect(data.numeric(.tokensPerSecond, now: now.addingTimeInterval(16)) == nil)
+    #expect(data.resolvedMetric(raw: "tokensPerSecond", layout: direct, now: now) == .tokensPerSecond)
+    #expect(data.resolvedMetric(raw: "tokensPerSecond", layout: direct, now: now.addingTimeInterval(16)) == nil)
 
     let id = UUID().uuidString
     let rule = HUDConditional(predicates: [.init(metric: .tokensPerSecond, threshold: 50)],
@@ -26,6 +29,26 @@ import Testing
     let bound = HUDLayout(lines: [[]]).inserting(.tokensPerSecond, row: 0, sourceID: "local")
     #expect(bound.lines == [["tokensPerSecond@@local"]])
     #expect(HUDMetric.palette.contains(.tokensPerSecond))
+}
+
+@Test @MainActor func tokenSpeedHiddenStateUsesNoWidthOrSpacingForDirectAndConditionalControls() {
+    let now = Date()
+    let baseline = HUDLayout(lines: [["account", "costToday"]])
+    let withSpeed = HUDLayout(lines: [["account", "tokensPerSecond", "costToday"]])
+    let unavailable = HUDEntityData(costToday: "≈0.20 USD")
+    let stale = HUDEntityData(tokenRate: .init(value: 68.4, measuredAt: now.addingTimeInterval(-20), isStale: true),
+                             costToday: "≈0.20 USD")
+    for data in [unavailable, stale] {
+        let expected = HUDMetricStrip.measuredWidth(layout: baseline, data: data, remaining: true, menuBar: true, now: now)
+        #expect(HUDMetricStrip.measuredWidth(layout: withSpeed, data: data, remaining: true, menuBar: true, now: now) == expected)
+        #expect(HUDMetricStrip.measuredWidth(layout: .init(lines: [["tokensPerSecond"]]), data: data,
+                                           remaining: true, menuBar: false, now: now) == 0)
+        let rule = HUDConditional(predicates: [.init(metric: .costToday, threshold: 0)],
+                                  thenMetric: .tokensPerSecond, elseMetric: .hidden)
+        let conditional = HUDLayout(lines: [["conditional:speed"]], conditionals: ["speed": rule])
+        var knownCost = data; knownCost.costTodayUSD = 1
+        #expect(knownCost.resolvedMetric(raw: "conditional:speed", layout: conditional, now: now) == nil)
+    }
 }
 
 @MainActor private func captureProgressView<V: View>(_ view: V, size: CGSize, name: String) async throws {
@@ -115,12 +138,48 @@ import Testing
     try await captureProgressView(list, size: .init(width: 520, height: 218), name: "task-row-long-title")
     try await captureProgressView(TaskProgressPanel(store: store, threadID: id, close: {}).background(Color.black),
                                   size: .init(width: 460, height: 560), name: "task-progress")
+    let unbound = "unbound-synthetic-thread"
+    await store.discoverAndWait(threadID: unbound)
+    for tab in TaskProgressPanelTab.allCases {
+        let name: String
+        switch tab { case .tasks: name = "checklist"; case .documents: name = "documents"; case .settings: name = "settings" }
+        try await captureProgressView(TaskProgressPanel(store: store, threadID: unbound, initialTab: tab,
+            managesRetention: false, close: {}).background(Color.black), size: .init(width: 460, height: 560),
+            name: "task-progress-unbound-" + name)
+    }
+}
+
+@Test @MainActor func nativeTaskProgressStatesUseDistinctIndicators() async throws {
+    _ = NSApplication.shared
+    let empty = TaskProgressSummary.summarize(bindings: [], snapshots: [:])
+    let known = TaskProgressSummary(completed: 2, total: 5, documentCount: 1, knownDocumentCount: 1, stale: false)
+    let states: [(String, TaskProgressSummary, TaskProgressScanState)] = [
+        ("正在扫描", empty, .init(isScanning: true, sessionBytesRead: 48, sessionTotalBytes: 100)),
+        ("扫描完成，未关联文档", empty, .init(lastScannedAt: Date())),
+        ("日志分段读取", empty, .init(hasUnreadSessionRecords: true, sessionBytesRead: 48, sessionTotalBytes: 100)),
+        ("已关联文档", known, .init(lastScannedAt: Date())),
+        ("后台更新已有进度", known, .init(isScanning: true))
+    ]
+    let view = VStack(alignment: .leading, spacing: 18) {
+        Text("任务清单状态 · 合成数据").font(.system(size: 12, weight: .semibold))
+        ForEach(Array(states.enumerated()), id: \.offset) { _, entry in
+            HStack {
+                Text(entry.0).font(.system(size: 11)).foregroundStyle(MonitorTheme.textSecondary)
+                Spacer()
+                TaskProgressIndicator(summary: entry.1, scan: entry.2)
+            }
+        }
+    }.padding(20).foregroundStyle(MonitorTheme.textPrimary).frame(width: 360)
+    try await captureProgressView(view, size: .init(width: 360, height: 220), name: "task-progress-states")
 }
 
 @Test @MainActor func tokenSpeedHUDRendersFreshEstimatedAndStaleStates() async throws {
     let now = Date()
     let samples: [(String, TokenRateSummary)] = [
-        ("有效样本", .init(value: 68.4, measuredAt: now, measuredCount: 1, activeCount: 1)),
+        ("低于 20", .init(value: 8.5, measuredAt: now, measuredCount: 1, activeCount: 1)),
+        ("20–不足 50", .init(value: 35.2, measuredAt: now, measuredCount: 1, activeCount: 1)),
+        ("50–不足 100", .init(value: 68.4, measuredAt: now, measuredCount: 1, activeCount: 1)),
+        ("100 及以上", .init(value: 128.6, measuredAt: now, measuredCount: 1, activeCount: 1)),
         ("增量估算", .init(value: 52.8, measuredAt: now, isEstimate: true, measuredCount: 1, activeCount: 1)),
         ("最近测量", .init(value: 68.4, measuredAt: now.addingTimeInterval(-20), isStale: true)),
         ("没有数据", .unavailable)
@@ -139,5 +198,20 @@ import Testing
             }
         }
     }.padding(20).frame(width: 300).background(Color.black)
-    try await captureProgressView(view, size: .init(width: 300, height: 160), name: "hud-token-rate")
+    try await captureProgressView(view, size: .init(width: 300, height: 260), name: "hud-token-rate")
+
+    let contextLayout = HUDLayout(lines: [["account", "tokensPerSecond", "costToday"]])
+    let context = VStack(alignment: .leading, spacing: 18) {
+        Text("测速显示状态 · 合成数据").font(.system(size: 12, weight: .semibold)).foregroundStyle(.white)
+        ForEach([0, 5, 6], id: \.self) { index in
+            HStack {
+                Text(index == 0 ? "生成中" : index == 5 ? "空闲" : "等待样本")
+                    .font(.system(size: 11)).foregroundStyle(MonitorTheme.textSecondary)
+                Spacer()
+                HUDMetricStrip(layout: contextLayout,
+                    data: .init(account: "本机", tokenRate: samples[index].1, costToday: "≈0.20 USD"))
+            }
+        }
+    }.padding(20).frame(width: 380).background(Color.black)
+    try await captureProgressView(context, size: .init(width: 380, height: 160), name: "hud-token-rate-visibility")
 }

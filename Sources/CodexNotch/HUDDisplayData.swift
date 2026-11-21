@@ -6,7 +6,7 @@ struct HUDQuotaSample: Equatable, Sendable {
     var duration: TimeInterval?
     var label: String
 }
-enum HUDTone: Equatable { case primary, secondary, tertiary, healthy, warning, critical }
+enum HUDTone: Equatable { case primary, secondary, tertiary, healthy, warning, critical, accent }
 struct HUDDisplayValue: Equatable {
     var label = ""
     var value: String
@@ -108,8 +108,13 @@ struct HUDEntityData: Equatable {
     }
     func resolvedMetric(raw: String, layout: HUDLayout, now: Date = Date()) -> HUDMetric? {
         guard let kind = HUDMetric.parse(raw) else { return nil }
+        func visible(_ metric: HUDMetric) -> HUDMetric? {
+            if hidesFiveHourQuota && isFiveHourMetric(metric) { return nil }
+            if metric == .tokensPerSecond && tokenRate?.isFresh(at: now) != true { return nil }
+            return metric
+        }
         if kind != .conditional {
-            return hidesFiveHourQuota && isFiveHourMetric(kind) ? nil : kind
+            return visible(kind)
         }
         guard let id = HUDLayoutToken.conditionalID(raw), let stored = layout.conditionals[id] else { return nil }
         let rule = stored.normalized
@@ -123,7 +128,7 @@ struct HUDEntityData: Equatable {
             results.append(p.comparison.evaluate(value, p.threshold))
         }
         let resolved = (rule.matchAll ? results.allSatisfy { $0 } : results.contains(true)) ? rule.thenMetric : rule.elseMetric
-        return hidesFiveHourQuota && isFiveHourMetric(resolved) ? nil : resolved
+        return visible(resolved)
     }
     func display(_ metric: HUDMetric, remaining: Bool, now: Date = Date()) -> HUDDisplayValue {
         if metric.isQuota && metric != .usageBar {
@@ -172,8 +177,12 @@ struct HUDEntityData: Equatable {
         case .usageBar: return .init(value: automatic.map { "\(Int((remaining ? $0 : 100 - $0).rounded()))%" } ?? "—", tone: tone(for: automatic))
         case .tokensToday: return .init(label: "Today", value: todayTokens ?? "—", tone: todayTokens == nil ? .tertiary : .primary)
         case .tokensPerSecond:
-            return .init(value: (tokenRate ?? .unavailable).formatted(at: now),
-                         tone: tokenRate?.isFresh(at: now) == true ? .primary : .tertiary)
+            let rate = tokenRate ?? .unavailable
+            guard rate.isFresh(at: now), let speed = rate.value else {
+                return .init(value: rate.formatted(at: now), tone: .tertiary)
+            }
+            return .init(value: rate.formatted(at: now),
+                         tone: speed < 20 ? .critical : speed < 50 ? .warning : speed < 100 ? .healthy : .accent)
         case .balance: return .init(value: balance ?? "余额 —", tone: balance == nil ? .tertiary : .primary)
         case .costToday: return .init(label: "今日", value: costToday ?? "—", tone: costToday == nil ? .tertiary : .primary)
         case .cost30d: return .init(label: "30天", value: cost30d ?? "—", tone: cost30d == nil ? .tertiary : .primary)

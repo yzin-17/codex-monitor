@@ -2,7 +2,7 @@
 
 原生 macOS 刘海屏 / 菜单栏监测工具：贴着 MacBook 刘海（或菜单栏）常驻显示 Codex 运行状态与额度，点击展开成灵动岛式详情面板，把本机用量、性能、Skills、公开评分、社区预测和远程账号放在一个窗口里。
 
-![版本](https://img.shields.io/badge/版本-0.4.13-blue) ![平台](https://img.shields.io/badge/macOS-14%2B-lightgrey) ![Swift](https://img.shields.io/badge/Swift-6-orange) ![许可](https://img.shields.io/badge/License-MIT-green) ![架构](https://img.shields.io/badge/Arch-arm64%20%2F%20x86__64-lightgrey)
+![版本](https://img.shields.io/badge/版本-0.4.14-blue) ![平台](https://img.shields.io/badge/macOS-14%2B-lightgrey) ![Swift](https://img.shields.io/badge/Swift-6-orange) ![许可](https://img.shields.io/badge/License-MIT-green) ![架构](https://img.shields.io/badge/Arch-arm64%20%2F%20x86__64-lightgrey)
 
 项目以 [ALight777/codex-monitor](https://github.com/ALight777/codex-monitor) 原始源码为基线，在此基础上移植 [jackiemingnew/codex-monitor-macos](https://github.com/jackiemingnew/codex-monitor-macos) 的性能与 Skills 模块，并参考 [steipete/CodexBar](https://github.com/steipete/CodexBar) 的 HUD 控件思路与 [JiaYang-BUAA/Codex-Desktop-Usage-Monitor-Windows](https://github.com/JiaYang-BUAA/Codex-Desktop-Usage-Monitor-Windows) 的续跑状态机。**本项目不是从零原创**，来源与许可边界见 [NOTICE.md](NOTICE.md)。
 
@@ -63,6 +63,7 @@
 
 - **自动发现与绑定**：沿当前任务的会话记录，识别消息中引用以及工具创建、更新、读取过的 Markdown 路径；同时检查项目的 `TASKS.md`、`tasks/`、`docs/tasks/`。明确引用或创建、更新过且实际含任务的文档尝试自动绑定；仅目录匹配或读取过的文档列为候选。每个任务最多绑定 16 个文件。
 - 任务行显示环形进度及完成数／总数，点击打开原生浮窗，包含「清单／文档／设置」三个 tab。标题栏可拖动、可固定，关闭后恢复默认位置。Monitor 自己解析及监听文件，不依赖 Task Lens、Node Agent 或 CDP。
+- 扫描中显示加载动画，扫描结束但没有绑定文档时显示清单图标与「未关联」；已知进度才显示圆环。日志分段读取显示已读取比例，暂停时显示「待续读」。自动发现追平后等待日志、候选文档或任务目录变化，手动重新扫描始终可用。
 - 「清单」按文档分组，并分别展示未完成／已完成任务；展开条目可查看原文、任务 ID、分组、源行号与状态冲突。默认编辑器支持时可直接打开源行。
 - 「文档」显示已选文档与候选来源，可选择文件、扫描目录、粘贴路径或搜索章节范围；调整进入草稿，确认后保存。保存期间源文档或后台绑定发生变化会要求重新核对，保留当前草稿。
 - 「设置」可控制自动绑定及项目目录扫描，恢复手动忽略的文档。手动移除会持久排除该文档，避免下次扫描又绑定；手动选择的章节范围优先于自动发现。
@@ -73,6 +74,7 @@
 
 ### 本机 Codex 监测
 
+- 测速在任务运行且有新鲜有效样本时显示：低于 20 token/s 为红色，20–不足 50 为橙色，50–不足 100 为绿色，100 及以上为蓝色；估算值保留「≈」。空闲、无样本或样本过期时自动隐藏，位置与间距随内容收缩。
 - 运行状态（执行中 / 空闲）、活跃任务与活跃子代理数量、最近活动对话列表。
 - 可用额度窗口剩余百分比；可选显示 GPT-5.3-Codex-Spark 专属窗口。
 - 周额度行显示剩余重置次数，旁边显示最近一笔可用重置次数的**到期倒计时**（每分钟更新，到期后自动选下一笔未来时间）。日期缺失显示「未知」，不把到期时间冒充额度恢复时间。

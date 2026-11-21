@@ -20,6 +20,7 @@ extension HUDTone {
         case .healthy: MonitorTheme.healthy
         case .warning: MonitorTheme.warning
         case .critical: MonitorTheme.critical
+        case .accent: MonitorTheme.radarBaseline
         }
     }
 }
@@ -73,10 +74,11 @@ struct HUDMetricStrip: View {
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
+            let visibleRows = rows.map { visible($0, at: context.date) }.filter { !$0.isEmpty }
             VStack(alignment: .leading, spacing: menuBar && rows.count == 2 ? 0 : 2) {
-                ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                ForEach(Array(visibleRows.enumerated()), id: \.offset) { _, row in
                     HStack(alignment: .firstTextBaseline, spacing: Self.itemSpacing) {
-                        ForEach(Array(visible(row, at: context.date).enumerated()), id: \.offset) { _, raw in
+                        ForEach(Array(row.enumerated()), id: \.offset) { _, raw in
                             cell(raw, now: context.date)
                         }
                     }
@@ -136,7 +138,8 @@ struct HUDMetricStrip: View {
             guard let metric = itemData.resolvedMetric(raw: raw, layout: layout, now: now) else { return nil }
             if [.space, .hidden, .separatorDot].contains(metric) { return nil }
             let source = HUDLayoutToken.sourceID(raw).map { " [\($0)]" } ?? " [本机 Codex]"
-            let detail = metric == .tokensPerSecond ? "\n" + (itemData.tokenRate ?? .unavailable).explanation(at: now) : ""
+            let detail = metric == .tokensPerSecond ? "\n" + (itemData.tokenRate ?? .unavailable).explanation(at: now)
+                + "\n速度颜色：低于 20 红色，20–不足 50 橙色，50–不足 100 绿色，100 及以上蓝色（token/s）。" : ""
             return metric.title + source + "：" + itemData.text(metric, remaining: remaining, now: now) + detail
         }
         return (data.warning.map { "注意：\($0)\n" } ?? "")

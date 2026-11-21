@@ -42,6 +42,8 @@ final class TaskProgressStore: ObservableObject {
     private var generations: [String: Int] = [:]
     private var scanWorkers: [String: Task<Void, Never>] = [:]
     private var scanGenerations: [String: Int] = [:]
+    private var discoveryInputs: [String: [String: String]] = [:]
+    private var directoryScans: [String: Int] = [:]
     private var storageWritable = true
     private var stopped = false
 
@@ -183,29 +185,50 @@ final class TaskProgressStore: ObservableObject {
             guard force else { return }
             scanWorkers.removeValue(forKey: threadID)?.cancel()
         }
-        if !force, let last = discoveryByThread[threadID]?.lastScannedAt, Date().timeIntervalSince(last) < 1 { return }
         let generation = (scanGenerations[threadID] ?? 0) + 1
         scanGenerations[threadID] = generation
-        var state = discoveryState(for: threadID); state.isScanning = true
-        discoveryByThread[threadID] = state
+        let state = discoveryState(for: threadID)
         let rollout = contexts[threadID]?.rolloutPath
         let workspace = state.workspacePath
         let service = discovery
+        let knownPaths = Set(discoveryInputs[threadID]?.keys.map { $0 } ?? [])
+            .union(rollout.map { [$0] } ?? [])
         scanWorkers[threadID] = Task { [weak self] in
+            // 轮询只比较元数据；输入未变且日志已追平时，不发布扫描状态或读取内容。
+            let inputs = await Task.detached { Self.inputVersions(paths: knownPaths) }.value
+            guard let self, !self.stopped, !Task.isCancelled, self.scanGenerations[threadID] == generation else { return }
+            if !force, !state.hasUnreadSessionRecords, self.discoveryInputs[threadID] == inputs {
+                self.scanWorkers.removeValue(forKey: threadID)
+                if self.directoryScans[threadID] == nil, self.discoveryByThread[threadID]?.isScanning == true {
+                    self.discoveryByThread[threadID]?.isScanning = false
+                }
+                return
+            }
+            self.discoveryByThread[threadID, default: .init()].isScanning = true
+            var observedPaths = Set(rollout.map { [$0] } ?? [])
             // 每次最多推进 8 块，目录上限和超大日志都不会造成无限循环。
             for chunk in 0..<8 {
-                guard let self, !Task.isCancelled, self.scanGenerations[threadID] == generation else { return }
+                guard !self.stopped, !Task.isCancelled, self.scanGenerations[threadID] == generation else { return }
                 let result = await service.scan(threadID: threadID, rolloutPath: rollout,
                     workspacePath: workspace, includeWorkspace: self.settings(for: threadID).scanWorkspace,
-                    force: force && chunk == 0)
+                    force: chunk == 0)
                 guard !Task.isCancelled, self.scanGenerations[threadID] == generation else { return }
+                observedPaths.formUnion(result.observedPaths)
+                observedPaths.formUnion(result.hints.map(\.path))
+                observedPaths.formUnion(self.extraHints[threadID, default: []].map(\.path))
+                let paths = observedPaths
+                let versions = await Task.detached { Self.inputVersions(paths: paths) }.value
+                guard !self.stopped, !Task.isCancelled, self.scanGenerations[threadID] == generation else { return }
+                // 已知输入保留扫描前版本，扫描期间发生的写入会在下次检查中继续处理。
+                self.discoveryInputs[threadID] = versions.merging(inputs) { _, before in before }
+                    .filter { observedPaths.contains($0.key) }
                 await self.accept(result, threadID: threadID, generation: generation)
                 guard !Task.isCancelled, self.scanGenerations[threadID] == generation else { return }
                 if !result.hasUnreadSessionRecords { break }
                 try? await Task.sleep(for: .milliseconds(60))
             }
-            guard let self, self.scanGenerations[threadID] == generation else { return }
-            self.discoveryByThread[threadID]?.isScanning = false
+            guard !self.stopped, self.scanGenerations[threadID] == generation else { return }
+            self.discoveryByThread[threadID]?.isScanning = self.directoryScans[threadID, default: 0] > 0
             self.scanWorkers.removeValue(forKey: threadID)
             self.updateObservation()
         }
@@ -218,6 +241,13 @@ final class TaskProgressStore: ObservableObject {
     }
 
     func scanDirectory(path: String, threadID: String) async {
+        guard !stopped else { return }
+        directoryScans[threadID, default: 0] += 1
+        discoveryByThread[threadID, default: .init()].isScanning = true
+        defer {
+            Self.decrement(&directoryScans, threadID)
+            discoveryByThread[threadID]?.isScanning = !stopped && (scanWorkers[threadID] != nil || directoryScans[threadID] != nil)
+        }
         let result = await discovery.scanDirectory(path: path)
         guard !stopped else { return }
         extraHints[threadID] = Self.mergeHints((extraHints[threadID] ?? []) + result.hints)
@@ -227,8 +257,21 @@ final class TaskProgressStore: ObservableObject {
         let merged = TaskProgressDiscoveryResult(hints: Self.mergeHints(known + result.hints),
             workspacePath: state.workspacePath, message: result.message, hasMore: state.hasMore || result.hasMore)
         await accept(merged, threadID: threadID, generation: nil)
-        discoveryByThread[threadID]?.isScanning = scanWorkers[threadID] != nil
+        // 所选目录与新增候选也参与后续变化检查。
+        let paths = Set(result.observedPaths + result.hints.map(\.path))
+        let versions = await Task.detached { Self.inputVersions(paths: paths) }.value
+        if !stopped { discoveryInputs[threadID, default: [:]].merge(versions) { old, _ in old } }
         updateObservation()
+    }
+
+    nonisolated private static func inputVersions(paths: Set<String>) -> [String: String] {
+        Dictionary(uniqueKeysWithValues: paths.map { path in
+            guard let attributes = try? FileManager.default.attributesOfItem(atPath: path) else { return (path, "missing") }
+            let metadata = [FileAttributeKey.systemNumber, .systemFileNumber, .size, .posixPermissions]
+                .map { String(describing: attributes[$0]) }.joined(separator: "|")
+            let modified = (attributes[.modificationDate] as? Date)?.timeIntervalSince1970
+            return (path, metadata + "|\(modified ?? 0)")
+        })
     }
 
     private func accept(_ result: TaskProgressDiscoveryResult, threadID: String, generation: Int?) async {
@@ -263,6 +306,11 @@ final class TaskProgressStore: ObservableObject {
         state.candidates = candidates
         state.workspacePath = result.workspacePath ?? state.workspacePath
         state.lastScannedAt = Date(); state.message = result.message; state.hasMore = result.hasMore
+        if generation != nil {
+            state.hasUnreadSessionRecords = result.hasUnreadSessionRecords
+            state.sessionBytesRead = result.sessionBytesRead
+            state.sessionTotalBytes = result.sessionTotalBytes
+        }
         if eligible.count > pending.count {
             state.hasMore = true
             state.message = "候选文档超过 1024 份，请选择更小的任务目录继续查找。"
@@ -498,6 +546,8 @@ final class TaskProgressStore: ObservableObject {
         debounce?.cancel(); debounce = nil
         workers.values.forEach { $0.cancel() }; workers.removeAll()
         scanWorkers.values.forEach { $0.cancel() }; scanWorkers.removeAll()
+        for thread in discoveryByThread.keys { discoveryByThread[thread]?.isScanning = false }
+        discoveryInputs.removeAll()
         watchers.values.forEach { $0.cancel() }; watchers.removeAll()
         pollTimer?.invalidate(); pollTimer = nil
         visibleThreads.removeAll(); panelThreads.removeAll(); contexts.removeAll()
