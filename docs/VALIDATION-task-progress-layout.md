@@ -55,7 +55,7 @@ swift build -c debug
 
 真实账户对账、长期运行、Intel 实机执行及 Apple 公证不在本轮已通过项目中。
 
-## 2026-11-21：测速数字按区间着色
+## 2026-11-21：0.4.14 测速数字按区间着色
 
 测速使用共享 HUD 显示逻辑：低于 20 token/s 为红色，20–不足 50 为橙色，50–不足 100 为绿色，100 及以上为蓝色。任务运行且有新鲜有效样本时显示，估算值保留「≈」；空闲、无样本或样本过期时隐藏，宽度和间距随内容收缩，空行也会收起。悬停说明列出颜色区间，HUD 与布局预览复用同一配色。
 
@@ -65,8 +65,16 @@ swift build -c debug
 
 `CODEX_NOTCH_SKIP_TESTS=1 scripts/build.sh` 已通过 ARM64、Intel Release 编译、DMG 打包及脚本内 ad-hoc 签名校验，日志为 `/tmp/codex-monitor-speed-colors-20261121/build.log`。`git diff --check` 通过。未安装、提交或发布，真实运行表现仍需在安装后验证。
 
-当前显示行为的证据位于 `/tmp/codex-monitor-speed-visibility-20261121/`。11 项定向测试通过，覆盖直接测速项、条件分支、过期样本及宽度、间距收缩；已查看 `ui/hud-token-rate.png`、`ui/hud-token-rate-visibility.png` 及最终完整复验的 `ui-recheck/hud-token-rate-visibility.png`，生成中显示速度，空闲及等待样本时收起测速，相邻账号和费用保持正常布局。
+0.4.14 显示行为的证据位于 `/tmp/codex-monitor-speed-visibility-20261121/`。11 项定向测试通过，覆盖直接测速项、条件分支、过期样本及宽度、间距收缩；已查看 `ui/hud-token-rate.png`、`ui/hud-token-rate-visibility.png` 及最终完整复验的 `ui-recheck/hud-token-rate-visibility.png`，生成中显示速度，空闲及等待样本时收起测速，相邻账号和费用保持正常布局。
 
 本轮首轮完整回归执行 409 项，测速检查通过，但既有 `validLocalQuotaSuppressesOnlyTheCurrentAccount` 失败：预期替身请求为 `["acct-b"]`，实际记录为空，完整日志保留在 `test.log`。该用例等待首个请求后清空记录，而账户实现会跳过尚未结束的同账号请求，存在并发时序敏感路径；原因判断尚属推断。对同一源码单独复跑该测试通过（约 0.05 秒），见 `account-recheck.log`。没有修改账户实现或该测试。
 
 最终完整复验使用 `CODEX_MONITOR_SNAPSHOT_DIR=/tmp/codex-monitor-speed-visibility-20261121/ui-recheck scripts/test.sh`，409 项测试、4 个 suite 及独立回归全部通过，生成 37 张原生截图，日志为 `test-recheck.log`。最终源码执行 `CODEX_NOTCH_SKIP_TESTS=1 scripts/build.sh`，ARM64、Intel Release 编译、DMG 打包及脚本内 ad-hoc 签名校验通过，日志为 `build.log`。补丁格式检查通过。未安装、提交或发布，安装后的真实会话表现尚未验证。
+
+## 2026-11-21：0.4.15 运行中保留测速占位
+
+显示策略由任务运行状态独立决定：运行中保持测速项，缺少新鲜有效样本时显示灰色 `— token/s`，有效样本按原区间着色；空闲时收起。条件规则的数值输入仍只使用新鲜有效样本。布局编辑器的合成预览使用显式运行状态。
+
+11 项定向回归通过，覆盖运行状态切换、无样本、过期、配色、条件规则及宽度；已查看原生截图，确认 RUN 下的两种占位与 IDLE 隐藏。证据位于 `/tmp/codex-monitor-running-speed-0.4.15/`。`scripts/test.sh` 完成 410 项测试、4 个 suite 及独立回归，全部通过；`CODEX_NOTCH_SKIP_TESTS=1 scripts/build.sh` 完成 ARM64／Intel Release 编译、DMG 打包与签名校验。日志分别为 `targeted.log`、`test.log`、`build.log`，完整原生截图位于 `ui-full/`。
+
+已在 `/Applications/CodexMonitor.app` 原位置安装并启动 0.4.15，核对安装版本、签名及进程；旧版 0.4.14 已退出，并按用户要求删除本次安装产生的备份，安装记录为 `install.json`。原生 UI 工具读取该安装路径两次超时，不能记作真实 HUD 视觉验收；合成原生截图与安装启动证据分别保留，真实显示由用户继续查看。

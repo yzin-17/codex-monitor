@@ -100,7 +100,7 @@ private func hudFixtureWindow() -> (HUDDragFixture, NSWindow) {
             HStack(spacing: 12) {
                 Text(sample.0).font(.system(size: 11)).frame(width: 50, alignment: .leading)
                 HUDMetricStrip(layout: .init(lines: [["weekly", "tokensPerSecond"]]),
-                    data: .init(weekly: 4, tokenRate: .init(value: sample.1, measuredAt: now)), menuBar: true)
+                    data: .init(weekly: 4, hasRunningTasks: sample.1 != nil, tokenRate: .init(value: sample.1, measuredAt: now)), menuBar: true)
                     .padding(.horizontal, 8).padding(.vertical, 5)
                     .background(Color.black, in: Capsule())
             }

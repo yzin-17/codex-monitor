@@ -2,7 +2,7 @@
 
 原生 macOS 刘海屏 / 菜单栏监测工具：贴着 MacBook 刘海（或菜单栏）常驻显示 Codex 运行状态与额度，点击展开成灵动岛式详情面板，把本机用量、性能、Skills、公开评分、社区预测和远程账号放在一个窗口里。
 
-![版本](https://img.shields.io/badge/版本-0.4.14-blue) ![平台](https://img.shields.io/badge/macOS-14%2B-lightgrey) ![Swift](https://img.shields.io/badge/Swift-6-orange) ![许可](https://img.shields.io/badge/License-MIT-green) ![架构](https://img.shields.io/badge/Arch-arm64%20%2F%20x86__64-lightgrey)
+![版本](https://img.shields.io/badge/版本-0.4.15-blue) ![平台](https://img.shields.io/badge/macOS-14%2B-lightgrey) ![Swift](https://img.shields.io/badge/Swift-6-orange) ![许可](https://img.shields.io/badge/License-MIT-green) ![架构](https://img.shields.io/badge/Arch-arm64%20%2F%20x86__64-lightgrey)
 
 项目以 [ALight777/codex-monitor](https://github.com/ALight777/codex-monitor) 原始源码为基线，在此基础上移植 [jackiemingnew/codex-monitor-macos](https://github.com/jackiemingnew/codex-monitor-macos) 的性能与 Skills 模块，并参考 [steipete/CodexBar](https://github.com/steipete/CodexBar) 的 HUD 控件思路与 [JiaYang-BUAA/Codex-Desktop-Usage-Monitor-Windows](https://github.com/JiaYang-BUAA/Codex-Desktop-Usage-Monitor-Windows) 的续跑状态机。**本项目不是从零原创**，来源与许可边界见 [NOTICE.md](NOTICE.md)。
 
@@ -52,7 +52,7 @@
 - **内容自适应宽度**：文字和数字控件按当前内容占宽，数值位数增加时撑开、减少时收窄；隐藏控件不占位。组件间距为 5 pt，手动空格、图标和用量条保留自身尺寸，预览与实际 HUD 使用相同的宽度规则。
 - 原生拖放支持从组件库拖入、同行排序、跨行移动及拖到移除区，并显示插入位置。切换「启动／外观」保留草稿；移动保留每个控件的数据源及条件配置，点击「保存布局」后应用。
 - **Token 速度**：在「设置 → 外观 → 自定义布局」添加 `Token 速度`，显示本机运行会话的输出 `token/s`。请求结算用量优先，计数增量估算带 `≈`；首 token 等待包含在请求耗时中，可确认的阻塞工具等待排除。输入和缓存输入不计入测速，推理输出不重复相加。
-- 测速使用增量日志，父任务与子代理仅汇总各自输出；样本超过 15 秒或进入工具等待后置灰为最近测量，覆盖不全在悬停说明中标明。配额和余额接口不能提供测速数据时显示 `— token/s`。
+- 测速使用增量日志，父任务与子代理仅汇总各自输出；运行中尚无样本、样本超过 15 秒或进入工具等待时显示灰色 `— token/s`，覆盖不全在悬停说明中标明。没有任务运行时自动隐藏测速项。
 - 「恢复默认刷新」只重置本机 Codex 的平衡刷新频率，不改变账号、外观、布局或远程数据源。
 
 设置侧栏的「启动」负责开机自启及凭据存储；「外观」集中显示模式、几何、透明度、动画和 HUD 编辑器。切换页面保留未保存的布局草稿，现有配置继续读取。
@@ -74,7 +74,7 @@
 
 ### 本机 Codex 监测
 
-- 测速在任务运行且有新鲜有效样本时显示：低于 20 token/s 为红色，20–不足 50 为橙色，50–不足 100 为绿色，100 及以上为蓝色；估算值保留「≈」。空闲、无样本或样本过期时自动隐藏，位置与间距随内容收缩。
+- 测速在任务运行时显示：低于 20 token/s 为红色，20–不足 50 为橙色，50–不足 100 为绿色，100 及以上为蓝色；估算值保留「≈」。运行中缺少新鲜有效样本时显示灰色 `— token/s`；空闲时隐藏，位置与间距随内容收缩。
 - 运行状态（执行中 / 空闲）、活跃任务与活跃子代理数量、最近活动对话列表。
 - 可用额度窗口剩余百分比；可选显示 GPT-5.3-Codex-Spark 专属窗口。
 - 周额度行显示剩余重置次数，旁边显示最近一笔可用重置次数的**到期倒计时**（每分钟更新，到期后自动选下一笔未来时间）。日期缺失显示「未知」，不把到期时间冒充额度恢复时间。

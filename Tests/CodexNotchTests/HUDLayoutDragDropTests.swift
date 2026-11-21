@@ -82,7 +82,7 @@ private let dragContext = HUDLayoutDragContext(sessionID: UUID(), layoutID: "fix
     let layout = HUDLayout(lines: [["tokensPerSecond"]])
     func rateWidth(_ value: Double?) -> CGFloat {
         HUDMetricStrip.measuredWidth(layout: layout,
-            data: .init(tokenRate: .init(value: value, measuredAt: now, measuredCount: 1, activeCount: 1)),
+            data: .init(hasRunningTasks: true, tokenRate: .init(value: value, measuredAt: now, measuredCount: 1, activeCount: 1)),
             remaining: true, menuBar: true, now: now)
     }
     #expect(rateWidth(nil) < rateWidth(8.5))

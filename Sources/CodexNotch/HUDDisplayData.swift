@@ -24,6 +24,7 @@ struct HUDEntityData: Equatable {
     var resetsAt: Date?
     var balance: String?
     var todayTokens: String?
+    var hasRunningTasks = false
     var tokenRate: TokenRateSummary?
     var costToday: String?
     var cost30d: String?
@@ -90,7 +91,7 @@ struct HUDEntityData: Equatable {
         return elapsed
     }
     func numeric(_ metric: HUDMetric, remaining: Bool = false, now: Date = Date()) -> Double? {
-        if metric == .tokensPerSecond { return tokenRate?.isFresh(at: now) == true ? tokenRate?.value : nil }
+        if metric == .tokensPerSecond { return hasRunningTasks && tokenRate?.isFresh(at: now) == true ? tokenRate?.value : nil }
         let w = window(for: metric)
         if metric.isQuota { return validPercent(w?.remaining).map { remaining ? $0 : 100 - $0 } }
         if metric.isPace {
@@ -110,7 +111,7 @@ struct HUDEntityData: Equatable {
         guard let kind = HUDMetric.parse(raw) else { return nil }
         func visible(_ metric: HUDMetric) -> HUDMetric? {
             if hidesFiveHourQuota && isFiveHourMetric(metric) { return nil }
-            if metric == .tokensPerSecond && tokenRate?.isFresh(at: now) != true { return nil }
+            if metric == .tokensPerSecond && !hasRunningTasks { return nil }
             return metric
         }
         if kind != .conditional {
@@ -179,7 +180,7 @@ struct HUDEntityData: Equatable {
         case .tokensPerSecond:
             let rate = tokenRate ?? .unavailable
             guard rate.isFresh(at: now), let speed = rate.value else {
-                return .init(value: rate.formatted(at: now), tone: .tertiary)
+                return .init(value: "— token/s", tone: .tertiary)
             }
             return .init(value: rate.formatted(at: now),
                          tone: speed < 20 ? .critical : speed < 50 ? .warning : speed < 100 ? .healthy : .accent)

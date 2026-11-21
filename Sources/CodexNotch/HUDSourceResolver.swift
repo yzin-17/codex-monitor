@@ -19,6 +19,7 @@ extension HUDEntityData {
         var d = Self()
         if source == "local" {
             let s = usage.snapshot
+            d.hasRunningTasks = s.isRunning
             d.tokenRate = s.isRunning ? usage.tokenRateSummary : .unavailable
             d.primary = s.primaryPercent.map(Double.init); d.weekly = s.secondaryPercent.map(Double.init)
             d.state = s.isRunning ? "RUN" : "IDLE"

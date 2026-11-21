@@ -10,6 +10,7 @@ import Testing
     let direct = HUDLayout(lines: [["tokensPerSecond"]])
     #expect(data.resolvedMetric(raw: "tokensPerSecond", layout: direct, now: now) == nil)
     #expect(data.numeric(.tokensPerSecond, now: now) == nil)
+    data.hasRunningTasks = true
     data.tokenRate = .init(value: 68.4, measuredAt: now, measuredCount: 1, activeCount: 2)
     #expect(data.text(.tokensPerSecond, remaining: true, now: now) == "68.4 token/s")
     #expect(data.numeric(.tokensPerSecond, remaining: true, now: now) == 68.4)
@@ -17,7 +18,7 @@ import Testing
     #expect(data.display(.tokensPerSecond, remaining: true, now: now.addingTimeInterval(16)).tone == .tertiary)
     #expect(data.numeric(.tokensPerSecond, now: now.addingTimeInterval(16)) == nil)
     #expect(data.resolvedMetric(raw: "tokensPerSecond", layout: direct, now: now) == .tokensPerSecond)
-    #expect(data.resolvedMetric(raw: "tokensPerSecond", layout: direct, now: now.addingTimeInterval(16)) == nil)
+    #expect(data.resolvedMetric(raw: "tokensPerSecond", layout: direct, now: now.addingTimeInterval(16)) == .tokensPerSecond)
 
     let id = UUID().uuidString
     let rule = HUDConditional(predicates: [.init(metric: .tokensPerSecond, threshold: 50)],
@@ -29,6 +30,24 @@ import Testing
     let bound = HUDLayout(lines: [[]]).inserting(.tokensPerSecond, row: 0, sourceID: "local")
     #expect(bound.lines == [["tokensPerSecond@@local"]])
     #expect(HUDMetric.palette.contains(.tokensPerSecond))
+}
+
+@Test @MainActor func tokenSpeedRunningTaskKeepsPlaceholderUntilFreshSample() {
+    let now = Date()
+    let layout = HUDLayout(lines: [["tokensPerSecond"]])
+    var data = HUDEntityData(state: "本机额度", hasRunningTasks: true)
+    #expect(data.resolvedMetric(raw: "tokensPerSecond", layout: layout, now: now) == .tokensPerSecond)
+    #expect(data.text(.tokensPerSecond, remaining: true, now: now) == "— token/s")
+    #expect(data.display(.tokensPerSecond, remaining: true, now: now).tone == .tertiary)
+    #expect(data.numeric(.tokensPerSecond, now: now) == nil)
+    data.tokenRate = .init(value: 68.4, measuredAt: now, measuredCount: 1, activeCount: 1)
+    #expect(data.display(.tokensPerSecond, remaining: true, now: now).tone == .healthy)
+    #expect(data.text(.tokensPerSecond, remaining: true, now: now.addingTimeInterval(16)) == "— token/s")
+    #expect(data.resolvedMetric(raw: "tokensPerSecond", layout: layout, now: now.addingTimeInterval(16)) == .tokensPerSecond)
+    data.hasRunningTasks = false
+    #expect(data.resolvedMetric(raw: "tokensPerSecond", layout: layout, now: now) == nil)
+    #expect(data.numeric(.tokensPerSecond, now: now) == nil)
+    #expect(HUDMetricStrip.measuredWidth(layout: layout, data: data, remaining: true, menuBar: true, now: now) == 0)
 }
 
 @Test @MainActor func tokenSpeedHiddenStateUsesNoWidthOrSpacingForDirectAndConditionalControls() {
@@ -185,8 +204,8 @@ import Testing
         ("没有数据", .unavailable)
     ]
     let layout = HUDLayout(lines: [["tokensPerSecond"]])
-    var fresh = HUDEntityData(); fresh.tokenRate = samples[0].1
-    var unknown = HUDEntityData(); unknown.tokenRate = .unavailable
+    var fresh = HUDEntityData(hasRunningTasks: true); fresh.tokenRate = samples[0].1
+    var unknown = HUDEntityData(hasRunningTasks: true); unknown.tokenRate = .unavailable
     #expect(HUDMetricStrip.measuredWidth(layout: layout, data: fresh, remaining: true, menuBar: false)
         > HUDMetricStrip.measuredWidth(layout: layout, data: unknown, remaining: true, menuBar: false))
     let view = VStack(alignment: .leading, spacing: 16) {
@@ -194,24 +213,35 @@ import Testing
             HStack {
                 Text(entry.0).font(.system(size: 11)).foregroundStyle(.white.opacity(0.65))
                 Spacer()
-                HUDMetricStrip(layout: layout, data: HUDEntityData(tokenRate: entry.1))
+                HUDMetricStrip(layout: layout, data: HUDEntityData(hasRunningTasks: true, tokenRate: entry.1))
             }
         }
     }.padding(20).frame(width: 300).background(Color.black)
     try await captureProgressView(view, size: .init(width: 300, height: 260), name: "hud-token-rate")
 
-    let contextLayout = HUDLayout(lines: [["account", "tokensPerSecond", "costToday"]])
+    let contextLayout = HUDLayout(lines: [["weekly", "tokensPerSecond", "weeklyCountdown"]])
+    let contexts: [(String, Bool, TokenRateSummary)] = [
+        ("运行 · 等待样本", true, .unavailable),
+        ("运行 · 有效样本", true, samples[2].1),
+        ("运行 · 样本过期", true, samples[5].1),
+        ("空闲", false, samples[2].1)
+    ]
     let context = VStack(alignment: .leading, spacing: 18) {
         Text("测速显示状态 · 合成数据").font(.system(size: 12, weight: .semibold)).foregroundStyle(.white)
-        ForEach([0, 5, 6], id: \.self) { index in
+        ForEach(Array(contexts.enumerated()), id: \.offset) { _, entry in
             HStack {
-                Text(index == 0 ? "生成中" : index == 5 ? "空闲" : "等待样本")
+                Text(entry.0)
                     .font(.system(size: 11)).foregroundStyle(MonitorTheme.textSecondary)
                 Spacer()
-                HUDMetricStrip(layout: contextLayout,
-                    data: .init(account: "本机", tokenRate: samples[index].1, costToday: "≈0.20 USD"))
+                HStack(spacing: 12) {
+                    HUDRuntimeStatus(isRunning: entry.1, compact: true)
+                    HUDMetricStrip(layout: contextLayout,
+                        data: .init(weekly: 97, resetsAt: now.addingTimeInterval(6 * 86_400 + 7_200),
+                                    hasRunningTasks: entry.1, tokenRate: entry.2))
+                }.padding(.horizontal, 10).padding(.vertical, 5)
+                    .background(MonitorTheme.sectionFill, in: Capsule())
             }
         }
-    }.padding(20).frame(width: 380).background(Color.black)
-    try await captureProgressView(context, size: .init(width: 380, height: 160), name: "hud-token-rate-visibility")
+    }.padding(20).frame(width: 540).background(Color.black)
+    try await captureProgressView(context, size: .init(width: 540, height: 240), name: "hud-token-rate-visibility")
 }

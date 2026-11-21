@@ -364,6 +364,7 @@ struct HUDLayoutEditorView: View {
             costToday: "≈1.20 USD",
             cost30d: "≈12.30 USD"
         )
+        value.hasRunningTasks = true
         value.tokenRate = .init(value: 68.4, measuredAt: Date(), measuredCount: 1, activeCount: 1)
         return value
     }
@@ -371,7 +372,7 @@ struct HUDLayoutEditorView: View {
     private func previewData(for source: String) -> HUDEntityData {
         var value = previewData
         value.account = sourceLabel(source)
-        if source != "local" && source != "legacy" { value.tokenRate = nil }
+        if source != "local" && source != "legacy" { value.hasRunningTasks = false; value.tokenRate = nil }
         if source.hasPrefix("remote:") { value.providerID = "gateway"; value.provider = "网关" }
         else if source.hasPrefix("newapi:") { value.providerID = "newapi"; value.provider = "NewAPI" }
         else if source.hasPrefix("subapi:") { value.providerID = "subapi"; value.provider = "Sub2API" }
