@@ -287,14 +287,19 @@ private func referenceCatalog(at now: Date) throws -> SkillCatalogSnapshot {
         onCodexRadarRefresh: {}, initialPage: .codexRadar)
     try await captureCustomization(AnyView(radarFailureView), size: .init(width: 680, height: 746),
                                    name: "radar-refresh-failure", output: output)
+    let eventRound = Data(String(decoding: radarCurrentRoundFixture(), as: UTF8.self)
+        .replacingOccurrences(of: "codex-four-accepted-complete/1", with: "codex-four-accepted-event/1").utf8)
     let pairedRadar = CodexRadarViewModel(settings: settings, client: CodexRadarClient { request in
-        (radarFixtureResponse(request), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        (request.url?.path == CodexRadarClient.currentRoundURL.path ? eventRound : radarFixtureResponse(request),
+         HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
     }, cacheDirectory: radarCache.appendingPathComponent("paired"), selectionDefaults: defaults, now: { radarScoreDate })
     for _ in 0..<100 {
         if !pairedRadar.isRefreshing { break }
         try await Task.sleep(for: .milliseconds(10))
     }
     #expect(pairedRadar.snapshot.state == .ready)
+    #expect(pairedRadar.snapshot.dataSource == .publicCurrentRound)
+    #expect(pairedRadar.snapshot.message == nil)
     #expect(pairedRadar.combinedScores.first?.community?.average == 8.5)
     let pairedView = DetailPanelView(viewModel: usage, remoteViewModel: remote, newAPIViewModel: newAPI,
         subAPIViewModel: subAPI, codexRadarViewModel: pairedRadar, performanceViewModel: perf,

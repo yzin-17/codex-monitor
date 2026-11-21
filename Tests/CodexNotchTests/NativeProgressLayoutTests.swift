@@ -42,7 +42,8 @@ import Testing
     #expect(data.numeric(.tokensPerSecond, now: now) == nil)
     data.tokenRate = .init(value: 68.4, measuredAt: now, measuredCount: 1, activeCount: 1)
     #expect(data.display(.tokensPerSecond, remaining: true, now: now).tone == .healthy)
-    #expect(data.text(.tokensPerSecond, remaining: true, now: now.addingTimeInterval(16)) == "— token/s")
+    #expect(data.text(.tokensPerSecond, remaining: true, now: now.addingTimeInterval(16)) == "68.4 token/s")
+    #expect(data.display(.tokensPerSecond, remaining: true, now: now.addingTimeInterval(16)).tone == .tertiary)
     #expect(data.resolvedMetric(raw: "tokensPerSecond", layout: layout, now: now.addingTimeInterval(16)) == .tokensPerSecond)
     data.hasRunningTasks = false
     #expect(data.resolvedMetric(raw: "tokensPerSecond", layout: layout, now: now) == nil)
@@ -220,9 +221,15 @@ import Testing
     try await captureProgressView(view, size: .init(width: 300, height: 260), name: "hud-token-rate")
 
     let contextLayout = HUDLayout(lines: [["weekly", "tokensPerSecond", "weeklyCountdown"]])
+    let waiting = TokenRateSummary.aggregate([
+        .init(threadID: "synthetic-running", parentThreadID: nil, value: 42,
+              measuredAt: now.addingTimeInterval(-2), isEstimate: false, isWaiting: true,
+              isFinished: false, isInternalReview: false)
+    ], activeThreadIDs: ["synthetic-running"], expectedActiveCount: 1, now: now)
     let contexts: [(String, Bool, TokenRateSummary)] = [
         ("运行 · 等待样本", true, .unavailable),
         ("运行 · 有效样本", true, samples[2].1),
+        ("运行 · 等待工具", true, waiting),
         ("运行 · 样本过期", true, samples[5].1),
         ("空闲", false, samples[2].1)
     ]
@@ -237,11 +244,13 @@ import Testing
                     HUDRuntimeStatus(isRunning: entry.1, compact: true)
                     HUDMetricStrip(layout: contextLayout,
                         data: .init(weekly: 97, resetsAt: now.addingTimeInterval(6 * 86_400 + 7_200),
-                                    hasRunningTasks: entry.1, tokenRate: entry.2))
+                                    hasRunningTasks: entry.1, tokenRate: entry.2,
+                                    weeklyWindow: .init(remaining: 97, resetsAt: now.addingTimeInterval(6 * 86_400 + 7_200),
+                                                        duration: 604_800, label: "7d")))
                 }.padding(.horizontal, 10).padding(.vertical, 5)
                     .background(MonitorTheme.sectionFill, in: Capsule())
             }
         }
     }.padding(20).frame(width: 540).background(Color.black)
-    try await captureProgressView(context, size: .init(width: 540, height: 240), name: "hud-token-rate-visibility")
+    try await captureProgressView(context, size: .init(width: 540, height: 280), name: "hud-token-rate-visibility")
 }

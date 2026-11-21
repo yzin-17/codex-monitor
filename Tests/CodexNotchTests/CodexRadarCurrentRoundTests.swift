@@ -32,6 +32,8 @@ import Testing
 @Test func radarFourTaskRejectsUnknownIncompleteAndMixedRounds() throws {
     let invalid: [Data] = try [
         changingRound { $0["schema"] = "unknown/2" },
+        changingRound { $0["publication_contract"] = "codex-four-unknown/1" },
+        changingRound { $0["publication_status"] = "partial" },
         changingRound { $0["protocol"] = "codex-four-weighted-100-v1" },
         changingRound { $0["round_id"] = "radar-bench-final64-20261004" },
         changingRound { $0["all_graded"] = false },
@@ -63,6 +65,25 @@ import Testing
     ]
     for data in invalid {
         #expect(throws: (any Error).self) { try CodexRadarCurrentRound.decode(data, fetchedAt: radarScoreDate) }
+    }
+}
+
+@Test func radarFourTaskAcceptsCompleteEventPublicationsAndValidatesTheirCache() throws {
+    let data = try changingRound { $0["publication_contract"] = "codex-four-accepted-event/1" }
+    let round = try CodexRadarCurrentRound.decode(data, fetchedAt: radarScoreDate)
+    #expect(round.models.count == 2)
+    #expect(round.models.first?.score == 112.5)
+    #expect(try CodexRadarCurrentRoundCache(data: data, round: round).validatedRound().models == round.models)
+    for key in ["all_graded", "graded", "publication_status"] {
+        let incomplete = try changingRound { value in
+            value["publication_contract"] = "codex-four-accepted-event/1"
+            switch key {
+            case "all_graded": value[key] = false
+            case "graded": value[key] = 7
+            default: value[key] = "partial"
+            }
+        }
+        #expect(throws: (any Error).self) { try CodexRadarCurrentRound.decode(incomplete, fetchedAt: radarScoreDate) }
     }
 }
 
@@ -159,7 +180,9 @@ import Testing
         #expect(model.snapshot.dataSource == .publicBench)
         #expect(model.snapshot.models.first?.score == 50)
         model.selectDimension(.comprehensive)
-        await context.transport.setCurrent(radarCurrentRoundFixture(roundID: "codex-four-synthetic-2"))
+        var event = try #require(JSONSerialization.jsonObject(with: radarCurrentRoundFixture(roundID: "codex-four-synthetic-2")) as? [String: Any])
+        event["publication_contract"] = "codex-four-accepted-event/1"
+        await context.transport.setCurrent(try JSONSerialization.data(withJSONObject: event))
         context.date.addTimeInterval(300)
         model.refreshIfNeeded()
         try await waitForCurrentRoundRefresh(model)

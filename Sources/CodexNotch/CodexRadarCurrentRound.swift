@@ -4,6 +4,9 @@ import Foundation
 struct CodexRadarCurrentRound: Sendable {
     static let schema = "codex-four-task-results/1"
     static let scoringProtocol = "codex-four-weighted-150-v2"
+    private static let publicationContracts: Set<String> = [
+        "codex-four-accepted-complete/1", "codex-four-accepted-event/1"
+    ]
     static let weights: [String: Double] = ["combined": 60, "pompeii": 45, "pelican": 22.5, "candy": 22.5]
 
     let roundID: String
@@ -21,7 +24,7 @@ struct CodexRadarCurrentRound: Sendable {
               dto.version_boundary.scoring_protocol == scoringProtocol,
               dto.version_boundary.weights == weights,
               dto.all_graded, dto.publication_status == "complete",
-              dto.publication_contract == "codex-four-accepted-complete/1",
+              publicationContracts.contains(dto.publication_contract),
               (1...128).contains(dto.configurations), dto.expected == dto.configurations * 4,
               dto.graded == dto.expected, dto.rows.count == dto.configurations,
               !dto.models.isEmpty, Set(dto.models).count == dto.models.count,

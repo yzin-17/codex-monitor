@@ -343,6 +343,35 @@ private func rateSample(_ thread: String, value: Double, at seconds: TimeInterva
     #expect(summary.measuredCount == 1)
 }
 
+@Test func tokenRateWaitingAndOldSamplesKeepOnlyTheLatestActiveRequest() {
+    let samples = [rateSample(rateThread, value: 35, at: 10, waiting: true),
+                   rateSample(rateChild, value: 45, at: 12, parent: rateThread, waiting: true),
+                   rateSample("unrelated", value: 900, at: 19)]
+    for now in [rateDate(13), rateDate(4_000)] {
+        let summary = TokenRateSummary.aggregate(samples, activeThreadIDs: [rateThread], expectedActiveCount: 2, now: now)
+        #expect(rateClose(summary.value, 45))
+        #expect(summary.isStale && summary.hasMeasurement(at: now))
+        #expect(!summary.isFresh(at: now))
+        #expect(summary.measuredCount == 1)
+        #expect(summary.formatted(at: now) == "45.0 token/s")
+    }
+    let unrelatedOnly = TokenRateSummary.aggregate([samples[2]], activeThreadIDs: [rateThread],
+                                                    expectedActiveCount: 1, now: rateDate(20))
+    #expect(unrelatedOnly.value == nil)
+}
+
+@Test func tokenRateRecentSamplesRejectInvalidAndFutureMeasurements() {
+    let samples = [rateSample(rateThread, value: 35, at: 10, waiting: true),
+                   rateSample(rateThread, value: 100, at: 30),
+                   rateSample("invalid", value: .infinity, at: 19, parent: rateThread),
+                   rateSample("negative", value: -1, at: 19, parent: rateThread)]
+    let summary = TokenRateSummary.aggregate(samples, activeThreadIDs: [rateThread], expectedActiveCount: 1, now: rateDate(20))
+    #expect(rateClose(summary.value, 35))
+    let future = TokenRateSummary(value: 100, measuredAt: rateDate(30))
+    #expect(!future.hasMeasurement(at: rateDate(20)))
+    #expect(future.formatted(at: rateDate(20)) == "— token/s")
+}
+
 @Test func tokenRateUnavailableIsNotZeroAndFutureSamplesAreNotFresh() {
     let empty = TokenRateSummary.aggregate([], activeThreadIDs: [rateThread], expectedActiveCount: 1, now: rateDate(10))
     #expect(empty.value == nil)

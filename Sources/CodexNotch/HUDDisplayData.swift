@@ -179,11 +179,13 @@ struct HUDEntityData: Equatable {
         case .tokensToday: return .init(label: "Today", value: todayTokens ?? "—", tone: todayTokens == nil ? .tertiary : .primary)
         case .tokensPerSecond:
             let rate = tokenRate ?? .unavailable
-            guard rate.isFresh(at: now), let speed = rate.value else {
+            guard rate.hasMeasurement(at: now), let speed = rate.value else {
                 return .init(value: "— token/s", tone: .tertiary)
             }
             return .init(value: rate.formatted(at: now),
-                         tone: speed < 20 ? .critical : speed < 50 ? .warning : speed < 100 ? .healthy : .accent)
+                         tone: rate.isFresh(at: now)
+                            ? (speed < 20 ? .critical : speed < 50 ? .warning : speed < 100 ? .healthy : .accent)
+                            : .tertiary)
         case .balance: return .init(value: balance ?? "余额 —", tone: balance == nil ? .tertiary : .primary)
         case .costToday: return .init(label: "今日", value: costToday ?? "—", tone: costToday == nil ? .tertiary : .primary)
         case .cost30d: return .init(label: "30天", value: cost30d ?? "—", tone: cost30d == nil ? .tertiary : .primary)

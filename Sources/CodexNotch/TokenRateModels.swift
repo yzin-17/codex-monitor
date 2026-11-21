@@ -11,13 +11,18 @@ struct TokenRateSummary: Equatable, Sendable {
 
     static let unavailable = Self(value: nil, measuredAt: nil)
 
+    func hasMeasurement(at now: Date) -> Bool {
+        guard let measuredAt, let value, value.isFinite, value > 0 else { return false }
+        return measuredAt <= now
+    }
+
     func isFresh(at now: Date) -> Bool {
-        guard !isStale, let measuredAt, let value, value.isFinite, value > 0 else { return false }
+        guard !isStale, hasMeasurement(at: now), let measuredAt else { return false }
         return (0..<OutputEstimate.freshnessInterval).contains(now.timeIntervalSince(measuredAt))
     }
 
     func formatted(at now: Date) -> String {
-        guard let value, value.isFinite, value > 0 else { return "— token/s" }
+        guard hasMeasurement(at: now), let value else { return "— token/s" }
         return (isEstimate ? "≈" : "") + String(format: "%.1f token/s", value)
     }
 
@@ -26,7 +31,7 @@ struct TokenRateSummary: Equatable, Sendable {
             return "等待有效输出样本；只有配额或余额的数据源不能测速。"
         }
         let method = isEstimate ? "输出计数增量估算" : "最近一次请求的输出 token / 可观测请求耗时"
-        let state = isFresh(at: now) ? "有效样本 \(measuredCount)/\(max(activeCount, measuredCount))" : "最近测量，当前未生成或样本已过期"
+        let state = isFresh(at: now) ? "有效样本 \(measuredCount)/\(max(activeCount, measuredCount))" : "最近测量，等待工具或样本已过期"
         let time = measuredAt.formatted(date: .omitted, time: .standard)
         return "\(method)；\(state)；采样时间 \(time)。包含首 token 等待，排除可确认的阻塞工具等待；不计输入，推理 token 不重复相加。"
     }
@@ -35,7 +40,8 @@ struct TokenRateSummary: Equatable, Sendable {
                           expectedActiveCount: Int, now: Date) -> Self {
         // 每个文件只报告自身输出；父会话的账单合计不参与测速。
         var unique: [String: TokenRateTaskSample] = [:]
-        for sample in samples where !sample.isInternalReview {
+        for sample in samples where !sample.isInternalReview && sample.value.isFinite && sample.value > 0
+            && sample.measuredAt <= now {
             if unique[sample.threadID].map({ sample.measuredAt > $0.measuredAt }) ?? true {
                 unique[sample.threadID] = sample
             }
@@ -58,8 +64,7 @@ struct TokenRateSummary: Equatable, Sendable {
                         activeCount: max(expectedActiveCount, fresh.count))
         }
         // 没有新鲜并发样本时，只展示最新单次测量，避免相加历史速率冒充当前总速率。
-        guard let recent = unique.values.max(by: { $0.measuredAt < $1.measuredAt }),
-              now >= recent.measuredAt, now.timeIntervalSince(recent.measuredAt) <= 3600 else {
+        guard let recent = active.max(by: { $0.measuredAt < $1.measuredAt }) else {
             return Self(value: nil, measuredAt: nil, activeCount: expectedActiveCount)
         }
         return Self(value: recent.value, measuredAt: recent.measuredAt, isEstimate: recent.isEstimate,
